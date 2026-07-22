@@ -73,7 +73,7 @@ app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command 
 app.include_router(ai_assistant_router, prefix="/api/ai-assistant", tags=["AI Assistant"])
 app.include_router(watchlist_router, prefix="/api/watchlist", tags=["Watchlist"])
 app.include_router(my_stats_router, prefix="/api/my-stats", tags=["My Stats"])
-app.include_router(personal_todo_router, prefix="/api/personal-todo", tags=["Personal TODO"])
+app.include_router(personal_todo_router, prefix="/api/personal-todo", tags=["Personal Todo"])
 app.include_router(intelligence_router, prefix="/api/intelligence", tags=["Intelligence Reports"])
 
 

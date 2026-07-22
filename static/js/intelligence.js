@@ -1,4 +1,4 @@
-// intelligence.js - 情报面板视图
+// intelligence.js - 洞察面板视图
 
 function intelligenceMixin() {
     return {
@@ -7,6 +7,7 @@ function intelligenceMixin() {
         intelLoading: false,
 
         // ===== 生成报告表单 =====
+        showIntelModal: false,
         intelForm: {
             task_id: '',
             title: '',
@@ -100,6 +101,8 @@ function intelligenceMixin() {
                     body: JSON.stringify(payload),
                 }, 30000);
                 this.showToast('报告生成中', result.message || '请稍后查看', 'success', 6000);
+                // 关闭弹窗
+                this.showIntelModal = false;
                 // 立即在列表顶部插入一个 generating 状态的项
                 this.intelReports.unshift({
                     id: result.report_id,
@@ -128,7 +131,7 @@ function intelligenceMixin() {
             const startTime = Date.now();
             const timeout = 600000; // 10 分钟超时（agent 多轮调用耗时较长）
             this.pollingTimer = setInterval(async () => {
-                // 用户已离开情报面板且没在看报告弹窗，停止轮询
+                // 用户已离开洞察面板且没在看报告弹窗，停止轮询
                 if (this.currentView !== 'intelligence' && !this.selectedReport) {
                     clearInterval(this.pollingTimer);
                     this.pollingTimer = null;

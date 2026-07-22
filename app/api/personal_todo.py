@@ -25,7 +25,7 @@ from app.schemas import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-VALID_STATUSES = ("all", "todo", "in_progress", "done", "cancelled")
+VALID_STATUSES = ("all", "todo", "in_progress", "done")
 VALID_PRIORITIES = ("all", "P0", "P1", "P2", "P3")
 SORT_FIELDS = {
     "created": PersonalTask.created_at,
@@ -63,7 +63,7 @@ def _task_list_dict(task: PersonalTask, db: Session, insight_task_ids: set = Non
 
 def _build_stats(db: Session) -> dict:
     """聚合统计：按状态/优先级分组计数"""
-    by_status = {"todo": 0, "in_progress": 0, "done": 0, "cancelled": 0}
+    by_status = {"todo": 0, "in_progress": 0, "done": 0}
     by_priority = {"P0": 0, "P1": 0, "P2": 0, "P3": 0}
     rows = db.query(PersonalTask.status, PersonalTask.priority, func.count(PersonalTask.id)).group_by(
         PersonalTask.status, PersonalTask.priority

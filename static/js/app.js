@@ -16,7 +16,7 @@ function app() {
 
         // ===== Community filters =====
         sortBy: 'created',
-        communityTab: 'issues',
+        communityTab: 'prs',
         communityPage: 1,
         pageSize: 25,
         searchQuery: '',
@@ -34,7 +34,7 @@ function app() {
         // ===== Watchlist（特别关注）=====
         watchlist: [],  // [{number, item_type, title, url, added_at}]
         watchlistSet: new Set(),  // "type:number" 快速查找
-        watchlistTab: 'issue',
+        watchlistTab: 'pr',
         // 手动添加
         manualAddType: 'issue',
         manualAddNumber: '',
@@ -69,27 +69,18 @@ function app() {
                 'community': '社区动态',
                 'pr-center': '我的贡献',
                 'watchlist': '特别关注',
-                'my-data': '我的数据',
-                'personal-todo': '个人 TODO',
-                'intelligence': '情报面板',
+                'personal-todo': '我的任务',
+                'intelligence': '洞察面板',
             }[this.currentView] || '';
         },
         get currentViewSub() {
-            return {
-                'community': '实时活动流',
-                'pr-center': '管理你的 PR 和 Issue',
-                'watchlist': '重点跟进的 issue 和 PR',
-                'my-data': '贡献数据仪表盘',
-                'personal-todo': '集中管理个人任务',
-                'intelligence': 'AI 洞察报告',
-            }[this.currentView] || '';
+            return '';
         },
         get searchPlaceholder() {
             const map = {
                 'community': '搜索 Issues 和 PRs…',
                 'pr-center': '搜索你的 PR 和 Issue…',
                 'watchlist': '搜索关注项…',
-                'my-data': '搜索…',
                 'personal-todo': '搜索任务…',
                 'intelligence': '搜索报告…',
             };
@@ -119,9 +110,7 @@ function app() {
             if (this.loading) return '同步中…';
             if (this.syncStatus === 'error') return '同步失败';
             if (this.lastSync) {
-                const ago = this.timeAgo(this.lastSync);
-                const cd = this.nextSyncCountdown ? ' · ' + this.nextSyncCountdown : '';
-                return '同步于 ' + ago + cd;
+                return '同步于 ' + this.exactTime(this.lastSync);
             }
             return '空闲';
         },
@@ -212,6 +201,7 @@ function app() {
                     this.loadAreas(),
                     this.loadCommunityData(),
                     this.loadMyPRs(),
+                    this.loadMyStats(),
                     this.loadSyncStatus(),
                     this.loadWatchlist(),
                 ]);
@@ -401,15 +391,15 @@ function app() {
             this.currentView = view;
             this.searchQuery = '';
             this.communityPage = 1;
-            // 切到我的数据时自动加载
-            if (view === 'my-data' && !this.myStats && !this.statsLoading) {
+            // 切到我的贡献时自动加载统计数据
+            if (view === 'pr-center' && !this.myStats && !this.statsLoading) {
                 this.loadMyStats();
             }
-            // 切到个人 TODO 时自动加载
+            // 切到我的任务时自动加载
             if (view === 'personal-todo') {
                 this.loadTodoTasks();
             }
-            // 切到情报面板时自动加载
+            // 切到洞察面板时自动加载
             if (view === 'intelligence') {
                 this.loadIntelReports();
                 this.loadIntelTasks();
@@ -424,11 +414,10 @@ function app() {
             if (e.metaKey || e.ctrlKey || e.altKey) return;
 
             if (e.key === '1') { e.preventDefault(); this.switchView('community'); }
-            else if (e.key === '2') { e.preventDefault(); this.switchView('pr-center'); }
-            else if (e.key === '3') { e.preventDefault(); this.switchView('watchlist'); }
-            else if (e.key === '4') { e.preventDefault(); this.switchView('my-data'); }
-            else if (e.key === '5') { e.preventDefault(); this.switchView('personal-todo'); }
-            else if (e.key === '6') { e.preventDefault(); this.switchView('intelligence'); }
+            else if (e.key === '2') { e.preventDefault(); this.switchView('watchlist'); }
+            else if (e.key === '3') { e.preventDefault(); this.switchView('pr-center'); }
+            else if (e.key === '4') { e.preventDefault(); this.switchView('personal-todo'); }
+            else if (e.key === '5') { e.preventDefault(); this.switchView('intelligence'); }
             else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); this.refreshAll(); }
         },
 
@@ -542,7 +531,7 @@ function app() {
 // 让整个合并失败 -> 所有变量未定义。
 // 用 defineProperty 复制 descriptor 能保留 getter，后续 Alpine 访问时才求值。
 window.buildApp = function() {
-    const sources = [app(), communityMixin(), prCenterMixin(), myDataMixin(), personalTodoMixin(), intelligenceMixin()];
+    const sources = [app(), communityMixin(), prCenterMixin(), personalTodoMixin(), intelligenceMixin()];
     const result = {};
     for (const src of sources) {
         const descs = Object.getOwnPropertyDescriptors(src);

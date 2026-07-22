@@ -137,7 +137,6 @@ class Area(Base):
 
     id = Column(String(50), primary_key=True)
     name = Column(String(100), nullable=False)
-    owners = Column(Text)  # JSON array of github handles
     paths = Column(Text)  # JSON array of file paths (from CODEOWNERS)
     description = Column(Text)
     last_sync = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
@@ -146,7 +145,6 @@ class Area(Base):
         return {
             "id": self.id,
             "name": self.name,
-            "owners": json.loads(self.owners) if self.owners else [],
             "paths": json.loads(self.paths) if self.paths else [],
             "description": self.description,
         }

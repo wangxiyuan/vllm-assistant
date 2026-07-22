@@ -63,8 +63,8 @@ html, body {
     background: var(--bg-base);
     color: var(--text-primary);
     font-family: var(--font-ui);
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 16px;
+    line-height: 1.7;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow: hidden;
@@ -114,7 +114,7 @@ body {
 .brand-logo {
     font-family: var(--font-mono);
     font-weight: 700;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--amber);
     letter-spacing: 0.18em;
     text-transform: uppercase;
@@ -141,11 +141,11 @@ body {
 .brand-name {
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: 17px;
+    font-size: 20px;
     letter-spacing: -0.01em;
 }
 .brand-sub {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-tertiary);
     margin-top: 4px;
     font-family: var(--font-mono);
@@ -157,7 +157,7 @@ body {
 }
 .nav-label {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.16em;
     color: var(--text-tertiary);
@@ -174,7 +174,7 @@ body {
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-family: var(--font-ui);
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 500;
     text-align: left;
     cursor: pointer;
@@ -206,9 +206,9 @@ body {
     opacity: 0.85;
 }
 .nav-kbd {
-    margin-left: auto;
+    margin-right: 6px;
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 12px;
     color: var(--text-tertiary);
     background: var(--bg-elev-2);
     border: 1px solid var(--border-faint);
@@ -220,7 +220,7 @@ body {
     margin-top: auto;
     padding: 12px 16px;
     border-top: 1px solid var(--border-faint);
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-tertiary);
     font-family: var(--font-mono);
 }
@@ -253,7 +253,7 @@ body {
     border-radius: var(--radius-sm);
     padding: 8px 12px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.7;
     color: var(--text-secondary);
     white-space: nowrap;
@@ -323,13 +323,13 @@ body {
 .view-title h1 {
     margin: 0;
     font-family: var(--font-display);
-    font-size: 18px;
+    font-size: 21px;
     font-weight: 600;
     letter-spacing: -0.01em;
 }
 .view-title .view-sub {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-tertiary);
     letter-spacing: 0.04em;
 }
@@ -348,7 +348,7 @@ body {
     padding: 8px 12px 8px 34px;
     color: var(--text-primary);
     font-family: var(--font-ui);
-    font-size: 13px;
+    font-size: 15px;
     transition: all 0.15s var(--ease-out);
 }
 .search-bar input::placeholder { color: var(--text-tertiary); }
@@ -372,7 +372,7 @@ body {
     top: 50%;
     transform: translateY(-50%);
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 12px;
     color: var(--text-tertiary);
     background: var(--bg-elev-3);
     border: 1px solid var(--border);
@@ -397,7 +397,7 @@ body {
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-ui);
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s var(--ease-out);
@@ -438,7 +438,7 @@ body {
 }
 .btn-sm {
     padding: 4px 8px;
-    font-size: 11px;
+    font-size: 13px;
 }
 /* 按钮内的 SVG 图标：统一尺寸 + 垂直对齐 */
 .btn svg {
@@ -508,7 +508,7 @@ body {
 }
 .stat-label {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.14em;
     color: var(--text-tertiary);
@@ -516,14 +516,14 @@ body {
 }
 .stat-value {
     font-family: var(--font-mono);
-    font-size: 28px;
+    font-size: 32px;
     font-weight: 700;
     color: var(--accent-color, var(--amber));
     line-height: 1;
     letter-spacing: -0.02em;
 }
 .stat-trend {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-tertiary);
     margin-top: 6px;
     font-family: var(--font-mono);
@@ -550,13 +550,13 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 600;
     color: var(--text-primary);
 }
 .panel-title .count {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-tertiary);
     background: var(--bg-elev-2);
     padding: 2px 7px;
@@ -589,7 +589,7 @@ body {
     border-radius: 3px;
     color: var(--text-secondary);
     font-family: var(--font-ui);
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s var(--ease-out);
@@ -605,7 +605,7 @@ body {
 }
 .tab .badge {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 12px;
     background: var(--bg-base);
     padding: 1px 5px;
     border-radius: 8px;
@@ -625,7 +625,7 @@ body {
     border: 1px solid var(--border-faint);
     border-radius: 12px;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s var(--ease-out);
@@ -649,7 +649,7 @@ body {
     padding: 6px 28px 6px 10px;
     color: var(--text-primary);
     font-family: var(--font-ui);
-    font-size: 12px;
+    font-size: 14px;
     cursor: pointer;
     appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b95a7' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
@@ -664,7 +664,7 @@ body {
 }
 .select-sm {
     padding: 3px 24px 3px 8px;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 /* ===== Input ===== */
@@ -675,7 +675,7 @@ body {
     padding: 7px 10px;
     color: var(--text-primary);
     font-family: var(--font-ui);
-    font-size: 13px;
+    font-size: 15px;
     width: 100%;
     transition: all 0.15s var(--ease-out);
 }
@@ -687,7 +687,7 @@ body {
 /* Date input - ensure native date picker works */
 .input[type="date"] {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 14px;
     cursor: pointer;
     min-width: 140px;
     color-scheme: dark;
@@ -723,11 +723,11 @@ body {
 }
 .input-mono {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 14px;
 }
 .input-sm {
     padding: 3px 8px;
-    font-size: 11px;
+    font-size: 13px;
 }
 /* watchlist 手动添加表单 */
 .watchlist-add-form {
@@ -743,7 +743,7 @@ body {
     align-items: center;
     gap: 8px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-secondary);
     user-select: none;
 }
@@ -809,7 +809,7 @@ body {
 
 .item-number {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text-tertiary);
     flex-shrink: 0;
@@ -824,10 +824,10 @@ body {
     min-width: 0;
 }
 .item-title {
-    font-size: 13.5px;
+    font-size: 16px;
     font-weight: 500;
     color: var(--text-primary);
-    line-height: 1.4;
+    line-height: 1.6;
     word-break: break-word;
 }
 .item-title:hover { color: var(--amber-bright); }
@@ -836,7 +836,7 @@ body {
     align-items: center;
     gap: 10px;
     margin-top: 4px;
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--text-tertiary);
     font-family: var(--font-mono);
     flex-wrap: wrap;
@@ -862,7 +862,7 @@ body {
     padding: 2px 7px;
     border-radius: 3px;
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 12.5px;
     font-weight: 500;
     letter-spacing: 0.02em;
     border: 1px solid var(--border-faint);
@@ -894,14 +894,14 @@ body {
     border-radius: 3px;
     color: var(--signal-red);
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 12.5px;
     font-weight: 600;
 }
 
 /* ===== Diff stat (additions/deletions) ===== */
 .diffstat {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 13px;
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -928,18 +928,18 @@ body {
     color: var(--text-tertiary);
 }
 .empty-state .empty-icon {
-    font-size: 32px;
+    font-size: 38px;
     opacity: 0.3;
     margin-bottom: 12px;
 }
 .empty-state .empty-title {
-    font-size: 14px;
+    font-size: 16px;
     color: var(--text-secondary);
     margin-bottom: 6px;
     font-weight: 500;
 }
 .empty-state .empty-desc {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-tertiary);
     font-family: var(--font-mono);
     max-width: 360px;
@@ -969,6 +969,63 @@ body {
     align-items: stretch;
     justify-content: flex-end;
     animation: fade-in 0.2s var(--ease-out);
+}
+
+/* Centered modal variant (used when modal-backdrop wraps a .modal instead of .drawer) */
+.modal-backdrop:has(> .modal) {
+    align-items: center;
+    justify-content: center;
+}
+.modal {
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    width: min(520px, 92vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    animation: modal-in 0.25s var(--ease-out);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+@keyframes modal-in {
+    from { transform: scale(0.95) translateY(12px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
+}
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-faint);
+}
+.modal-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+}
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+.modal-close:hover { color: var(--text-primary); }
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+.modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-faint);
 }
 @keyframes fade-in {
     from { opacity: 0; }
@@ -1001,16 +1058,16 @@ body {
 }
 .drawer-title .pr-id {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 14px;
     color: var(--amber);
     letter-spacing: 0.04em;
     margin-bottom: 4px;
 }
 .drawer-title h2 {
     margin: 0;
-    font-size: 17px;
+    font-size: 20px;
     font-weight: 600;
-    line-height: 1.3;
+    line-height: 1.7;
     font-family: var(--font-display);
 }
 .drawer-close {
@@ -1061,7 +1118,7 @@ body {
 }
 .collapse-arrow {
     display: inline-block;
-    font-size: 10px;
+    font-size: 12px;
     color: var(--amber);
     transition: transform 0.2s var(--ease-out);
     margin-right: 4px;
@@ -1074,7 +1131,7 @@ body {
     align-items: center;
     gap: 8px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 13px;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--amber);
@@ -1082,17 +1139,17 @@ body {
 }
 .ai-result-title::before {
     content: "◆";
-    font-size: 8px;
+    font-size: 12px;
 }
 .ai-result-body {
     padding: 16px;
-    font-size: 13px;
+    font-size: 15px;
     line-height: 1.65;
 }
 .ai-result-body p { margin: 0 0 10px; }
 .ai-result-body h4 {
     margin: 16px 0 8px;
-    font-size: 12px;
+    font-size: 14px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-secondary);
@@ -1106,7 +1163,7 @@ body {
 .ai-result-body li { margin-bottom: 4px; }
 .ai-result-body code {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 14px;
     background: var(--bg-elev-2);
     padding: 1px 5px;
     border-radius: 3px;
@@ -1121,7 +1178,7 @@ body {
 /* AI raw fallback (JSON) */
 .ai-raw {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 14px;
     background: var(--bg-elev-2);
     padding: 12px;
     border-radius: var(--radius-sm);
@@ -1134,7 +1191,7 @@ body {
 
 /* ===== Markdown 渲染（PR/Issue body）===== */
 .pr-body {
-    font-size: 13px;
+    font-size: 15px;
     line-height: 1.65;
     color: var(--text-primary);
     word-break: break-word;
@@ -1143,18 +1200,18 @@ body {
     margin: 16px 0 8px;
     color: var(--text-primary);
     font-weight: 600;
-    line-height: 1.3;
+    line-height: 1.7;
 }
-.pr-body h1 { font-size: 18px; border-bottom: 1px solid var(--border-faint); padding-bottom: 6px; }
-.pr-body h2 { font-size: 16px; }
-.pr-body h3 { font-size: 14px; }
-.pr-body h4 { font-size: 13px; }
+.pr-body h1 { font-size: 21px; border-bottom: 1px solid var(--border-faint); padding-bottom: 6px; }
+.pr-body h2 { font-size: 19px; }
+.pr-body h3 { font-size: 16px; }
+.pr-body h4 { font-size: 15px; }
 .pr-body p { margin: 0 0 10px; }
 .pr-body ul, .pr-body ol { margin: 0 0 12px; padding-left: 22px; }
 .pr-body li { margin-bottom: 3px; }
 .pr-body code {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 14px;
     background: var(--bg-elev-2);
     padding: 1px 5px;
     border-radius: 3px;
@@ -1192,7 +1249,7 @@ body {
 .pr-body table {
     border-collapse: collapse;
     margin: 0 0 12px;
-    font-size: 12px;
+    font-size: 14px;
 }
 .pr-body th, .pr-body td {
     border: 1px solid var(--border-faint);
@@ -1214,7 +1271,7 @@ body {
     padding: 6px 10px;
     border-radius: var(--radius-sm);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 14px;
     transition: background 0.12s;
 }
 .file-list li:hover { background: var(--bg-elev-2); }
@@ -1253,15 +1310,15 @@ body {
     background: linear-gradient(135deg, var(--amber-glow), var(--bg-elev-1) 50%);
 }
 .area-card .area-name {
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 600;
     margin-bottom: 6px;
     color: var(--text-primary);
 }
 .area-card .area-desc {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-tertiary);
-    line-height: 1.5;
+    line-height: 1.7;
     margin-bottom: 10px;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -1275,7 +1332,7 @@ body {
 }
 .owner-chip {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 12px;
     padding: 2px 6px;
     background: var(--bg-elev-2);
     border-radius: 3px;
@@ -1304,7 +1361,7 @@ body {
     border-left: 3px solid var(--amber);
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text-primary);
     animation: toast-in 0.3s var(--ease-out);
 }
@@ -1319,7 +1376,7 @@ body {
     flex-shrink: 0;
     font-family: var(--font-mono);
     font-weight: 700;
-    font-size: 12px;
+    font-size: 14px;
     padding-top: 1px;
 }
 .toast.error .toast-icon { color: var(--signal-red); }
@@ -1329,10 +1386,10 @@ body {
 .toast-title {
     font-weight: 600;
     margin-bottom: 2px;
-    font-size: 12.5px;
+    font-size: 14.5px;
 }
 .toast-msg {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-secondary);
     font-family: var(--font-mono);
 }
@@ -1356,7 +1413,7 @@ body {
 }
 .label-popover .lp-title {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--amber);
@@ -1370,7 +1427,7 @@ body {
 }
 .label-popover .lp-label {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 13px;
     padding: 3px 8px;
     background: var(--amber-glow);
     border: 1px solid var(--amber-dim);
@@ -1384,7 +1441,7 @@ body {
     color: #1a1206;
 }
 .label-popover .lp-hint {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--text-tertiary);
     font-family: var(--font-mono);
 }
@@ -1475,7 +1532,7 @@ body {
     background: var(--bg-elev-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-secondary);
 }
 .tag-chip button {
@@ -1483,7 +1540,7 @@ body {
     border: none;
     color: var(--text-tertiary);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1;
     padding: 0;
 }
@@ -1521,7 +1578,7 @@ body {
     background: var(--bg-elev-2);
 }
 .kanban-col-header .count {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-tertiary);
     font-family: var(--font-mono);
 }
@@ -1537,7 +1594,7 @@ body {
 .kanban-empty {
     text-align: center;
     color: var(--text-disabled);
-    font-size: 12px;
+    font-size: 14px;
     padding: 24px 0;
 }
 
@@ -1562,17 +1619,17 @@ body {
     margin-bottom: 6px;
 }
 .task-card-title {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 500;
     margin: 0 0 6px;
     color: var(--text-primary);
-    line-height: 1.4;
+    line-height: 1.6;
 }
 .task-card-meta {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-tertiary);
     margin-bottom: 6px;
 }
@@ -1592,13 +1649,45 @@ body {
     opacity: 1;
 }
 
+/* 过期任务 */
+.task-card.overdue {
+    border-color: var(--signal-red);
+    background: linear-gradient(135deg, rgba(239, 83, 80, 0.06), transparent 80%);
+}
+.task-card.overdue .task-card-title::after {
+    content: ' ⚠';
+    color: var(--signal-red);
+    font-size: 13px;
+}
+.task-card.overdue .task-card-meta .meta-item.due-date {
+    color: var(--signal-red);
+    font-weight: 600;
+}
+.task-card .due-date.overdue {
+    color: var(--signal-red) !important;
+    font-weight: 600;
+}
+.task-card .due-date.overdue::before {
+    content: '⚠ ';
+}
+.list-item.overdue {
+    border-left: 3px solid var(--signal-red);
+}
+.list-item.overdue .due-date {
+    color: var(--signal-red) !important;
+    font-weight: 600;
+}
+.list-item.overdue .due-date::before {
+    content: '⚠ ';
+}
+
 /* ===== 优先级徽章 ===== */
 .priority-badge {
     display: inline-flex;
     align-items: center;
     padding: 1px 6px;
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     font-family: var(--font-mono);
     letter-spacing: 0.05em;
@@ -1613,7 +1702,7 @@ body {
     display: inline-flex;
     padding: 1px 6px;
     border-radius: var(--radius-sm);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 500;
 }
 .status-todo { background: rgba(121, 192, 255, 0.12); color: var(--signal-blue); }
@@ -1643,7 +1732,7 @@ body {
     margin-bottom: 4px;
 }
 
-/* ===== 情报面板 - 生成表单 ===== */
+/* ===== 洞察面板 - 生成表单 ===== */
 .intel-gen-form {
     display: flex;
     flex-direction: column;
@@ -1655,7 +1744,7 @@ body {
     gap: 4px;
 }
 .intel-form-row > label {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-secondary);
     font-weight: 500;
 }
@@ -1674,7 +1763,7 @@ body {
     gap: 8px;
 }
 
-/* ===== 情报面板 - 报告卡片 ===== */
+/* ===== 洞察面板 - 报告卡片 ===== */
 .report-card .report-icon {
     margin-right: 8px;
     flex-shrink: 0;
@@ -1682,7 +1771,7 @@ body {
 
 /* ===== 来源徽章 ===== */
 .badge-source {
-    font-size: 10px;
+    font-size: 12px;
     padding: 1px 5px;
 }
 .source-vllm { background: rgba(121, 192, 255, 0.12); color: var(--signal-blue); }

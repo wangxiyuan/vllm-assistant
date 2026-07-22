@@ -27,10 +27,14 @@ class AIAssistant:
         if not OpenAI:
             raise ImportError("openai package is required")
 
+        # 忽略环境变量中的代理（httpx 不支持 socks 协议），
+        # 通过显式创建 httpx 客户端来避免代理冲突
+        import httpx
+        http_client = httpx.Client(proxy=None, timeout=self.DEFAULT_TIMEOUT, trust_env=False)
         self.client = OpenAI(
             api_key=Config.OPENAI_API_KEY,
             base_url=Config.OPENAI_BASE_URL,
-            timeout=self.DEFAULT_TIMEOUT,
+            http_client=http_client,
         )
         self.model = Config.OPENAI_MODEL
 
@@ -53,12 +57,27 @@ class AIAssistant:
             raise
 
     def _safe_json(self, content: str, default: Any) -> Any:
-        """解析 AI 返回的 JSON，失败时返回 default"""
+        """解析 AI 返回的 JSON，失败时尝试自动修复常见格式错误"""
         if not content:
             return default
+        # 尝试直接解析
         try:
             return json.loads(content)
         except (json.JSONDecodeError, TypeError):
+            pass
+        # 尝试修复常见问题：字段名缺少引号、值缺少引号、末尾逗号
+        import re
+        try:
+            # 1. 去掉 markdown 代码块标记
+            cleaned = re.sub(r'^```(?:json)?\s*\n?', '', content.strip())
+            cleaned = re.sub(r'\n```\s*$', '', cleaned)
+            # 2. 修复键名缺少引号：{key:  -> {"key":
+            cleaned = re.sub(r'(?<=[{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'"\1":', cleaned)
+            # 3. 修复值中未引用的字符串（在 : 之后、, 或 } 之前）
+            #   先处理数组和对象嵌套，跳过
+            # 4. 尝试再次解析
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, TypeError, re.error):
             return default
 
     def generate_review(
@@ -79,7 +98,6 @@ class AIAssistant:
                 "performance": [...],
                 "tests": [...],
                 "docs": [...],
-                "area_owners": [...],
             }
         """
         prompt = f"""你是一位资深 vLLM 贡献者，正在 review 一个 PR。
@@ -106,14 +124,12 @@ PR Diff:
   ],
   "docs": [
     {{"severity": "minor", "title": "问题标题", "description": "详细说明"}}
-  ],
-  "area_owners": ["@owner1", "@owner2"]
+  ]
 }}
 
 规则：
-- 所有字段必须是上述类型：summary 是字符串，其余 5 个字段都是数组
+- 所有字段必须是上述类型：summary 是字符串，其余 4 个字段都是数组
 - 数组中每项必须是对象，含 severity（critical/important/minor）、title（简短标题）、description（详细说明）
-- area_owners 是字符串数组，每项是 @github_username 格式
 - 如果某个方面没有问题，返回空数组 []
 - 所有文字用中文，severity 值用英文"""
 
@@ -123,11 +139,15 @@ PR Diff:
             return {"error": str(e)}
 
         parsed = self._safe_json(content, None)
-        if parsed is not None:
+        if parsed is not None and isinstance(parsed, dict):
             return parsed
+        # JSON 解析失败时，返回空结构化数据 + raw_response 兜底
         return {
             "summary": "AI 返回了内容但格式无法解析",
-            "raw_response": content,
+            "code_quality": [],
+            "performance": [],
+            "tests": [],
+            "docs": [],
         }
 
     def analyze_impact(self, changed_files: List[str]) -> Dict[str, Any]:

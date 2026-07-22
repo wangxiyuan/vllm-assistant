@@ -209,7 +209,6 @@ def sync_areas():
                 existing = db.query(Area).filter(Area.id == area["id"]).first()
                 if existing:
                     existing.name = area.get("name", existing.name)
-                    existing.owners = json.dumps(area.get("owners", []))
                     existing.paths = json.dumps(area.get("paths", []))
                     existing.description = area.get("description")
                     existing.last_sync = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -217,7 +216,6 @@ def sync_areas():
                     db.add(Area(
                         id=area["id"],
                         name=area.get("name", area["id"]),
-                        owners=json.dumps(area.get("owners", [])),
                         paths=json.dumps(area.get("paths", [])),
                         description=area.get("description"),
                         last_sync=datetime.now(timezone.utc).replace(tzinfo=None),
@@ -400,7 +398,6 @@ def sync_user_prs():
 
 def _process_single_user_issue(db, issue: dict, mapper: AreaMapper) -> None:
     """把用户创建的 Issue 写入 user_issues 表"""
-    from app.models import UserIssue
     issue_number = issue.get("number")
     if issue_number is None:
         return
@@ -504,10 +501,6 @@ def _fetch_user_pr_detail(pr: dict, pr_number: int,
         # dirty 状态也是冲突信号（即使 behind 未报）
         if mergeable_state == "dirty":
             conflict_detected = True
-
-    # 领域映射：先查现有 Item 缓存的 area（避免重复调 files API），
-    # 缺失时才调 _map_pr_to_area（会打 get_pull_files）。
-    area_id = None
 
     return {
         "pr_number": pr_number,

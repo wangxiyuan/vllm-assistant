@@ -32,54 +32,29 @@
                 <div class="nav-label">工作区</div>
                 <button class="nav-item" :class="{active: currentView === 'community'}" @click="switchView('community')">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                    <span>社区动态</span>
-                    <span class="nav-kbd">1</span>
-                </button>
-                <button class="nav-item" :class="{active: currentView === 'pr-center'}" @click="switchView('pr-center')">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-                    <span>我的贡献</span>
-                    <span class="nav-kbd">2</span>
+                    <span class="nav-kbd">1</span><span>社区动态</span>
                 </button>
                 <button class="nav-item" :class="{active: currentView === 'watchlist'}" @click="switchView('watchlist')">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                    <span>特别关注</span>
-                    <span class="nav-kbd">3</span>
+                    <span class="nav-kbd">2</span><span>特别关注</span>
                 </button>
-                <button class="nav-item" :class="{active: currentView === 'my-data'}" @click="switchView('my-data')">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                    <span>我的数据</span>
-                    <span class="nav-kbd">4</span>
+                <button class="nav-item" :class="{active: currentView === 'pr-center'}" @click="switchView('pr-center')">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+                    <span class="nav-kbd">3</span><span>我的贡献</span>
                 </button>
                 <button class="nav-item" :class="{active: currentView === 'personal-todo'}" @click="switchView('personal-todo')">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                    <span>个人 TODO</span>
-                    <span class="nav-kbd">5</span>
+                    <span class="nav-kbd">4</span><span>我的任务</span>
                 </button>
                 <button class="nav-item" :class="{active: currentView === 'intelligence'}" @click="switchView('intelligence')">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <span>情报面板</span>
-                    <span class="nav-kbd">6</span>
-                </button>
-            </nav>
-
-            <div class="nav-section">
-                <div class="nav-label">操作</div>
-                <button class="nav-item" @click="refreshAll()">
-                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                    <span>立即同步</span>
-                    <span class="nav-kbd">R</span>
+                    <span class="nav-kbd">5</span><span>洞察面板</span>
                 </button>
             </nav>
 
             <div class="sidebar-footer">
-                <div class="sync-status">
-                    <span class="sync-dot" :class="syncStatusClass"></span>
-                    <span x-text="syncStatusText"></span>
-                    <div class="tt">
-                        <span class="tt-line"><span class="tt-k">上次同步：</span><span class="tt-v" x-text="exactTime(lastSync) || '从未'"></span></span>
-                        <span class="tt-line" x-show="nextSync"><span class="tt-k">下次同步：</span><span class="tt-v amber" x-text="exactTime(nextSync)"></span></span>
-                        <span class="tt-line" x-show="nextSync"><span class="tt-k">倒　　计：</span><span class="tt-v amber" x-text="nextSyncCountdown"></span></span>
-                    </div>
+                <div style="font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary);">
+                    vLLM Assistant v1.0
                 </div>
             </div>
         </aside>
@@ -102,6 +77,13 @@
             </div>
 
             <div class="header-actions">
+                <div class="sync-status" style="margin-right: 12px; font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary);">
+                    <span class="sync-dot" :class="syncStatusClass"></span>
+                    <span x-text="syncStatusText"></span>
+                    <span style="margin-left: 8px;">|</span>
+                    <span x-show="nextSync" style="margin-left: 4px;">下次：<span class="amber" x-text="exactTime(nextSync)"></span></span>
+                    <span x-show="nextSync" style="margin-left: 8px;">倒计时：<span class="amber" x-text="nextSyncCountdown"></span></span>
+                </div>
                 <button class="btn btn-ghost btn-icon" @click="refreshAll()" title="同步 (R)">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 </button>
@@ -144,11 +126,11 @@
                         <div class="panel-title">
                             动态流
                             <div class="tabs" style="margin-left: 12px;">
-                                <button class="tab" :class="{active: communityTab === 'issues'}" @click="communityTab = 'issues'">
-                                    Issues <span class="badge" x-text="issues.length"></span>
-                                </button>
                                 <button class="tab" :class="{active: communityTab === 'prs'}" @click="communityTab = 'prs'">
                                     PRs <span class="badge" x-text="prs.length"></span>
+                                </button>
+                                <button class="tab" :class="{active: communityTab === 'issues'}" @click="communityTab = 'issues'">
+                                    Issues <span class="badge" x-text="issues.length"></span>
                                 </button>
                             </div>
                             <span class="count" x-text="(filteredIssues.length + filteredPRs.length) + ' 条'"></span>
@@ -286,8 +268,75 @@
                 </div>
             </div>
 
-            <!-- ============= 我的贡献（PR + Issue） ============= -->
+            <!-- ============= 我的贡献（PR + Issue + 仪表盘） ============= -->
             <div x-show="currentView === 'pr-center'" class="view" x-cloak>
+
+                <!-- 贡献概览仪表盘 -->
+                <div x-show="statsLoading" class="empty-state">
+                    <div class="empty-icon">⟳</div>
+                    <div class="empty-title">加载数据中…</div>
+                </div>
+                <div x-show="!statsLoading" x-cloak>
+                    <template x-if="myStats">
+                    <div>
+                        <div class="panel">
+                            <div class="panel-header">
+                                <div class="panel-title">贡献概览</div>
+                                <div class="panel-actions">
+                                    <button class="btn btn-sm" @click="loadMyStats()" :disabled="statsLoading">
+                                        <span x-show="!statsLoading">刷新</span>
+                                        <span x-show="statsLoading">加载中…</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="panel-body">
+                                <div class="stat-grid" style="margin-bottom: 0;">
+                                    <div class="stat-card" style="--accent-color: var(--signal-green)">
+                                        <div class="stat-label">已合并 PR</div>
+                                        <div class="stat-value" x-text="myStats.summary.merged_prs"></div>
+                                    </div>
+                                    <div class="stat-card" style="--accent-color: var(--signal-blue)">
+                                        <div class="stat-label">开放中 PR</div>
+                                        <div class="stat-value" x-text="myStats.summary.open_prs"></div>
+                                    </div>
+                                    <div class="stat-card" style="--accent-color: var(--signal-purple)">
+                                        <div class="stat-label">开放 Issue</div>
+                                        <div class="stat-value" x-text="myStats.summary.open_issues"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 月度贡献趋势 -->
+                        <div class="panel" x-show="Object.keys(myStats.monthly?.created || {}).length > 0">
+                            <div class="panel-header">
+                                <div class="panel-title">月度贡献趋势</div>
+                                <div class="panel-actions" style="font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono);">
+                                    <span>横向滚动查看更多 →</span>
+                                </div>
+                            </div>
+                            <div class="panel-body" style="padding: 16px;">
+                                <div style="overflow-x: auto; padding-bottom: 8px;">
+                                    <div style="display: flex; gap: 6px; align-items: flex-end; height: 140px; padding: 12px 4px 28px; min-width: 100%;">
+                                        <template x-for="(count, month) in myStats.monthly.created" :key="month">
+                                            <div style="flex: 0 0 36px; display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative;">
+                                                <span class="text-mono" style="font-size: 10px; color: var(--text-secondary);" x-text="count || ''"></span>
+                                                <div :style="'width: 28px; height: ' + Math.max(2, monthBarHeight(count, myStats.monthly.created)) + 'px; background: ' + (count > 0 ? 'var(--amber)' : 'var(--border-faint)') + '; border-radius: 2px 2px 0 0; transition: height 0.3s;'"
+                                                     :title="month + ': ' + count + ' PR'"></div>
+                                                <span class="text-mono" style="font-size: 9px; color: var(--text-tertiary); position: absolute; bottom: -22px; white-space: nowrap;" x-text="formatMonthLabel(month)"></span>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 16px; margin-top: 14px; font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono);">
+                                    <span>■ <span style="color: var(--amber)">活跃月份</span></span>
+                                    <span>■ <span style="color: var(--text-tertiary)">无活动</span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </template>
+                </div>
 
                 <!-- 顶层 tab：PR / Issue 切换 -->
                 <div class="panel">
@@ -474,8 +523,8 @@
                         <div class="panel-title">
                             特别关注列表
                             <div class="tabs" style="margin-left: 12px;">
-                                <button class="tab" :class="{active: watchlistTab === 'issue'}" @click="watchlistTab = 'issue'">Issues <span class="badge" x-text="watchlist.filter(w => w.item_type === 'issue').length"></span></button>
                                 <button class="tab" :class="{active: watchlistTab === 'pr'}" @click="watchlistTab = 'pr'">PRs <span class="badge" x-text="watchlist.filter(w => w.item_type === 'pr').length"></span></button>
+                                <button class="tab" :class="{active: watchlistTab === 'issue'}" @click="watchlistTab = 'issue'">Issues <span class="badge" x-text="watchlist.filter(w => w.item_type === 'issue').length"></span></button>
                             </div>
                             <span class="count" x-text="watchlist.length + ' 项'"></span>
                         </div>
@@ -532,189 +581,62 @@
                 </div>
             </div>
 
-            <!-- ============= 我的数据（仪表盘） ============= -->
-            <div x-show="currentView === 'my-data'" class="view" x-cloak>
-
-                <div x-show="statsLoading" class="empty-state">
-                    <div class="empty-icon">⟳</div>
-                    <div class="empty-title">加载数据中…</div>
-                </div>
-
-                <template x-if="myStats">
-                <div x-show="!statsLoading">
-                    <!-- 总览统计卡 -->
-                    <div class="stat-grid">
-                        <div class="stat-card" style="--accent-color: var(--signal-green)">
-                            <div class="stat-label">总 PR 数</div>
-                            <div class="stat-value" x-text="myStats.summary.total_prs"></div>
-                            <div class="stat-trend" x-text="myStats.summary.merged_prs + ' 已合并 · ' + myStats.summary.merge_rate + '% 合并率'"></div>
-                        </div>
-                        <div class="stat-card" style="--accent-color: var(--signal-blue)">
-                            <div class="stat-label">总 Issue 数</div>
-                            <div class="stat-value" x-text="myStats.summary.total_issues"></div>
-                            <div class="stat-trend" x-text="myStats.summary.open_issues + ' 开放 · ' + myStats.summary.closed_issues + ' 已关闭'"></div>
-                        </div>
-                        <div class="stat-card" style="--accent-color: var(--amber)">
-                            <div class="stat-label">贡献时长</div>
-                            <div class="stat-value" x-text="myStats.summary.days_active + ' 天'"></div>
-                            <div class="stat-trend" x-text="'首次贡献于 ' + timeAgo(myStats.summary.first_contribution)"></div>
-                        </div>
-                        <div class="stat-card" style="--accent-color: var(--signal-purple)">
-                            <div class="stat-label">近 30 天活跃</div>
-                            <div class="stat-value" x-text="myStats.activity.recent_30d_prs + myStats.activity.recent_30d_issues"></div>
-                            <div class="stat-trend" x-text="myStats.activity.recent_30d_prs + ' PR · ' + myStats.activity.recent_30d_issues + ' Issue'"></div>
-                        </div>
-                    </div>
-
-                    <!-- PR 状态分布 -->
-                    <div class="panel">
-                        <div class="panel-header">
-                            <div class="panel-title">PR 状态分布</div>
-                            <div class="panel-actions">
-                                <button class="btn btn-sm" @click="loadMyStats()" :disabled="statsLoading">
-                                    <span x-show="!statsLoading">刷新</span>
-                                    <span x-show="statsLoading">加载中…</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="panel-body">
-                            <div class="stat-grid" style="margin-bottom: 0;">
-                                <div class="stat-card" style="--accent-color: var(--signal-green)">
-                                    <div class="stat-label">已合并</div>
-                                    <div class="stat-value" x-text="myStats.summary.merged_prs"></div>
-                                </div>
-                                <div class="stat-card" style="--accent-color: var(--signal-blue)">
-                                    <div class="stat-label">开放中</div>
-                                    <div class="stat-value" x-text="myStats.summary.open_prs"></div>
-                                </div>
-                                <div class="stat-card" style="--accent-color: var(--signal-red)">
-                                    <div class="stat-label">已关闭未合并</div>
-                                    <div class="stat-value" x-text="myStats.summary.closed_prs"></div>
-                                </div>
-                                <div class="stat-card" style="--accent-color: var(--amber)">
-                                    <div class="stat-label">合并率</div>
-                                    <div class="stat-value" x-text="myStats.summary.merge_rate + '%'"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 月度贡献趋势 -->
-                    <div class="panel" x-show="Object.keys(myStats.monthly?.created || {}).length > 0">
-                        <div class="panel-header">
-                            <div class="panel-title">月度贡献趋势</div>
-                            <div class="panel-actions" style="font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono);">
-                                <span>横向滚动查看更多 →</span>
-                            </div>
-                        </div>
-                        <div class="panel-body" style="padding: 16px;">
-                            <div style="overflow-x: auto; padding-bottom: 8px;">
-                                <div style="display: flex; gap: 6px; align-items: flex-end; height: 140px; padding: 12px 4px 28px; min-width: 100%;">
-                                    <template x-for="(count, month) in myStats.monthly.created" :key="month">
-                                        <div style="flex: 0 0 36px; display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative;">
-                                            <span class="text-mono" style="font-size: 10px; color: var(--text-secondary);" x-text="count || ''"></span>
-                                            <div :style="'width: 28px; height: ' + Math.max(2, monthBarHeight(count, myStats.monthly.created)) + 'px; background: ' + (count > 0 ? 'var(--amber)' : 'var(--border-faint)') + '; border-radius: 2px 2px 0 0; transition: height 0.3s;'"
-                                                 :title="month + ': ' + count + ' PR'"></div>
-                                            <span class="text-mono" style="font-size: 9px; color: var(--text-tertiary); position: absolute; bottom: -22px; white-space: nowrap;" x-text="formatMonthLabel(month)"></span>
-                                        </div>
-                                    </template>
-                                </div>
-                            </div>
-                            <div style="display: flex; gap: 16px; margin-top: 14px; font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono);">
-                                <span>■ <span style="color: var(--amber)">活跃月份</span></span>
-                                <span>■ <span style="color: var(--text-tertiary)">无活动</span></span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 最近 PR -->
-                    <div class="panel">
-                        <div class="panel-header">
-                            <div class="panel-title">最近 PR</div>
-                        </div>
-                        <div class="panel-body" style="padding: 0;">
-                            <div class="list">
-                                <template x-for="pr in myStats.recent_prs" :key="pr.number">
-                                    <div class="list-item" @click="window.open(pr.url, '_blank')">
-                                        <span class="item-number pr" x-text="'#' + pr.number"></span>
-                                        <div class="item-main">
-                                            <a :href="pr.url" target="_blank" class="item-title" @click.stop="" x-text="pr.title"></a>
-                                            <div class="item-meta">
-                                                <span class="badge" :class="pr.merged ? 'badge-state-merged' : pr.state === 'open' ? 'badge-state-open' : 'badge-state-closed'"
-                                                      x-text="pr.merged ? '已合并' : pr.state === 'open' ? '开放' : '已关闭'"></span>
-                                                <span class="tt-host" style="display: inline-block;" x-show="pr.created_at">
-                                                    <span x-text="timeAgo(pr.created_at)"></span>
-                                                    <span class="tt" x-text="exactTime(pr.created_at)"></span>
-                                                </span>
-                                                <span class="meta-item" x-show="pr.comments > 0">
-                                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                                                    <span x-text="pr.comments"></span>
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <div class="item-side">
-                                            <button class="btn btn-sm" :class="isWatched(pr.number, 'pr') ? 'btn-primary' : 'btn-ghost'"
-                                                @click.stop="toggleWatch(pr.number, 'pr', pr.title, pr.url, {area: pr.area, state: pr.state})"
-                                                    :title="isWatched(pr.number, 'pr') ? '取消特别关注' : '加入特别关注'">
-                                                <svg width="12" height="12" viewBox="0 0 24 24" :fill="isWatched(pr.number, 'pr') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </template>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                </template>
-            </div>
-
-            <!-- ============= 个人 TODO 面板 ============= -->
+            <!-- ============= 我的任务面板 ============= -->
             <div x-show="currentView === 'personal-todo'" class="view" x-cloak>
 
-                <!-- 快速添加任务 -->
+                <!-- 快捷添加 -->
                 <div class="panel">
                     <div class="panel-header">
-                        <div class="panel-title">快速添加任务</div>
+                        <div class="panel-title">
+                            <button class="btn btn-primary btn-sm" @click="showAddTaskModal = true">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                添加任务
+                            </button>
+                        </div>
                     </div>
-                    <div class="panel-body">
-                        <div class="todo-add-form">
-                            <input class="input" type="text" placeholder="任务标题" x-model="newTask.title" @keydown.enter="createTask()">
-                            <textarea class="input" placeholder="详细描述（可选）" x-model="newTask.description" rows="2"></textarea>
-                            <div class="todo-form-row">
-                                <select class="select" x-model="newTask.source">
-                                    <template x-for="s in sources" :key="s.value">
-                                        <option :value="s.value" x-text="s.label"></option>
-                                    </template>
-                                </select>
-                                <select class="select" x-model="newTask.priority">
-                                    <option value="P0">P0 紧急</option>
-                                    <option value="P1">P1 重要</option>
-                                    <option value="P2">P2 普通</option>
-                                    <option value="P3">P3 低优</option>
-                                </select>
-                                <input class="input" type="text" placeholder="领域 (如 engine)" x-model="newTask.area">
-                                <input class="input" type="date" x-model="newTask.due_date" title="截止日期" onclick="this.showPicker?.()">
+                </div>
+
+                <!-- 添加任务弹窗 -->
+                <div x-show="showAddTaskModal" x-cloak class="modal-backdrop" @click.self="showAddTaskModal = false">
+                    <div class="modal" @click.stop>
+                        <div class="modal-header">
+                            <h3>添加任务</h3>
+                            <button class="modal-close" @click="showAddTaskModal = false">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="todo-add-form">
+                                <input class="input" type="text" placeholder="任务标题" x-model="newTask.title" @keydown.enter="createTask()">
+                                <textarea class="input" placeholder="详细描述（可选）" x-model="newTask.description" rows="3"></textarea>
+                                <div class="todo-form-row">
+                                    <select class="select" x-model="newTask.source">
+                                        <template x-for="s in sources" :key="s.value">
+                                            <option :value="s.value" x-text="s.label"></option>
+                                        </template>
+                                    </select>
+                                    <select class="select" x-model="newTask.priority">
+                                        <option value="P0">P0 紧急</option>
+                                        <option value="P1">P1 重要</option>
+                                        <option value="P2">P2 普通</option>
+                                        <option value="P3">P3 低优</option>
+                                    </select>
+                                    <input class="input" type="text" placeholder="领域 (如 engine)" x-model="newTask.area">
+                                    <input class="input" type="date" x-model="newTask.due_date" title="截止日期" onclick="this.showPicker?.()">
+                                </div>
+                                <div class="todo-form-actions">
+                                    <label class="toggle">
+                                        <input type="checkbox" x-model="newTask.trigger_dedup_check">
+                                        <span class="toggle-track"></span>
+                                        <span>添加后自动去重检查</span>
+                                    </label>
+                                </div>
                             </div>
-                            <div class="todo-tags-row">
-                                <template x-for="tag in newTask.tags" :key="tag">
-                                    <span class="tag-chip">
-                                        <span x-text="tag"></span>
-                                        <button @click.stop="removeTaskTag(tag)">×</button>
-                                    </span>
-                                </template>
-                                <input class="input input-sm" type="text" placeholder="添加标签后回车" x-model="newTaskTagInput" @keydown.enter="addTaskTag()" style="width: 160px;">
-                            </div>
-                            <div class="todo-form-actions">
-                                <label class="toggle">
-                                    <input type="checkbox" x-model="newTask.trigger_dedup_check">
-                                    <span class="toggle-track"></span>
-                                    <span>添加后自动去重检查</span>
-                                </label>
-                                <button class="btn btn-primary" @click="createTask()" :disabled="newTaskLoading || !newTask.title.trim()">
-                                    <span x-show="!newTaskLoading">添加任务</span>
-                                    <span x-show="newTaskLoading">添加中…</span>
-                                </button>
-                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn" @click="showAddTaskModal = false">取消</button>
+                            <button class="btn btn-primary" @click="createTask()" :disabled="newTaskLoading || !newTask.title.trim()">
+                                <span x-show="!newTaskLoading">确认添加</span>
+                                <span x-show="newTaskLoading">添加中…</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -733,10 +655,6 @@
                         <div class="stat-label">已完成</div>
                         <div class="stat-value" x-text="doneCount"></div>
                     </div>
-                    <div class="stat-card" style="--accent-color: var(--text-tertiary)">
-                        <div class="stat-label">已取消</div>
-                        <div class="stat-value" x-text="cancelledCount"></div>
-                    </div>
                 </div>
 
                 <!-- 筛选器 -->
@@ -748,7 +666,6 @@
                                 <button class="tab" :class="{active: todoFilterStatus === 'todo'}" @click="switchTodoStatusFilter('todo')">待处理</button>
                                 <button class="tab" :class="{active: todoFilterStatus === 'in_progress'}" @click="switchTodoStatusFilter('in_progress')">进行中</button>
                                 <button class="tab" :class="{active: todoFilterStatus === 'done'}" @click="switchTodoStatusFilter('done')">已完成</button>
-                                <button class="tab" :class="{active: todoFilterStatus === 'cancelled'}" @click="switchTodoStatusFilter('cancelled')">已取消</button>
                             </div>
                         </div>
                         <div class="panel-actions">
@@ -758,10 +675,6 @@
                                     <button class="tab" :class="{active: todoFilterPriority === p}" @click="switchTodoPriorityFilter(p)" x-text="p"></button>
                                 </template>
                             </div>
-                            <button class="btn btn-sm" @click="loadTodoTasks()" :disabled="todoLoading">
-                                <span x-show="!todoLoading">刷新</span>
-                                <span x-show="todoLoading">加载中…</span>
-                            </button>
                         </div>
                     </div>
                     <div class="panel-body" style="padding: 0;">
@@ -775,7 +688,7 @@
                                     </div>
                                     <div class="kanban-col-body">
                                         <template x-for="task in tasksByPriority[p]" :key="task.id">
-                                            <div class="task-card" @click="openTask(task)">
+                                            <div class="task-card" :class="{'overdue': task.due_date && task.due_date < todayISO() && task.status !== 'done'}" @click="openTask(task)">
                                                 <div class="task-card-header">
                                                     <span class="priority-badge" :class="priorityClass(task.priority)" x-text="task.priority"></span>
                                                     <span class="status-badge" :class="statusClass(task.status)" x-text="statusLabel(task.status)"></span>
@@ -784,7 +697,7 @@
                                                 <div class="task-card-meta">
                                                     <span class="meta-item" x-text="sourceLabel(task.source)"></span>
                                                     <span class="meta-item" x-show="task.area" x-text="task.area"></span>
-                                                    <span class="meta-item" x-show="task.due_date" x-text="'截止 ' + task.due_date"></span>
+                                                    <span class="meta-item" x-show="task.due_date" :class="{'overdue': task.due_date && task.due_date < todayISO() && task.status !== 'done'}" x-text="'截止 ' + task.due_date"></span>
                                                 </div>
                                                 <div class="task-card-badges" x-show="task.has_dedup_check || task.has_ai_insight">
                                                     <span class="badge badge-warning" x-show="task.has_dedup_check && task.dedup_check_result && task.dedup_check_result.matches && task.dedup_check_result.matches.length > 0">
@@ -797,7 +710,7 @@
                                                     <button class="btn btn-sm btn-ghost" @click.stop="generateInsightFromTask(task)" title="生成洞察报告" :disabled="insightGenLoading">
                                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                                                     </button>
-                                                    <button class="btn btn-sm btn-ghost" @click.stop="markTaskDone(task)" title="标记完成" x-show="task.status !== 'done' && task.status !== 'cancelled'">
+                                                    <button class="btn btn-sm btn-ghost" @click.stop="toggleTaskDone(task)" :title="task.status === 'done' ? '恢复未完成' : '标记完成'" x-show="task.status !== 'cancelled'">
                                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
                                                     </button>
                                                 </div>
@@ -812,8 +725,7 @@
                         <!-- 列表视图（有筛选时显示） -->
                         <div x-show="todoFilterStatus !== 'all' || todoFilterPriority !== 'all'" class="list">
                             <template x-for="task in todoTasks" :key="task.id">
-                                <div class="list-item" @click="openTask(task)">
-                                    <span class="priority-badge" :class="priorityClass(task.priority)" x-text="task.priority"></span>
+                                <div class="list-item" :class="{'overdue': task.due_date && task.due_date < todayISO() && task.status !== 'done'}" @click="openTask(task)">
                                     <div class="item-main">
                                         <div class="flex items-center gap-2 flex-wrap">
                                             <span class="item-title" style="cursor: pointer;" x-text="task.title"></span>
@@ -822,7 +734,7 @@
                                         <div class="item-meta">
                                             <span class="meta-item" x-text="sourceLabel(task.source)"></span>
                                             <span class="meta-item" x-show="task.area" x-text="task.area"></span>
-                                            <span x-show="task.due_date" x-text="'截止 ' + task.due_date"></span>
+                                            <span class="due-date" :class="{'overdue': task.due_date && task.due_date < todayISO() && task.status !== 'done'}" x-show="task.due_date" x-text="'截止 ' + task.due_date"></span>
                                             <span x-text="timeAgo(task.created_at)"></span>
                                         </div>
                                     </div>
@@ -845,51 +757,67 @@
                 </div>
             </div>
 
-            <!-- ============= 情报面板 ============= -->
+            <!-- ============= 洞察面板 ============= -->
             <div x-show="currentView === 'intelligence'" class="view" x-cloak>
 
                 <!-- 生成洞察报告 -->
                 <div class="panel">
                     <div class="panel-header">
-                        <div class="panel-title">生成洞察报告</div>
+                        <div class="panel-title">
+                            <button class="btn btn-primary btn-sm" @click="showIntelModal = true">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                生成洞察报告
+                            </button>
+                        </div>
                     </div>
-                    <div class="panel-body">
-                        <div class="intel-gen-form">
-                            <div class="intel-form-row">
-                                <label>关联任务</label>
-                                <select class="select" x-model="intelForm.task_id">
-                                    <option value="">请选择任务…</option>
-                                    <template x-for="t in intelTasks" :key="t.id">
-                                        <option :value="t.id" x-text="'#' + t.id + ' ' + t.title"></option>
-                                    </template>
-                                </select>
-                            </div>
-                            <div class="intel-form-row">
-                                <label>报告标题（可选）</label>
-                                <input class="input" type="text" placeholder="留空则自动生成" x-model="intelForm.title">
-                            </div>
-                            <div class="intel-form-row">
-                                <label>包含来源</label>
-                                <div class="intel-sources">
-                                    <template x-for="s in intelSourceOptions" :key="s.value">
-                                        <label class="toggle">
-                                            <input type="checkbox" :checked="isSourceSelected(s.value)" @change="toggleIntelSource(s.value)">
-                                            <span class="toggle-track"></span>
-                                            <span x-text="s.label"></span>
-                                        </label>
-                                    </template>
+                </div>
+
+                <!-- 生成洞察报告弹窗 -->
+                <div x-show="showIntelModal" x-cloak class="modal-backdrop" @click.self="showIntelModal = false">
+                    <div class="modal" @click.stop>
+                        <div class="modal-header">
+                            <h3>生成洞察报告</h3>
+                            <button class="modal-close" @click="showIntelModal = false">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="intel-gen-form">
+                                <div class="intel-form-row">
+                                    <label>关联任务</label>
+                                    <select class="select" x-model="intelForm.task_id">
+                                        <option value="">请选择任务…</option>
+                                        <template x-for="t in intelTasks" :key="t.id">
+                                            <option :value="t.id" x-text="'#' + t.id + ' ' + t.title"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                                <div class="intel-form-row">
+                                    <label>报告标题（可选）</label>
+                                    <input class="input" type="text" placeholder="留空则自动生成" x-model="intelForm.title">
+                                </div>
+                                <div class="intel-form-row">
+                                    <label>包含来源</label>
+                                    <div class="intel-sources">
+                                        <template x-for="s in intelSourceOptions" :key="s.value">
+                                            <label class="toggle">
+                                                <input type="checkbox" :checked="isSourceSelected(s.value)" @change="toggleIntelSource(s.value)">
+                                                <span class="toggle-track"></span>
+                                                <span x-text="s.label"></span>
+                                            </label>
+                                        </template>
+                                    </div>
+                                </div>
+                                <div class="intel-form-row">
+                                    <label>额外提示词（可选）</label>
+                                    <textarea class="input" placeholder="可提供论文信息、特殊关注点等" x-model="intelForm.extra_prompt" rows="3"></textarea>
                                 </div>
                             </div>
-                            <div class="intel-form-row">
-                                <label>额外提示词（可选）</label>
-                                <textarea class="input" placeholder="可提供论文信息、特殊关注点等" x-model="intelForm.extra_prompt" rows="3"></textarea>
-                            </div>
-                            <div class="intel-form-actions">
-                                <button class="btn btn-primary" @click="generateReport()" :disabled="intelGenLoading || !intelForm.task_id">
-                                    <span x-show="!intelGenLoading">生成报告</span>
-                                    <span x-show="intelGenLoading">生成中…</span>
-                                </button>
-                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn" @click="showIntelModal = false">取消</button>
+                            <button class="btn btn-primary" @click="generateReport()" :disabled="intelGenLoading || !intelForm.task_id">
+                                <span x-show="!intelGenLoading">确认生成</span>
+                                <span x-show="intelGenLoading">生成中…</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1189,7 +1117,7 @@
             <div class="drawer-body">
                 <!-- 操作按钮 -->
                 <div class="flex gap-2 flex-wrap mb-4">
-                    <button class="btn btn-primary btn-sm" @click="generateInsightFromTask(selectedTaskDetails || selectedTask)" :disabled="insightGenLoading">
+                    <button class="btn btn-sm" @click="generateInsightFromTask(selectedTaskDetails || selectedTask)" :disabled="insightGenLoading">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                         <span x-show="!insightGenLoading">生成洞察报告</span>
                         <span x-show="insightGenLoading">生成中…</span>
@@ -1211,11 +1139,11 @@
                     <template x-if="editingTask">
                         <button class="btn btn-sm" @click="cancelEditTask()">取消</button>
                     </template>
-                    <button class="btn btn-sm" @click="markTaskDone(selectedTaskDetails || selectedTask)" x-show="(selectedTaskDetails || selectedTask)?.status !== 'done' && (selectedTaskDetails || selectedTask)?.status !== 'cancelled'">
+                    <button class="btn btn-sm" @click="toggleTaskDone(selectedTaskDetails || selectedTask)">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                        标记完成
+                        <span x-text="((selectedTaskDetails || selectedTask)?.status === 'done') ? '恢复未完成' : '标记完成'"></span>
                     </button>
-                    <button class="btn btn-sm btn-ghost" style="color: var(--signal-red)" @click="deleteTask(selectedTaskDetails || selectedTask)">
+                    <button class="btn btn-sm" style="color: var(--signal-red)" @click="deleteTask(selectedTaskDetails || selectedTask)">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                         删除
                     </button>
@@ -1245,7 +1173,6 @@
                                         <option value="todo">待处理</option>
                                         <option value="in_progress">进行中</option>
                                         <option value="done">已完成</option>
-                                        <option value="cancelled">已取消</option>
                                     </select>
                                     <input class="input" type="text" placeholder="领域" x-model="editTaskForm.area">
                                 </div>
@@ -1386,7 +1313,6 @@
     <script src="/static/js/app.js?v=15"></script>
     <script src="/static/js/community.js?v=15"></script>
     <script src="/static/js/pr_center.js?v=15"></script>
-    <script src="/static/js/my_data.js?v=15"></script>
     <script src="/static/js/personal_todo.js?v=15"></script>
     <script src="/static/js/intelligence.js?v=15"></script>
 </body>

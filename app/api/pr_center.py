@@ -4,7 +4,6 @@ PR Command Center API - PR指挥中心
 """
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -21,7 +20,7 @@ router = APIRouter()
 CACHE_TTL = timedelta(minutes=5)
 
 
-@router.get("/my-prs", response_model=List[MyPRResponse])
+@router.get("/my-prs", response_model=list[MyPRResponse])
 async def get_my_prs(
     state: str = Query("open", pattern="^(open|merged|closed|all)$"),
     filter_conflicts: bool = False,

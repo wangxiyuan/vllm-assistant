@@ -222,7 +222,6 @@ class AreaMapper:
 
     def __init__(self):
         self.area_map: Dict[str, str] = {}  # path -> area_id
-        self.area_owners: Dict[str, List[str]] = {}  # area_id -> owners
         self._load_codeowners()
 
     def _load_codeowners(self):
@@ -253,19 +252,12 @@ class AreaMapper:
             # 匹配模式: pattern @owner1 @owner2
             match = re.match(r"^([^\s]+)\s+(.+)$", line)
             if match:
-                pattern, owners_str = match.groups()
-                owners = re.findall(r"@([\w-]+)", owners_str)
+                pattern, _ = match.groups()
 
                 # 确定领域
                 area_id = self._identify_area(pattern)
                 if area_id:
                     self.area_map[pattern] = area_id
-                    if area_id not in self.area_owners:
-                        self.area_owners[area_id] = []
-                    # 去重添加 owners
-                    for o in owners:
-                        if o not in self.area_owners[area_id]:
-                            self.area_owners[area_id].append(o)
 
         # 没有解析到任何映射则用默认
         if not self.area_map:
@@ -362,9 +354,7 @@ class AreaMapper:
     def get_area_info(self, area_id: str) -> Optional[Dict]:
         """获取领域信息"""
         if area_id in self.AREA_DEFINITIONS:
-            info = self.AREA_DEFINITIONS[area_id].copy()
-            info["owners"] = self.area_owners.get(area_id, [])
-            return info
+            return self.AREA_DEFINITIONS[area_id].copy()
         return None
 
     def get_all_areas(self) -> List[Dict]:
@@ -373,7 +363,6 @@ class AreaMapper:
         for area_id, definition in self.AREA_DEFINITIONS.items():
             info = definition.copy()
             info["id"] = area_id
-            info["owners"] = self.area_owners.get(area_id, [])
             areas.append(info)
         return areas
 

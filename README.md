@@ -17,12 +17,6 @@ vLLM贡献者效率工具 - 帮助贡献者高效参与社区，加速成为comm
 - Review状态追踪（approved/changes_requested/pending）
 - 红色/黄色/绿色高亮问题PR
 
-### 🗺️ Area Explorer（领域探索器）
-- 可视化展示vllm所有CODEOWNERS领域
-- 显示各领域对应的committer
-- 基于你的贡献历史推荐适合focus的领域
-- 帮助你建立area ownership
-
 ### 🤖 AI Assistant（AI辅助）⭐
 - **Review意见生成**：基于PR diff自动生成结构化review建议
 - **PR影响范围分析**：分析变更可能影响的模块和测试
@@ -117,14 +111,18 @@ vllm-assistant/
 │   ├── api/                 # API 路由
 │   │   ├── community.py     # Community Pulse（读缓存）
 │   │   ├── pr_center.py     # PR Command Center（读缓存）
-│   │   ├── area_explorer.py # Area Explorer（读缓存）
+│   │   ├── watchlist.py     # 特别关注
+│   │   ├── my_stats.py      # 我的贡献统计
+│   │   ├── personal_todo.py # 个人任务管理
+│   │   ├── intelligence.py  # 洞察报告
 │   │   └── ai_assistant.py  # AI Assistant
 │   └── services/            # 服务层
 │       ├── github_client.py     # GitHub REST API 封装
 │       ├── area_mapper.py       # CODEOWNERS 解析
 │       ├── conflict_detector.py # Compare API 冲突检测
-│       ├── recommender.py       # 领域推荐
-│       └── ai_assistant.py      # OpenAI API 集成
+│       ├── task_dedup.py        # 任务去重检查
+│       ├── ai_assistant.py      # OpenAI API 集成
+│       └── intelligence_report.py # 洞察报告生成
 ├── static/                  # 前端（CDN + Alpine.js）
 │   ├── index.html
 │   ├── css/style.css
@@ -132,10 +130,8 @@ vllm-assistant/
 │       ├── app.js
 │       ├── community.js
 │       ├── pr_center.js
-│       ├── area_explorer.js
-│       └── ai_assistant.js
-├── tests/                   # 单元测试
-├── requirements.txt
+│       ├── personal_todo.js
+│       └── intelligence.js
 └── README.md
 ```
 

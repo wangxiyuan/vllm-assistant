@@ -536,9 +536,12 @@ function prCenterMixin() {
             if (!review) return '';
             // try-catch 保护：任何渲染异常都不应导致 Alpine 组件崩溃
             try {
-                // 错误/原始 fallback
-                const fallback = this.renderAIJSON(review);
-                if (fallback) return fallback;
+                // 错误/原始 fallback（仅当 review 只有 raw_response 没有结构化字段时）
+                const hasStructuredData = Array.isArray(review.code_quality) || Array.isArray(review.tests);
+                if (!hasStructuredData) {
+                    const fallback = this.renderAIJSON(review);
+                    if (fallback) return fallback;
+                }
 
                 let html = '';
 
@@ -587,12 +590,49 @@ function prCenterMixin() {
                 html += renderSection('性能', review.performance, '⚡');
                 html += renderSection('测试', review.tests, '✓');
                 html += renderSection('文档', review.docs, '📄');
-                html += renderSection('建议 Reviewer（基于 CODEOWNERS）', review.area_owners, '@');
+
+                // 如果有 raw_response（JSON 解析失败时的兜底），追加可折叠原始内容
+                if (review.raw_response) {
+                    html += `<details style="margin-top: 12px;"><summary style="cursor: pointer; font-size: 12px; color: var(--text-tertiary);">查看 AI 原始返回</summary><pre class="ai-raw" style="margin-top: 8px;">${this.esc(String(review.raw_response))}</pre></details>`;
+                }
 
                 return html || '<p class="text-tertiary">未返回结构化反馈</p>';
             } catch (e) {
                 return `<p style="color: var(--signal-red);">渲染失败：${this.esc(e.message)}</p>`;
             }
+        },
+
+        // ===== 贡献概览数据（原 my-data）=====
+        myStats: null,
+        statsLoading: false,
+
+        async loadMyStats() {
+            this.statsLoading = true;
+            try {
+                this.myStats = await this.api('/api/my-stats');
+            } catch (e) {
+                this.showToast('加载数据失败', e.message, 'error');
+            } finally {
+                this.statsLoading = false;
+            }
+        },
+
+        // 月度柱状图高度计算（百分比归一化）
+        monthBarHeight(count, allMonthly) {
+            const max = Math.max(...Object.values(allMonthly), 1);
+            return Math.round((count / max) * 100);
+        },
+
+        // 月份标签：每年第一个月显示年份，否则只显示月份
+        formatMonthLabel(month) {
+            if (!month) return '';
+            const [year, mon] = month.split('-');
+            const all = Object.keys(this.myStats?.monthly?.created || {});
+            const sameYearMonths = all.filter(m => m.startsWith(year + '-'));
+            if (sameYearMonths[0] === month) {
+                return year.slice(2) + '/' + mon;
+            }
+            return mon;
         },
     };
 }

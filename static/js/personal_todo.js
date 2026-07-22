@@ -1,10 +1,10 @@
-// personal_todo.js - 个人 TODO 面板视图
+// personal_todo.js - 我的任务面板视图
 
 function personalTodoMixin() {
     return {
         // ===== 任务列表 =====
         todoTasks: [],
-        todoStats: { by_status: { todo: 0, in_progress: 0, done: 0, cancelled: 0 }, by_priority: { P0: 0, P1: 0, P2: 0, P3: 0 } },
+        todoStats: { by_status: { todo: 0, in_progress: 0, done: 0 }, by_priority: { P0: 0, P1: 0, P2: 0, P3: 0 } },
         todoLoading: false,
         todoFilterStatus: 'all',
         todoFilterPriority: 'all',
@@ -12,8 +12,8 @@ function personalTodoMixin() {
         todoSortOrder: 'desc',
 
         // ===== 快速添加任务表单 =====
-        newTask: { title: '', description: '', source: 'self', priority: 'P2', area: '', tags: [], due_date: '', trigger_dedup_check: false },
-        newTaskTagInput: '',
+        showAddTaskModal: false,
+        newTask: { title: '', description: '', source: 'self', priority: 'P2', area: '', due_date: '', trigger_dedup_check: false },
         newTaskLoading: false,
 
         // ===== 任务详情抽屉 =====
@@ -71,7 +71,6 @@ function personalTodoMixin() {
                 const payload = { ...this.newTask };
                 if (!payload.due_date) delete payload.due_date;
                 if (!payload.area) delete payload.area;
-                if (payload.tags.length === 0) delete payload.tags;
                 const result = await this.api('/api/personal-todo/tasks', {
                     method: 'POST',
                     body: JSON.stringify(payload),
@@ -81,9 +80,9 @@ function personalTodoMixin() {
                 if (this.todoStats.by_status) this.todoStats.by_status.todo = (this.todoStats.by_status.todo || 0) + 1;
                 if (this.todoStats.by_priority) this.todoStats.by_priority[result.priority] = (this.todoStats.by_priority[result.priority] || 0) + 1;
                 this.showToast('任务已创建', `#${result.id} ${result.title}`, 'success');
-                // 重置表单
-                this.newTask = { title: '', description: '', source: 'self', priority: 'P2', area: '', tags: [], due_date: '', trigger_dedup_check: false };
-                this.newTaskTagInput = '';
+                // 重置表单并关闭弹窗
+                this.newTask = { title: '', description: '', source: 'self', priority: 'P2', area: '', due_date: '', trigger_dedup_check: false };
+                this.showAddTaskModal = false;
                 // 如果有去重结果，显示提示
                 if (result.dedup_check_result && result.dedup_check_result.matches && result.dedup_check_result.matches.length > 0) {
                     this.showToast('发现可能重复', `${result.dedup_check_result.matches.length} 个相似 issue/PR`, 'info', 6000);
@@ -93,18 +92,6 @@ function personalTodoMixin() {
             } finally {
                 this.newTaskLoading = false;
             }
-        },
-
-        // ===== 标签输入处理 =====
-        addTaskTag() {
-            const tag = (this.newTaskTagInput || '').trim();
-            if (tag && !this.newTask.tags.includes(tag)) {
-                this.newTask.tags.push(tag);
-            }
-            this.newTaskTagInput = '';
-        },
-        removeTaskTag(tag) {
-            this.newTask.tags = this.newTask.tags.filter(t => t !== tag);
         },
 
         // ===== 任务详情抽屉 =====
@@ -141,7 +128,7 @@ function personalTodoMixin() {
         // ===== 编辑任务 =====
         startEditTask() {
             if (!this.selectedTaskDetails) return;
-            this.editTaskForm = { ...this.selectedTaskDetails, tags: [...(this.selectedTaskDetails.tags || [])] };
+            this.editTaskForm = { ...this.selectedTaskDetails };
             this.editingTask = true;
         },
         cancelEditTask() {
@@ -152,7 +139,7 @@ function personalTodoMixin() {
             if (!this.selectedTaskDetails) return;
             try {
                 const updates = {};
-                const fields = ['title', 'description', 'source', 'priority', 'status', 'area', 'tags', 'due_date', 'related_issue_number', 'related_pr_number', 'related_url'];
+                const fields = ['title', 'description', 'source', 'priority', 'status', 'area', 'due_date', 'related_issue_number', 'related_pr_number', 'related_url'];
                 for (const f of fields) {
                     if (this.editTaskForm[f] !== this.selectedTaskDetails[f]) {
                         let val = this.editTaskForm[f];
@@ -197,12 +184,13 @@ function personalTodoMixin() {
             }
         },
 
-        // ===== 标记完成 =====
-        async markTaskDone(task) {
+        // ===== 标记完成 / 恢复未完成 =====
+        async toggleTaskDone(task) {
+            const isDone = task.status === 'done';
             try {
                 const result = await this.api(`/api/personal-todo/tasks/${task.id}`, {
                     method: 'PUT',
-                    body: JSON.stringify({ status: 'done' }),
+                    body: JSON.stringify({ status: isDone ? 'todo' : 'done' }),
                 });
                 const idx = this.todoTasks.findIndex(t => t.id === task.id);
                 if (idx >= 0) {
@@ -211,7 +199,7 @@ function personalTodoMixin() {
                 if (this.selectedTaskDetails && this.selectedTaskDetails.id === task.id) {
                     this.selectedTaskDetails = result;
                 }
-                this.showToast('已完成', '任务已标记为完成', 'success');
+                this.showToast(isDone ? '已恢复' : '已完成', isDone ? '任务已恢复为未完成' : '任务已标记为完成', 'success');
             } catch (e) {
                 this.showToast('操作失败', e.message, 'error');
             }
@@ -262,8 +250,8 @@ function personalTodoMixin() {
                         sources: ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'],
                     }),
                 }, 30000);
-                this.showToast('报告生成中', result.message || '请稍后在情报面板查看', 'success', 6000);
-                // 关闭抽屉，切到情报面板
+                this.showToast('报告生成中', result.message || '请稍后在洞察面板查看', 'success', 6000);
+                // 关闭抽屉，切到洞察面板
                 this.closeTask();
                 this.switchView('intelligence');
                 // 开始轮询
@@ -279,7 +267,7 @@ function personalTodoMixin() {
         get tasksByPriority() {
             const groups = { P0: [], P1: [], P2: [], P3: [] };
             for (const t of this.todoTasks) {
-                if (t.status === 'done' || t.status === 'cancelled') continue;
+                if (t.status === 'done') continue;
                 if (groups[t.priority]) groups[t.priority].push(t);
             }
             return groups;
@@ -288,7 +276,6 @@ function personalTodoMixin() {
         get todoCount() { return this.todoStats.by_status?.todo || 0; },
         get inProgressCount() { return this.todoStats.by_status?.in_progress || 0; },
         get doneCount() { return this.todoStats.by_status?.done || 0; },
-        get cancelledCount() { return this.todoStats.by_status?.cancelled || 0; },
 
         // ===== 标签辅助 =====
         sourceLabel(source) {
@@ -296,8 +283,16 @@ function personalTodoMixin() {
             return map[source] || source;
         },
         statusLabel(status) {
-            const map = { todo: '待处理', in_progress: '进行中', done: '已完成', cancelled: '已取消' };
+            const map = { todo: '待处理', in_progress: '进行中', done: '已完成' };
             return map[status] || status;
+        },
+        // 今天日期（YYYY-MM-DD），用于过期判断
+        todayISO() {
+            const d = new Date();
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
         },
         priorityClass(priority) {
             return 'priority-' + (priority || 'P2').toLowerCase();

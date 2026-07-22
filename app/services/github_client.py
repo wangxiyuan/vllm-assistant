@@ -377,34 +377,3 @@ class GitHubClient:
         return self._make_request("GET", f"/compare/{base}...{head}")
 
     # ==================== Commits API ====================
-
-    def list_commits(self, sha: Optional[str] = None, per_page: int = 30) -> List[Dict[str, Any]]:
-        """获取 commit 列表（``GET /commits?sha=X&per_page=N``）"""
-        params: Dict[str, Any] = {"per_page": per_page}
-        if sha:
-            params["sha"] = sha
-        return self._make_request("GET", "/commits", params=params) or []
-
-    def get_commit(self, sha: str) -> Optional[Dict[str, Any]]:
-        """获取单个 commit 详情"""
-        return self._make_request("GET", f"/commits/{sha}")
-
-    # ==================== Milestones API ====================
-
-    def get_milestones(self, state: str = "open") -> List[Dict[str, Any]]:
-        """获取milestone列表"""
-        return self._make_request("GET", "/milestones", params={"state": state}) or []
-
-    # ==================== Releases API ====================
-
-    def get_releases(self, per_page: int = 10) -> List[Dict[str, Any]]:
-        """获取release列表"""
-        return self._make_request("GET", "/releases", params={"per_page": per_page}) or []
-
-    # ==================== User API ====================
-
-    def get_user(self, username: str) -> Optional[Dict[str, Any]]:
-        """获取用户信息（不依赖 base_url，全局 API）"""
-        url = f"https://api.github.com/users/{username}"
-        result = self._request_with_retry("GET", url)
-        return result if isinstance(result, dict) else None
