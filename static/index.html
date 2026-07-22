@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>vLLM Assistant · 任务控制台</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0e14'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' text-anchor='middle' fill='%23ffb454'%3Ev%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/static/css/style.css?v=8">
+    <link rel="stylesheet" href="/static/css/style.css?v=9">
     <!-- Alpine.js (CDN) -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
@@ -16,7 +16,28 @@
 
     <div class="loading-bar" x-show="loading" x-cloak></div>
 
-    <div class="app-shell">
+    <!-- ===== 登录页 ===== -->
+    <div class="auth-screen" x-show="!authenticated" x-cloak>
+        <div class="auth-card">
+            <div class="auth-brand">
+                <div class="brand-mark">
+                    <span class="brand-logo">vLLM</span>
+                    <span class="brand-suffix">Assistant</span>
+                </div>
+                <div class="brand-sub">任务控制台</div>
+            </div>
+            <form class="auth-form" @submit.prevent="doLogin">
+                <div class="auth-field">
+                    <label for="auth-token">访问密钥</label>
+                    <input id="auth-token" type="password" x-model="authToken" placeholder="请输入密钥" autofocus>
+                </div>
+                <div class="auth-error" x-show="authError" x-text="authError"></div>
+                <button type="submit" class="auth-btn" :disabled="!authToken.trim()">进入</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="app-shell" x-show="authenticated" x-cloak>
 
         <!-- ===== Sidebar ===== -->
         <aside class="sidebar">
@@ -1310,7 +1331,7 @@
         </template>
     </div>
 
-    <script src="/static/js/app.js?v=15"></script>
+    <script src="/static/js/app.js?v=16"></script>
     <script src="/static/js/community.js?v=15"></script>
     <script src="/static/js/pr_center.js?v=15"></script>
     <script src="/static/js/personal_todo.js?v=15"></script>

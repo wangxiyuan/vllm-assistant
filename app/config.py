@@ -29,6 +29,8 @@ class Config:
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
+    API_KEY: str = os.getenv("API_KEY", "")
+    DEBUG: bool = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
 
     @classmethod
     def get_issues_url(cls, number: int) -> str:

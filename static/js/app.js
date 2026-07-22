@@ -3,6 +3,11 @@
 
 function app() {
     return {
+        // ===== Auth state =====
+        authenticated: false,
+        authToken: '',
+        authError: '',
+
         // ===== View state =====
         currentView: 'community',
         loading: false,
@@ -195,6 +200,26 @@ function app() {
 
         // ===== Init =====
         async init() {
+            // 尝试从 localStorage 恢复 token
+            const saved = localStorage.getItem('vllm_auth_token');
+            if (saved) {
+                this.authToken = saved;
+                // 用 /health 验证 token 是否有效
+                try {
+                    const res = await fetch('/health', {
+                        headers: { 'Authorization': 'Bearer ' + saved },
+                    });
+                    if (res.ok) {
+                        this.authenticated = true;
+                    } else {
+                        localStorage.removeItem('vllm_auth_token');
+                    }
+                } catch (_) {
+                    localStorage.removeItem('vllm_auth_token');
+                }
+            }
+            if (!this.authenticated) return;
+
             this.showLoading();
             try {
                 await Promise.all([
@@ -248,17 +273,47 @@ function app() {
             }, duration);
         },
 
+        // ===== Auth =====
+        async doLogin() {
+            this.authError = '';
+            const token = this.authToken.trim();
+            if (!token) return;
+            // 用 /health 验证 token
+            try {
+                const res = await fetch('/health', {
+                    headers: { 'Authorization': 'Bearer ' + token },
+                });
+                if (res.ok) {
+                    localStorage.setItem('vllm_auth_token', token);
+                    this.authenticated = true;
+                    this.init();
+                } else {
+                    this.authError = '密钥无效，请重试';
+                }
+            } catch (_) {
+                this.authError = '无法连接服务器';
+            }
+        },
+
         // ===== API helper =====
         async api(path, options = {}, timeoutMs = 90000) {
-            // 支持 AbortController 超时控制（默认 90s 防止 AI 长时间挂起）
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), timeoutMs);
             try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (this.authToken) {
+                    headers['Authorization'] = 'Bearer ' + this.authToken;
+                }
                 const res = await fetch(path, {
-                    headers: { 'Content-Type': 'application/json' },
+                    headers,
                     signal: controller.signal,
                     ...options,
                 });
+                if (res.status === 401) {
+                    localStorage.removeItem('vllm_auth_token');
+                    this.authenticated = false;
+                    throw new Error('未授权，请重新登录');
+                }
                 if (!res.ok) {
                     let detail = res.statusText;
                     try {

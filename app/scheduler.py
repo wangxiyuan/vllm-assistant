@@ -512,7 +512,7 @@ def _fetch_user_pr_detail(pr: dict, pr_number: int,
         "ci_status": ci_status,
         "conflict_commits": conflict_commits,
         "conflict_detected": conflict_detected,
-        "area_id": area_id,  # 占位；写库阶段若 Item 缺 area 才补算
+        "area_id": None,  # 占位；写库阶段若 Item 缺 area 才补算
     }
 
 

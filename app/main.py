@@ -8,6 +8,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.status import HTTP_401_UNAUTHORIZED
 
 from app.config import Config
 from app.scheduler import (
@@ -58,6 +60,34 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """简单的 Bearer Token 认证中间件。
+
+    DEBUG 模式跳过认证；静态文件和 /health 放行。
+    """
+    async def dispatch(self, request: Request, call_next):
+        if Config.DEBUG:
+            return await call_next(request)
+
+        path = request.url.path
+        # 放行静态文件、健康检查、/
+        if path.startswith("/static/") or path in ("/health", "/"):
+            return await call_next(request)
+
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and auth[7:] == Config.API_KEY:
+            return await call_next(request)
+
+        return JSONResponse(
+            status_code=HTTP_401_UNAUTHORIZED,
+            content={"detail": "Unauthorized"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+app.add_middleware(AuthMiddleware)
 
 # API 路由
 from app.api.community import router as community_router
