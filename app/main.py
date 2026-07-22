@@ -45,6 +45,10 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to start scheduler; service will run without background sync")
 
+    # 后台异步初始化代码仓库（学习文章功能）
+    if Config.REPOS:
+        asyncio.create_task(_init_repo_caches())
+
     yield
 
     # 关闭
@@ -52,6 +56,18 @@ async def lifespan(app: FastAPI):
         stop_scheduler()
     except Exception:
         logger.exception("Error stopping scheduler")
+
+
+async def _init_repo_caches():
+    """后台异步 clone/pull 所有代码仓库（不阻塞服务启动）"""
+    from app.services.repo_manager import RepoManager
+
+    manager = RepoManager()
+    for repo_name, clone_url in Config.REPOS.items():
+        try:
+            await manager.async_ensure_cloned(repo_name, clone_url, branch="main")
+        except Exception:
+            logger.exception(f"Failed to clone repo {repo_name}")
 
 
 app = FastAPI(
@@ -97,6 +113,8 @@ from app.api.watchlist import router as watchlist_router
 from app.api.my_stats import router as my_stats_router
 from app.api.personal_todo import router as personal_todo_router
 from app.api.intelligence import router as intelligence_router
+from app.api.articles import router as articles_router
+from app.api.sync import router as sync_router
 
 app.include_router(community_router, prefix="/api/community", tags=["Community Pulse"])
 app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command Center"])
@@ -105,6 +123,8 @@ app.include_router(watchlist_router, prefix="/api/watchlist", tags=["Watchlist"]
 app.include_router(my_stats_router, prefix="/api/my-stats", tags=["My Stats"])
 app.include_router(personal_todo_router, prefix="/api/personal-todo", tags=["Personal Todo"])
 app.include_router(intelligence_router, prefix="/api/intelligence", tags=["Intelligence Reports"])
+app.include_router(articles_router, prefix="/api/articles", tags=["Articles"])
+app.include_router(sync_router, prefix="/api/sync", tags=["Sync"])
 
 
 # 静态文件

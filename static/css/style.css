@@ -1904,3 +1904,153 @@ body {
     cursor: not-allowed;
 }
 
+
+/* ===== 学习文章系统样式（DESIGN-ARTICLES.md 7.4）===== */
+
+/* 嵌入的代码片段 */
+.code-embed {
+    margin: 12px 0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+pre code.embedded-code {
+    display: block;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 12px 16px;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+pre code.embedded-code .line-number {
+    color: #636e7b;
+    user-select: none;
+    min-width: 40px;
+    display: inline-block;
+    text-align: right;
+    margin-right: 12px;
+}
+
+pre code.embedded-code .code-content {
+    color: #e6edf3;
+}
+
+/* 过时引用 */
+pre code.embedded-code.outdated {
+    border-color: #ff7b72;
+    background: rgba(255, 123, 114, 0.05);
+}
+
+.outdated-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: rgba(255, 123, 114, 0.1);
+    border-bottom: 1px solid rgba(255, 123, 114, 0.3);
+    color: #ff7b72;
+    font-size: 13px;
+    font-family: var(--font-ui);
+}
+
+.outdated-banner .diff-toggle {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid #ff7b72;
+    color: #ff7b72;
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.outdated-banner .diff-toggle:hover {
+    background: rgba(255, 123, 114, 0.2);
+}
+
+/* 错误提示 */
+.code-embed-error {
+    background: rgba(255, 123, 114, 0.1);
+    border: 1px solid #ff7b72;
+    border-radius: 6px;
+    padding: 12px 16px;
+    color: #ff7b72;
+    font-size: 14px;
+    margin: 12px 0;
+}
+
+/* 代码引用 hover 浮层 */
+.code-embed:hover {
+    box-shadow: 0 0 0 2px rgba(255, 180, 84, 0.2);
+}
+
+/* 文章卡片验证状态 */
+.ref-status.ok {
+    color: var(--signal-green);
+}
+
+.ref-status.warning {
+    color: var(--amber);
+}
+
+/* 宽模态框（文章编辑器用） */
+.modal-wide {
+    width: 90vw;
+    max-width: 1100px;
+}
+
+.modal-wide .modal-body {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+/* 验证结果面板 */
+.dedup-item {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-faint);
+}
+
+.dedup-item:last-child {
+    border-bottom: none;
+}
+
+.dedup-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* 文章 badge 状态色 */
+.badge-state-draft {
+    background: rgba(242, 204, 96, 0.15);
+    color: var(--signal-yellow);
+}
+
+.badge-state-published {
+    background: rgba(126, 231, 135, 0.15);
+    color: var(--signal-green);
+}
+
+.badge-state-archived {
+    background: rgba(92, 102, 120, 0.2);
+    color: var(--text-tertiary);
+}
+
+/* 代码预览 */
+.code-preview {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    max-height: 200px;
+    overflow: auto;
+    color: var(--text-secondary);
+}
+

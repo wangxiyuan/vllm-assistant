@@ -602,6 +602,24 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # 学习文章 - 代码仓库同步（仅在配置了 REPOS 时启用）
+    if Config.REPOS:
+        scheduler.add_job(
+            sync_all_repos_job,
+            trigger=IntervalTrigger(minutes=Config.CODE_SYNC_INTERVAL),
+            id="sync_all_repos",
+            name="Sync All Repo Code",
+            replace_existing=True,
+        )
+
+        scheduler.add_job(
+            validate_articles_job,
+            trigger=IntervalTrigger(hours=Config.ARTICLE_VALIDATE_INTERVAL),
+            id="validate_articles",
+            name="Validate Article Code Refs",
+            replace_existing=True,
+        )
+
     scheduler.start()
     logger.info(f"Scheduler started with interval {Config.POLLING_INTERVAL} minutes")
 
@@ -613,6 +631,8 @@ def start_scheduler():
             sync_areas()
             sync_community_data()
             sync_user_prs()
+            if Config.REPOS:
+                sync_all_repos_job()
         except Exception:
             logger.exception("Initial sync failed (will retry on schedule)")
     threading.Thread(target=_initial_sync, daemon=True, name="initial-sync").start()
@@ -667,3 +687,50 @@ def stop_scheduler():
     if scheduler.running:
         scheduler.shutdown()
         logger.info("Scheduler stopped")
+
+
+# ===== 学习文章定时任务 =====
+
+
+def sync_all_repos_job():
+    """定时任务：同步所有仓库代码到 LocalCodeCache"""
+    from app.services.repo_manager import RepoManager
+
+    if not Config.REPOS:
+        logger.warning("No REPOS configured, skipping code sync")
+        return
+
+    manager = RepoManager()
+    for repo_name in Config.REPOS:
+        try:
+            result = manager.pull_and_sync(repo_name)
+            logger.info(f"Repo {repo_name} synced: {result}")
+        except Exception:
+            logger.exception(f"Error syncing repo {repo_name}")
+
+    # 对所有受影响文件做行号越界检查
+    try:
+        manager.validate_all_refs()
+    except Exception:
+        logger.exception("Error validating refs after sync")
+
+
+def validate_articles_job():
+    """定时任务：深度验证所有文章中的代码引用"""
+    from app.services.article_validator import ArticleValidator
+    from app.services.local_code_sync import LocalCodeSyncService
+    from app.database import SessionLocal
+
+    if not Config.REPOS:
+        return
+
+    db = SessionLocal()
+    try:
+        cache_service = LocalCodeSyncService(db)
+        validator = ArticleValidator(cache_service, db)
+        result = validator.batch_validate(deep_check=True)
+        logger.info(f"Article validation completed: {result}")
+    except Exception:
+        logger.exception("Error validating articles")
+    finally:
+        db.close()

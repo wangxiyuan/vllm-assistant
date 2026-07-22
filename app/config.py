@@ -6,7 +6,7 @@
 """
 import os
 from pathlib import Path
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Dict
 import yaml
 from dotenv import load_dotenv
 
@@ -62,6 +62,47 @@ class Config:
 
     # Personal TODO - 洞察报告异步超时（秒）
     INTELLIGENCE_REPORT_TIMEOUT: int = int(os.getenv("INTELLIGENCE_REPORT_TIMEOUT", "180"))
+
+    # ===== 学习文章管理系统 =====
+    # 代码仓库列表：{"vllm": "https://github.com/vllm-project/vllm.git", ...}
+    REPOS: Dict[str, str] = {}
+
+    # 各仓库的关注目录
+    WATCH_DIRS: Dict[str, List[str]] = {}
+
+    # 代码同步间隔（分钟）
+    CODE_SYNC_INTERVAL: int = int(os.getenv("CODE_SYNC_INTERVAL", "30"))
+
+    # 文章验证间隔（小时）
+    ARTICLE_VALIDATE_INTERVAL: int = int(os.getenv("ARTICLE_VALIDATE_INTERVAL", "48"))
+
+    @classmethod
+    def get_watch_dirs(cls, repo_name: str) -> List[str]:
+        """获取指定仓库的关注目录"""
+        return cls.WATCH_DIRS.get(repo_name.upper(), [])
+
+    @classmethod
+    def parse_repos_config(cls) -> None:
+        """从环境变量 REPOS 解析仓库配置"""
+        raw = os.getenv("REPOS", "")
+        if not raw:
+            cls.REPOS = {}
+            return
+
+        repos = {}
+        for part in raw.split(","):
+            part = part.strip()
+            if "=" in part:
+                name, url = part.split("=", 1)
+                repos[name.strip()] = url.strip()
+        cls.REPOS = repos
+
+        # 解析各仓库的 WATCH_DIRS
+        for name in repos:
+            env_key = f"WATCH_DIRS_{name.upper()}"
+            dirs_raw = os.getenv(env_key, "")
+            if dirs_raw:
+                cls.WATCH_DIRS[name.upper()] = [d.strip() for d in dirs_raw.split(",") if d.strip()]
 
     @classmethod
     def validate(cls) -> bool:
@@ -124,3 +165,6 @@ def load_config_file(path: Optional[str] = None) -> dict:
 file_config = load_config_file()
 _flat_to_class_attrs(file_config)
 _load_env_polling_areas()
+
+# 学习文章：解析仓库配置
+Config.parse_repos_config()

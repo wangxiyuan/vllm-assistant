@@ -17,7 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
 )
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
@@ -345,3 +345,116 @@ class IntelligenceReport(Base):
         if include_content:
             d["content"] = self.content or ""
         return d
+
+
+# ======================================================================
+# 学习文章管理系统（DESIGN-ARTICLES.md）
+# ======================================================================
+
+
+class Article(Base):
+    """学习文章"""
+    __tablename__ = "articles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)  # Markdown 原文
+    rendered_html = Column(Text)  # 渲染后的 HTML（缓存）
+
+    # 元信息
+    area = Column(String(50))  # 所属领域 (engine/model/...)
+    tags = Column(Text)  # JSON array
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    # 状态
+    status = Column(String(20), nullable=False, default="draft")  # draft / published / archived
+
+    # 代码引用统计
+    code_refs_count = Column(Integer, default=0)
+    valid_refs_count = Column(Integer, default=0)
+    outdated_refs_count = Column(Integer, default=0)
+
+    # 最后验证时间
+    last_verified_at = Column(DateTime)
+
+    # ORM 关系
+    refs = relationship("CodeReference", back_populates="article",
+                        cascade="all, delete-orphan")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "content": self.content,
+            "area": self.area,
+            "tags": json.loads(self.tags) if self.tags else [],
+            "status": self.status,
+            "code_refs_count": self.code_refs_count or 0,
+            "valid_refs_count": self.valid_refs_count or 0,
+            "outdated_refs_count": self.outdated_refs_count or 0,
+            "last_verified_at": _iso_utc(self.last_verified_at),
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }
+
+
+class CodeReference(Base):
+    """文章中的代码引用记录"""
+    __tablename__ = "code_references"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    article_id = Column(Integer, ForeignKey("articles.id"), nullable=False)
+
+    # 引用位置（在文章中的位置）
+    article_line_start = Column(Integer)
+    article_line_end = Column(Integer)
+
+    # 引用目标
+    repo_name = Column(String(100), nullable=False)  # 仓库名，如 vllm、vllm-ascend
+    file_path = Column(String(500), nullable=False)  # 仓库内相对路径
+    line_start = Column(Integer, nullable=False)
+    line_end = Column(Integer)
+
+    # 引用内容快照
+    content_snapshot = Column(Text)
+    content_hash = Column(String(64))
+
+    # 验证状态
+    last_checked_at = Column(DateTime)
+    is_valid = Column(Boolean, default=True)
+    current_content = Column(Text)  # 当前代码内容（用于渲染）
+    diff_summary = Column(Text)  # 变化摘要
+
+    # ORM 关系
+    article = relationship("Article", back_populates="refs")
+
+
+class LocalCodeCache(Base):
+    """本地代码缓存（按仓库隔离）"""
+    __tablename__ = "local_code_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    repo = Column(String(100), nullable=False, default="vllm")
+    file_path = Column(String(500), nullable=False)
+    content = Column(Text)
+    last_synced_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    checksum = Column(String(64))
+    total_lines = Column(Integer)
+
+    __table_args__ = (
+        UniqueConstraint("repo", "file_path", name="uq_repo_file"),
+    )
+
+
+class RepoCache(Base):
+    """已缓存的本地仓库记录"""
+    __tablename__ = "repo_caches"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    repo = Column(String(100), unique=True, nullable=False)
+    clone_url = Column(String(500), nullable=False)
+    local_path = Column(String(500), nullable=False)
+    branch = Column(String(50), default="main")
+    last_synced_at = Column(DateTime)
+    commit_sha = Column(String(40))

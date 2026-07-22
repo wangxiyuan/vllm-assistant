@@ -71,6 +71,10 @@
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     <span class="nav-kbd">5</span><span>洞察面板</span>
                 </button>
+                <button class="nav-item" :class="{active: currentView === 'articles'}" @click="switchView('articles')">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    <span class="nav-kbd">6</span><span>学习文章</span>
+                </button>
             </nav>
 
             <div class="sidebar-footer">
@@ -903,6 +907,116 @@
                 </div>
             </div>
 
+            <!-- ============= 学习文章 ============= -->
+            <div x-show="currentView === 'articles'" class="view" x-cloak @keydown="handleArticleKeydown($event)">
+
+                <!-- 操作栏 -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">
+                            <button class="btn btn-primary btn-sm" @click="openNewArticle()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                新建文章
+                            </button>
+                        </div>
+                        <div class="panel-actions">
+                            <select class="select select-sm" x-model="articleFilterArea" @change="loadArticles()">
+                                <option value="">所有领域</option>
+                                <template x-for="area in areas" :key="area.id">
+                                    <option :value="area.id" x-text="area.name"></option>
+                                </template>
+                            </select>
+                            <select class="select select-sm" x-model="articleFilterStatus" @change="loadArticles()">
+                                <option value="all">全部状态</option>
+                                <option value="draft">草稿</option>
+                                <option value="published">已发布</option>
+                                <option value="archived">已归档</option>
+                            </select>
+                            <select class="select select-sm" x-model="articleSortBy" @change="loadArticles()">
+                                <option value="updated">最近更新</option>
+                                <option value="created">最近创建</option>
+                                <option value="title">标题</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 统计 -->
+                <div class="stat-grid">
+                    <div class="stat-card" style="--accent-color: var(--signal-blue)">
+                        <div class="stat-label">文章总数</div>
+                        <div class="stat-value" x-text="articles.length"></div>
+                        <div class="stat-trend" x-text="articleStatsText"></div>
+                    </div>
+                    <div class="stat-card" style="--accent-color: var(--signal-green)">
+                        <div class="stat-label">已发布</div>
+                        <div class="stat-value" x-text="articles.filter(a => a.status === 'published').length"></div>
+                    </div>
+                    <div class="stat-card" style="--accent-color: var(--amber)">
+                        <div class="stat-label">草稿</div>
+                        <div class="stat-value" x-text="articles.filter(a => a.status === 'draft').length"></div>
+                    </div>
+                    <div class="stat-card" style="--accent-color: var(--signal-red)">
+                        <div class="stat-label">有过时引用</div>
+                        <div class="stat-value" x-text="articles.filter(a => a.outdated_refs_count > 0).length"></div>
+                    </div>
+                </div>
+
+                <!-- 文章列表 -->
+                <div class="panel">
+                    <div class="panel-body" style="padding: 0;">
+                        <div x-show="articlesLoading" class="empty-state">
+                            <div class="empty-icon">⟳</div>
+                            <div class="empty-title">加载文章列表…</div>
+                        </div>
+                        <div x-show="!articlesLoading" class="list">
+                            <template x-for="article in articles" :key="article.id">
+                                <div class="list-item" :class="{'is-new': article.status === 'draft'}" @click="viewArticle(article)">
+                                    <div class="item-main">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <span class="item-title" style="cursor: pointer;" x-text="article.title"></span>
+                                            <span class="badge" :class="'badge-state-' + article.status" x-text="article.status === 'draft' ? '草稿' : article.status === 'published' ? '已发布' : '已归档'"></span>
+                                        </div>
+                                        <div class="item-meta">
+                                            <span class="meta-item" x-show="article.area">
+                                                <span class="badge badge-area" x-text="article.area"></span>
+                                            </span>
+                                            <template x-for="tag in (article.tags || []).slice(0, 3)" :key="tag">
+                                                <span class="badge" x-text="tag"></span>
+                                            </template>
+                                            <span class="meta-item" x-show="article.code_refs_count > 0">
+                                                <span :class="refStatusClass(article)" x-text="refStatusText(article)"></span>
+                                            </span>
+                                            <span class="tt-host" style="display: inline-block;">
+                                                <span x-text="timeAgo(article.updated_at)"></span>
+                                                <span class="tt" x-text="exactTime(article.updated_at)"></span>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="item-side">
+                                        <button class="btn btn-sm btn-ghost" @click.stop="openEditArticle(article)" title="编辑">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                        </button>
+                                        <button class="btn btn-sm btn-ghost" @click.stop="validateArticle(article, false)" :disabled="validating" title="验证引用">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                                        </button>
+                                        <button class="btn btn-sm btn-ghost" @click.stop="deleteArticle(article)" title="删除" style="color: var(--signal-red)">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                        </button>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-tertiary)"><polyline points="9 18 15 12 9 6"/></svg>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                        <div x-show="!articlesLoading && articles.length === 0" class="empty-state">
+                            <div class="empty-icon">📝</div>
+                            <div class="empty-title">暂无学习文章</div>
+                            <div class="empty-desc">点击上方「新建文章」开始撰写学习笔记，文中可使用 <code>`vllm/engine/core.py:10-20`</code> 格式引用代码</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
 
         </main>
     </div>
@@ -1318,6 +1432,232 @@
         </div>
     </div>
 
+    <!-- ===== Article Detail Drawer ===== -->
+    <div x-show="selectedArticle" x-cloak class="modal-backdrop" @click.self="closeArticleView()">
+        <div class="drawer drawer-wide" x-show="selectedArticle" x-transition:enter="drawer">
+            <div class="drawer-header">
+                <div class="drawer-title">
+                    <div class="pr-id">
+                        <span class="text-mono" style="color: var(--text-tertiary); font-size: 12px;">ARTICLE</span>
+                        <span style="margin-left: 8px;" x-show="selectedArticle?.status">
+                            <span class="badge" :class="'badge-state-' + selectedArticle?.status" x-text="selectedArticle?.status === 'draft' ? '草稿' : selectedArticle?.status === 'published' ? '已发布' : '已归档'"></span>
+                        </span>
+                    </div>
+                    <h2 x-text="selectedArticle?.title"></h2>
+                    <div class="item-meta mt-2">
+                        <span class="meta-item" x-show="selectedArticle?.area">
+                            <span class="badge badge-area" x-text="selectedArticle?.area"></span>
+                        </span>
+                        <template x-for="tag in (selectedArticle?.tags || [])" :key="tag">
+                            <span class="badge" x-text="tag"></span>
+                        </template>
+                        <span class="tt-host" style="display: inline-block;">
+                            <span x-text="timeAgo(selectedArticle?.updated_at)"></span>
+                            <span class="tt" x-text="exactTime(selectedArticle?.updated_at)"></span>
+                        </span>
+                    </div>
+                </div>
+                <button class="drawer-close" @click="closeArticleView()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="drawer-body">
+                <div class="flex gap-2 flex-wrap mb-4">
+                    <button class="btn btn-sm" @click="openEditArticle(selectedArticle)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        编辑
+                    </button>
+                    <button class="btn btn-sm" @click="validateArticle(selectedArticle, false)" :disabled="validating">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        <span x-show="!validating">验证引用</span>
+                        <span x-show="validating">验证中…</span>
+                    </button>
+                    <button class="btn btn-sm" @click="validateArticle(selectedArticle, true)" :disabled="validating" title="深层验证（含内容哈希对比）">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        深层验证
+                    </button>
+                    <button class="btn btn-sm" style="color: var(--signal-red)" @click="deleteArticle(selectedArticle)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        删除
+                    </button>
+                </div>
+
+                <!-- 验证结果 -->
+                <div x-show="validationResult" class="ai-result mb-4">
+                    <div class="ai-result-header">
+                        <div class="ai-result-title">验证结果</div>
+                        <button class="modal-close" @click="closeValidation()" style="position: static;">&times;</button>
+                    </div>
+                    <div class="ai-result-body">
+                        <p>共 <strong x-text="validationResult?.total_refs"></strong> 个引用，
+                        <span style="color: var(--signal-green);" x-text="validationResult?.valid_refs + ' 有效'"></span>
+                        <span x-show="validationResult?.invalid_refs > 0" style="color: var(--signal-red);">，
+                        <span x-text="validationResult?.invalid_refs + ' 无效'"></span></span>
+                        </p>
+                        <template x-for="detail in (validationResult?.details || [])" :key="detail.file_path + detail.line_start">
+                            <div class="dedup-item" style="font-size: 12px;">
+                                <div :style="'color: ' + (detail.is_valid ? 'var(--signal-green)' : 'var(--signal-red)')">
+                                    <span x-text="detail.repo + '/' + detail.file_path + ':' + detail.line_start + '-' + detail.line_end"></span>
+                                    <span x-text="detail.is_valid ? ' ✓' : ' ✗ ' + detail.reason"></span>
+                                </div>
+                                <div x-show="detail.message" style="color: var(--text-tertiary);" x-text="detail.message"></div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div x-show="articleDetailLoading" class="empty-state">
+                    <div class="empty-icon">⟳</div>
+                    <div class="empty-title">加载渲染内容…</div>
+                </div>
+
+                <div x-show="!articleDetailLoading && articleRenderedHtml" class="pr-body" x-html="articleRenderedHtml"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Article Editor Modal ===== -->
+    <div x-show="articleEditorOpen" x-cloak class="modal-backdrop" @click.self="articleEditorOpen = false" @keydown="handleArticleKeydown($event)">
+        <div class="modal modal-wide" @click.stop>
+            <div class="modal-header">
+                <h3 x-text="articleEditorMode === 'create' ? '新建文章' : '编辑文章'"></h3>
+                <div class="modal-actions">
+                    <button class="btn btn-sm" @click="openInsertRef()" title="插入代码引用">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                        插入代码引用
+                    </button>
+                    <button class="btn btn-sm" @click="previewArticle()" title="预览 (Ctrl+P)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        预览
+                    </button>
+                    <button class="btn btn-primary btn-sm" @click="saveArticle()" title="保存 (Ctrl+S)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                        保存
+                    </button>
+                    <button class="modal-close" @click="articleEditorOpen = false">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <!-- 元信息 -->
+                <div style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+                    <input class="input" type="text" placeholder="文章标题" x-model="articleForm.title" style="flex: 3; min-width: 200px;">
+                    <input class="input" type="text" placeholder="领域 (如 engine)" x-model="articleForm.area" style="flex: 1; min-width: 120px;">
+                    <select class="select" x-model="articleForm.status" style="flex: 0 0 auto;">
+                        <option value="draft">草稿</option>
+                        <option value="published">已发布</option>
+                        <option value="archived">已归档</option>
+                    </select>
+                </div>
+
+                <!-- 标签 -->
+                <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;">
+                    <template x-for="tag in articleForm.tags" :key="tag">
+                        <span class="badge" style="display: inline-flex; align-items: center; gap: 4px;">
+                            <span x-text="tag"></span>
+                            <button @click="removeEditorTag(tag)" style="background: none; border: none; color: inherit; cursor: pointer; padding: 0; font-size: 14px;">&times;</button>
+                        </span>
+                    </template>
+                    <div style="display: flex; gap: 4px;">
+                        <input class="input input-sm" type="text" placeholder="添加标签" x-model="editorTagInput" @keydown.enter.prevent="addEditorTag()" style="width: 100px;">
+                        <button class="btn btn-sm btn-ghost" @click="addEditorTag()">+</button>
+                    </div>
+                </div>
+
+                <!-- Markdown 编辑器 -->
+                <textarea id="article-editor"
+                    x-ref="articleEditor"
+                    @input="onEditorInput($event)"
+                    style="width: 100%; min-height: 400px; background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; line-height: 1.6; padding: 12px; resize: vertical;"
+                    placeholder="在此编写 Markdown 内容…&#10;&#10;使用 `vllm/engine/core.py:10-20` 格式引用代码片段&#10;使用 `vllm-ascend/ascend/backend.py:30` 引用其他仓库"></textarea>
+
+                <!-- 引用状态 -->
+                <div style="margin-top: 8px; font-size: 12px; color: var(--text-tertiary);">
+                    ⚡ 提示：使用 <code style="background: var(--bg-elev-3); padding: 1px 6px; border-radius: 3px;">`仓库名/路径:行号-行号`</code> 格式引用代码，渲染时自动嵌入
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Article Preview Drawer ===== -->
+    <div x-show="showPreview" x-cloak class="modal-backdrop" @click.self="closePreview()">
+        <div class="drawer drawer-wide" x-show="showPreview" x-transition:enter="drawer">
+            <div class="drawer-header">
+                <div class="drawer-title">
+                    <div class="pr-id">
+                        <span class="text-mono" style="color: var(--text-tertiary); font-size: 12px;">PREVIEW</span>
+                    </div>
+                    <h2 x-text="articleForm.title || '(无标题)'"></h2>
+                </div>
+                <button class="drawer-close" @click="closePreview()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="drawer-body">
+                <!-- 引用状态统计 -->
+                <div x-show="previewRefs.length > 0" class="mb-4" style="font-size: 12px; color: var(--text-tertiary);">
+                    📎 嵌入统计: <span x-text="previewRefs.length"></span> 个代码片段 ·
+                    <span style="color: var(--signal-green);" x-text="previewRefs.filter(r => r.is_valid).length + ' 有效'"></span> ·
+                    <span style="color: var(--signal-red);" x-show="previewRefs.filter(r => !r.is_valid).length > 0" x-text="previewRefs.filter(r => !r.is_valid).length + ' 无效'"></span>
+                </div>
+
+                <!-- 渲染内容 -->
+                <div class="pr-body" x-html="previewHtml"></div>
+
+                <div x-show="!previewHtml" class="empty-state">
+                    <div class="empty-icon">⟳</div>
+                    <div class="empty-title">生成预览中…</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Insert Code Reference Modal ===== -->
+    <div x-show="showInsertRef" x-cloak class="modal-backdrop" @click.self="closeInsertRef()">
+        <div class="modal" @click.stop>
+            <div class="modal-header">
+                <h3>插入代码引用</h3>
+                <button class="modal-close" @click="closeInsertRef()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">仓库</label>
+                        <select class="select" x-model="insertRef.repo">
+                            <template x-for="r in repoOptions" :key="r">
+                                <option :value="r" x-text="r"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">文件路径</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input class="input" type="text" placeholder="如: vllm/engine/core.py" x-model="insertRef.file_path" style="flex: 1;">
+                            <button class="btn btn-sm" @click="searchCacheFiles()">预览文件</button>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 12px;">
+                        <div style="flex: 1;">
+                            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">起始行</label>
+                            <input class="input" type="number" min="1" x-model.number="insertRef.line_start">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">结束行（可选）</label>
+                            <input class="input" type="number" min="1" x-model.number="insertRef.line_end">
+                        </div>
+                    </div>
+                    <div x-show="insertRefPreview">
+                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">预览</label>
+                        <pre style="background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; font-size: 12px; max-height: 200px; overflow: auto; color: var(--text-secondary);"><code x-text="insertRefPreview"></code></pre>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" @click="closeInsertRef()">取消</button>
+                <button class="btn btn-primary" @click="confirmInsertRef()" :disabled="!insertRef.file_path.trim()">✓ 确认插入</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== Toasts ===== -->
     <div class="toast-container">
         <template x-for="t in toasts" :key="t.id">
@@ -1336,5 +1676,6 @@
     <script src="/static/js/pr_center.js?v=15"></script>
     <script src="/static/js/personal_todo.js?v=15"></script>
     <script src="/static/js/intelligence.js?v=15"></script>
+    <script src="/static/js/articles.js?v=1"></script>
 </body>
 </html>
