@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>vLLM Assistant · 任务控制台</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0e14'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' text-anchor='middle' fill='%23ffb454'%3Ev%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/css/style.css?v=7">
+    <!-- Alpine.js (CDN) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body x-data="buildApp()"
+      x-init="init()"
+      @keydown.slash.window.prevent="$refs.searchInput?.focus()"
+      @keydown.window="handleGlobalShortcut($event)">
+
+    <div class="loading-bar" x-show="loading" x-cloak></div>
+
+    <div class="app-shell">
+
+        <!-- ===== Sidebar ===== -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-mark">
+                    <span class="brand-logo">vLLM</span>
+                </div>
+                <div class="brand-name">Assistant</div>
+                <div class="brand-sub">贡献者控制台</div>
+            </div>
+
+            <nav class="nav-section">
+                <div class="nav-label">工作区</div>
+                <button class="nav-item" :class="{active: currentView === 'community'}" @click="switchView('community')">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    <span>社区动态</span>
+                    <span class="nav-kbd">1</span>
+                </button>
+                <button class="nav-item" :class="{active: currentView === 'pr-center'}" @click="switchView('pr-center')">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+                    <span>我的贡献</span>
+                    <span class="nav-kbd">2</span>
+                </button>
+                <button class="nav-item" :class="{active: currentView === 'watchlist'}" @click="switchView('watchlist')">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    <span>特别关注</span>
+                    <span class="nav-kbd">3</span>
+                </button>
+                <button class="nav-item" :class="{active: currentView === 'my-data'}" @click="switchView('my-data')">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    <span>我的数据</span>
+                    <span class="nav-kbd">4</span>
+                </button>
+            </nav>
+
+            <div class="nav-section">
+                <div class="nav-label">操作</div>
+                <button class="nav-item" @click="refreshAll()">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    <span>立即同步</span>
+                    <span class="nav-kbd">R</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="sync-status">
+                    <span class="sync-dot" :class="syncStatusClass"></span>
+                    <span x-text="syncStatusText"></span>
+                    <div class="tt">
+                        <span class="tt-line"><span class="tt-k">上次同步：</span><span class="tt-v" x-text="exactTime(lastSync) || '从未'"></span></span>
+                        <span class="tt-line" x-show="nextSync"><span class="tt-k">下次同步：</span><span class="tt-v amber" x-text="exactTime(nextSync)"></span></span>
+                        <span class="tt-line" x-show="nextSync"><span class="tt-k">倒　　计：</span><span class="tt-v amber" x-text="nextSyncCountdown"></span></span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ===== Header ===== -->
+        <header class="header">
+            <div class="view-title">
+                <h1 x-text="currentViewTitle"></h1>
+                <span class="view-sub" x-text="currentViewSub"></span>
+            </div>
+
+            <div class="search-bar">
+                <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text"
+                       x-ref="searchInput"
+                       x-model="searchQuery"
+                       @input="onSearchInput($event)"
+                       :placeholder="searchPlaceholder">
+                <span class="search-kbd">/</span>
+            </div>
+
+            <div class="header-actions">
+                <button class="btn btn-ghost btn-icon" @click="refreshAll()" title="同步 (R)">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- ===== Main ===== -->
+        <main class="main">
+
+            <!-- ============= Community Pulse ============= -->
+            <div x-show="currentView === 'community'" class="view" x-cloak>
+
+                <!-- Stat cards -->
+                <div class="stat-grid">
+                    <div class="stat-card" style="--accent-color: var(--signal-blue)">
+                        <div class="stat-label">开放 Issues</div>
+                        <div class="stat-value" x-text="stats.totalIssues || 0"></div>
+                        <div class="stat-trend" x-text="lastSyncAgo"></div>
+                    </div>
+                    <div class="stat-card" style="--accent-color: var(--signal-green)">
+                        <div class="stat-label">开放 PRs</div>
+                        <div class="stat-value" x-text="stats.totalPRs || 0"></div>
+                        <div class="stat-trend" x-text="(newIssuesCount + newPRsCount) + ' 个 2 小时内新增'"></div>
+                    </div>
+                    <div class="stat-card" style="--accent-color: var(--amber)">
+                        <div class="stat-label">追踪领域</div>
+                        <div class="stat-value" x-text="areas.length || 0"></div>
+                        <div class="stat-trend">来自 CODEOWNERS</div>
+                    </div>
+                    <div class="stat-card" style="--accent-color: var(--signal-purple)">
+                        <div class="stat-label">新动态</div>
+                        <div class="stat-value" x-text="newIssuesCount + newPRsCount"></div>
+                        <div class="stat-trend">近 2 小时</div>
+                    </div>
+                </div>
+
+                <!-- Issues + PRs unified panel with tabs -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">
+                            动态流
+                            <div class="tabs" style="margin-left: 12px;">
+                                <button class="tab" :class="{active: communityTab === 'issues'}" @click="communityTab = 'issues'">
+                                    Issues <span class="badge" x-text="issues.length"></span>
+                                </button>
+                                <button class="tab" :class="{active: communityTab === 'prs'}" @click="communityTab = 'prs'">
+                                    PRs <span class="badge" x-text="prs.length"></span>
+                                </button>
+                            </div>
+                            <span class="count" x-text="(filteredIssues.length + filteredPRs.length) + ' 条'"></span>
+                        </div>
+                        <div class="panel-actions">
+                            <select class="select" x-model="sortBy" @change="loadCommunityData()">
+                                <option value="created">最新创建</option>
+                                <option value="updated">最近更新</option>
+                                <option value="comments">最多讨论</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="panel-body" style="padding: 0">
+                        <!-- Issue 二级过滤：类型 + 领域（仅 issues tab 显示） -->
+                        <div x-show="communityTab === 'issues'" class="panel-header" style="border-top: none; border-bottom: 1px solid var(--border-faint);">
+                            <div class="panel-actions">
+                                <div class="tabs">
+                                    <button class="tab" :class="{active: communityIssueType === 'all'}" @click="communityIssueType = 'all'">全部</button>
+                                    <button class="tab" :class="{active: communityIssueType === 'bug'}" @click="communityIssueType = 'bug'">Bug</button>
+                                    <button class="tab" :class="{active: communityIssueType === 'rfc'}" @click="communityIssueType = 'rfc'">RFC</button>
+                                    <button class="tab" :class="{active: communityIssueType === 'feature'}" @click="communityIssueType = 'feature'">功能</button>
+                                    <button class="tab" :class="{active: communityIssueType === 'usage'}" @click="communityIssueType = 'usage'">使用</button>
+                                    <button class="tab" :class="{active: communityIssueType === 'installation'}" @click="communityIssueType = 'installation'">安装</button>
+                                    <button class="tab" :class="{active: communityIssueType === 'performance'}" @click="communityIssueType = 'performance'">性能</button>
+                                    <button class="tab" :class="{active: communityIssueType === 'doc'}" @click="communityIssueType = 'doc'">文档</button>
+                                    <button class="tab" :class="{active: communityIssueType === 'other'}" @click="communityIssueType = 'other'">其他</button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- PR 二级过滤：领域（仅 prs tab 显示） -->
+                        <div x-show="communityTab === 'prs'" class="panel-header" style="border-top: none; border-bottom: 1px solid var(--border-faint);">
+                            <div class="panel-actions">
+                                <select class="select select-sm" x-model="communityPRArea">
+                                    <option value="">所有领域</option>
+                                    <template x-for="area in areas" :key="area.id">
+                                        <option :value="area.id" x-text="area.name"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="list">
+                            <template x-for="issue in pagedFilteredIssues" :key="issue.number">
+                                <div class="list-item" :class="{'is-new': issue.is_new}" @click="openCommunityIssue(issue)">
+                                    <span class="item-number issue" x-text="'#' + issue.number"></span>
+                                    <div class="item-main">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <a :href="issue.url" target="_blank" class="item-title" @click.stop="" x-text="issue.title"></a>
+                                            <span class="badge" :class="'badge-state-' + (issue.state || 'open')" x-text="issueStateLabel(issue.state)"></span>
+                                        </div>
+                                        <div class="item-meta">
+                                            <span class="meta-item">
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+                                                <span x-text="issue.author || '未知'"></span>
+                                            </span>
+                                            <span class="tt-host" style="display: inline-block;">
+                                                <span x-text="timeAgo(issue.created_at)"></span>
+                                                <span class="tt" x-text="exactTime(issue.created_at)"></span>
+                                            </span>
+                                            <span class="meta-item" x-show="issue.comments > 0">
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                                <span x-text="issue.comments"></span>
+                                            </span>
+                                            <template x-if="issue.is_new">
+                                                <span class="badge badge-area">新</span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <div class="item-side">
+                                        <span class="badge badge-area" x-show="issue.area" x-text="issue.area"></span>
+                                        <button class="btn btn-sm" :class="isWatched(issue.number, 'issue') ? 'btn-primary' : 'btn-ghost'"
+                                                    @click.stop="toggleWatch(issue.number, 'issue', issue.title, issue.url, {area: issue.area, issue_type: issueType(issue), state: issue.state})"
+                                                :title="isWatched(issue.number, 'issue') ? '取消特别关注' : '加入特别关注'">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" :fill="isWatched(issue.number, 'issue') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <template x-for="pr in pagedFilteredPRs" :key="pr.number">
+                                <div class="list-item" :class="{'is-new': pr.is_new}" @click="openCommunityPR(pr)">
+                                    <span class="item-number pr" x-text="'#' + pr.number"></span>
+                                    <div class="item-main">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <span class="item-title" style="cursor: pointer;" x-text="pr.title"></span>
+                                            <span class="badge" :class="'badge-state-' + (pr.state || 'open')" x-text="prStateLabel(pr.state)"></span>
+                                        </div>
+                                        <div class="item-meta">
+                                            <span class="meta-item">
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+                                                <span x-text="pr.author || '未知'"></span>
+                                            </span>
+                                            <span class="tt-host" style="display: inline-block;">
+                                                <span x-text="timeAgo(pr.created_at)"></span>
+                                                <span class="tt" x-text="exactTime(pr.created_at)"></span>
+                                            </span>
+                                            <span class="meta-item" x-show="pr.comments > 0">
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                                <span x-text="pr.comments"></span>
+                                            </span>
+                                            <template x-if="pr.additions || pr.deletions">
+                                                <span class="diffstat">
+                                                    <span class="add" x-text="'+' + (pr.additions || 0)"></span>
+                                                    <span class="del" x-text="'-' + (pr.deletions || 0)"></span>
+                                                </span>
+                                            </template>
+                                            <template x-if="pr.is_new">
+                                                <span class="badge badge-area">新</span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <div class="item-side">
+                                        <span class="badge badge-area" x-show="pr.area" x-text="pr.area"></span>
+                                        <button class="btn btn-sm" :class="isWatched(pr.number, 'pr') ? 'btn-primary' : 'btn-ghost'"
+                                                @click.stop="toggleWatch(pr.number, 'pr', pr.title, pr.url)"
+                                                :title="isWatched(pr.number, 'pr') ? '取消特别关注' : '加入特别关注'">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" :fill="isWatched(pr.number, 'pr') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <div x-show="(communityTab === 'all' || communityTab === 'issues' ? filteredIssues : []).length + (communityTab === 'all' || communityTab === 'prs' ? filteredPRs : []).length === 0"
+                             class="empty-state">
+                            <div class="empty-icon">∅</div>
+                            <div class="empty-title">暂无动态</div>
+                            <div class="empty-desc">调度器每几分钟同步一次。点击<strong>立即同步</strong>强制刷新，或检查 .env 中的 GITHUB_PAT 配置</div>
+                        </div>
+
+                        <!-- Load more -->
+                        <div x-show="hasMoreCommunity" style="padding: 12px; text-align: center;">
+                            <button class="btn" @click="communityPage++">加载更多</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============= 我的贡献（PR + Issue） ============= -->
+            <div x-show="currentView === 'pr-center'" class="view" x-cloak>
+
+                <!-- 顶层 tab：PR / Issue 切换 -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">
+                            <div class="tabs">
+                                <button class="tab" :class="{active: contributionTab === 'prs'}" @click="switchContributionTab('prs')">
+                                    我的 PR <span class="badge" x-text="allPRCount"></span>
+                                </button>
+                                <button class="tab" :class="{active: contributionTab === 'issues'}" @click="switchContributionTab('issues')">
+                                    我的 Issue <span class="badge" x-text="allIssueCount"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== PR 子视图 ===== -->
+                    <div x-show="contributionTab === 'prs'">
+                        <div class="panel-header" style="border-top: none;">
+                            <div class="panel-actions">
+                                <div class="tabs">
+                                    <button class="tab" :class="{active: prState === 'open'}" @click="switchPRState('open')">
+                                        开放 <span class="badge" x-text="openPRCount"></span>
+                                    </button>
+                                    <button class="tab" :class="{active: prState === 'merged'}" @click="switchPRState('merged')">
+                                        已合并 <span class="badge" x-text="mergedPRCount"></span>
+                                    </button>
+                                    <button class="tab" :class="{active: prState === 'closed'}" @click="switchPRState('closed')">
+                                        已关闭 <span class="badge" x-text="closedPRCount"></span>
+                                    </button>
+                                    <button class="tab" :class="{active: prState === 'all'}" @click="switchPRState('all')">
+                                        全部 <span class="badge" x-text="allPRCount"></span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="panel-actions">
+                                <label class="toggle">
+                                    <input type="checkbox" x-model="filterConflicts">
+                                    <span class="toggle-track"></span>
+                                    <span>仅冲突</span>
+                                </label>
+                                <label class="toggle">
+                                    <input type="checkbox" x-model="filterCIFail">
+                                    <span class="toggle-track"></span>
+                                    <span>CI 失败</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="panel-body" style="padding: 0">
+                            <div class="list">
+                                <template x-for="pr in filteredMyPRs" :key="pr.pr_number">
+                                    <div class="list-item" @click="openPR(pr)">
+                                        <span class="item-number pr" x-text="'#' + pr.pr_number"></span>
+                                        <div class="item-main">
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <span class="item-title" style="cursor: pointer" x-text="pr.title"></span>
+                                                <span class="badge" :class="'badge-state-' + pr.state" x-text="prStateLabel(pr.state)"></span>
+                                            </div>
+                                            <div class="item-meta">
+                                                <span x-show="pr.branch" class="meta-item">
+                                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                                                    <span x-text="pr.branch"></span>
+                                                </span>
+                                                <template x-if="pr.additions || pr.deletions">
+                                                    <span class="diffstat">
+                                                        <span class="add" x-text="'+' + (pr.additions || 0)"></span>
+                                                        <span class="del" x-text="'-' + (pr.deletions || 0)"></span>
+                                                        <span x-text="(pr.changed_files || 0) + ' 文件'"></span>
+                                                    </span>
+                                                </template>
+                                                <span class="tt-host" style="display: inline-block;" x-show="pr.last_sync">
+                                                    <span x-text="'已同步 ' + timeAgo(pr.last_sync)"></span>
+                                                    <span class="tt" x-text="exactTime(pr.last_sync)"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="item-side">
+                                            <span class="badge" :class="ciBadgeClass(pr.ci_status)" x-text="ciLabel(pr.ci_status)"></span>
+                                            <span class="conflict-bar" x-show="pr.conflict_detected" :title="'落后 main ' + pr.conflict_commits + ' 个 commit'">
+                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                                <span x-text="'落后 ' + pr.conflict_commits"></span>
+                                            </span>
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-tertiary)"><polyline points="9 18 15 12 9 6"/></svg>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+
+                            <div x-show="filteredMyPRs.length === 0" class="empty-state">
+                                <div class="empty-icon">∅</div>
+                                <div class="empty-title">未找到 PR</div>
+                                <div class="empty-desc">请在 .env 中设置 <strong>GITHUB_USERNAME</strong>，等待调度器同步，或调整上方筛选条件</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== Issue 子视图 ===== -->
+                    <div x-show="contributionTab === 'issues'">
+                        <div class="panel-header" style="border-top: none;">
+                            <div class="panel-actions">
+                                <div class="tabs">
+                                    <button class="tab" :class="{active: myIssuesState === 'open'}" @click="switchMyIssuesState('open')">
+                                        开放 <span class="badge" x-text="openIssueCount"></span>
+                                    </button>
+                                    <button class="tab" :class="{active: myIssuesState === 'closed'}" @click="switchMyIssuesState('closed')">
+                                        已关闭 <span class="badge" x-text="closedIssueCount"></span>
+                                    </button>
+                                    <button class="tab" :class="{active: myIssuesState === 'all'}" @click="switchMyIssuesState('all')">
+                                        全部 <span class="badge" x-text="allIssueCount"></span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="panel-actions">
+                                <button class="btn btn-sm" @click="loadMyIssues()" :disabled="myIssuesLoading">
+                                    <span x-show="!myIssuesLoading">刷新</span>
+                                    <span x-show="myIssuesLoading">加载中…</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Issue 类型过滤 -->
+                        <div class="panel-header" style="border-top: none; border-bottom: 1px solid var(--border-faint);">
+                            <div class="panel-actions">
+                                <div class="tabs">
+                                    <button class="tab" :class="{active: myIssuesType === 'all'}" @click="switchMyIssuesType('all')">全部</button>
+                                    <button class="tab" :class="{active: myIssuesType === 'bug'}" @click="switchMyIssuesType('bug')" x-show="myIssueTypeCounts.bug">Bug</button>
+                                    <button class="tab" :class="{active: myIssuesType === 'rfc'}" @click="switchMyIssuesType('rfc')" x-show="myIssueTypeCounts.rfc">RFC</button>
+                                    <button class="tab" :class="{active: myIssuesType === 'feature'}" @click="switchMyIssuesType('feature')" x-show="myIssueTypeCounts.feature">功能</button>
+                                    <button class="tab" :class="{active: myIssuesType === 'usage'}" @click="switchMyIssuesType('usage')" x-show="myIssueTypeCounts.usage">使用</button>
+                                    <button class="tab" :class="{active: myIssuesType === 'other'}" @click="switchMyIssuesType('other')">其他</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-body" style="padding: 0">
+                            <div class="list">
+                                <template x-for="issue in filteredMyIssues" :key="issue.number">
+                                    <div class="list-item" @click="openIssue(issue)">
+                                        <span class="item-number issue" x-text="'#' + issue.number"></span>
+                                        <div class="item-main">
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <a :href="issue.url" target="_blank" class="item-title" @click.stop="" x-text="issue.title"></a>
+                                                <span class="badge" :class="issue.state === 'open' ? 'badge-state-open' : 'badge-state-closed'" x-text="issue.state === 'open' ? '开放' : '已关闭'"></span>
+                                            </div>
+                                            <div class="item-meta">
+                                                <span class="meta-item" x-show="issue.comments > 0">
+                                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                                    <span x-text="issue.comments"></span>
+                                                </span>
+                                                <span class="tt-host" style="display: inline-block;" x-show="issue.created_at">
+                                                    <span x-text="'创建于 ' + timeAgo(issue.created_at)"></span>
+                                                    <span class="tt" x-text="exactTime(issue.created_at)"></span>
+                                                </span>
+                                                <template x-for="label in (issue.labels || []).slice(0, 3)" :key="label">
+                                                    <span class="badge" x-text="label"></span>
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <div class="item-side">
+                                            <button class="btn btn-sm" :class="isWatched(issue.number, 'issue') ? 'btn-primary' : 'btn-ghost'"
+                                                @click.stop="toggleWatch(issue.number, 'issue', issue.title, issue.url, {area: issue.area, issue_type: issueType(issue), state: issue.state})"
+                                                    :title="isWatched(issue.number, 'issue') ? '取消特别关注' : '加入特别关注'">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" :fill="isWatched(issue.number, 'issue') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                            </button>
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-tertiary)"><polyline points="9 18 15 12 9 6"/></svg>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+
+                            <div x-show="filteredMyIssues.length === 0 && !myIssuesLoading" class="empty-state">
+                                <div class="empty-icon">∅</div>
+                                <div class="empty-title">未找到 Issue</div>
+                                <div class="empty-desc">点击<strong>刷新</strong>从 GitHub 拉取你创建的 Issue</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============= Watchlist（特别关注） ============= -->
+            <div x-show="currentView === 'watchlist'" class="view" x-cloak>
+
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">
+                            特别关注列表
+                            <div class="tabs" style="margin-left: 12px;">
+                                <button class="tab" :class="{active: watchlistTab === 'issue'}" @click="watchlistTab = 'issue'">Issues <span class="badge" x-text="watchlist.filter(w => w.item_type === 'issue').length"></span></button>
+                                <button class="tab" :class="{active: watchlistTab === 'pr'}" @click="watchlistTab = 'pr'">PRs <span class="badge" x-text="watchlist.filter(w => w.item_type === 'pr').length"></span></button>
+                            </div>
+                            <span class="count" x-text="watchlist.length + ' 项'"></span>
+                        </div>
+                        <div class="panel-actions">
+                            <!-- 手动添加 issue/PR -->
+                            <div class="watchlist-add-form">
+                                <select class="select select-sm" x-model="manualAddType" style="width: auto;">
+                                    <option value="issue">Issue</option>
+                                    <option value="pr">PR</option>
+                                </select>
+                                <input class="input input-sm" type="number" placeholder="编号" x-model="manualAddNumber" @keydown.enter="addWatchlistByNumber()" style="width: 90px;">
+                                <button class="btn btn-primary btn-sm" @click="addWatchlistByNumber()" :disabled="manualAddLoading || !manualAddNumber">
+                                    <span x-show="!manualAddLoading">添加</span>
+                                    <span x-show="manualAddLoading">添加中…</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="panel-body" style="padding: 0">
+                        <div class="list">
+                            <template x-for="w in filteredWatchlist" :key="w.item_type + ':' + w.number">
+                                <div class="list-item" @click="w.item_type === 'pr' ? openWatchlistPR(w) : window.open(w.url, '_blank')">
+                                    <span class="item-number" :class="w.item_type" x-text="'#' + w.number"></span>
+                                    <div class="item-main">
+                                        <span class="item-title" style="cursor: pointer;" x-text="w.title || ('#' + w.number)"></span>
+                                        <div class="item-meta">
+                                            <span class="badge badge-state-open" x-show="w.state === 'open'" x-text="'开放'"></span>
+                                            <span class="badge badge-state-closed" x-show="w.state === 'closed'" x-text="'已关闭'"></span>
+                                            <span class="badge badge-state-merged" x-show="w.state === 'merged'" x-text="'已合并'"></span>
+                                            <template x-if="w.item_type === 'issue' && w.issue_type && w.issue_type !== 'other'">
+                                                <span class="badge" x-text="issueTypeLabel(w.issue_type)"></span>
+                                            </template>
+                                            <template x-if="w.area">
+                                                <span class="badge" x-text="areaName(w.area)"></span>
+                                            </template>
+                                            <span x-text="'关注于 ' + timeAgo(w.added_at)"></span>
+                                        </div>
+                                    </div>
+                                    <div class="item-side">
+                                        <button class="btn btn-sm btn-ghost" @click.stop="toggleWatch(w.number, w.item_type, w.title, w.url)" title="取消特别关注">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                        </button>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-tertiary)"><polyline points="9 18 15 12 9 6"/></svg>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                        <div x-show="filteredWatchlist.length === 0" class="empty-state">
+                            <div class="empty-icon">★</div>
+                            <div class="empty-title">暂无特别关注</div>
+                            <div class="empty-desc">在<strong>社区动态</strong>中点击星标按钮，将重要的 issue 或 PR 加入这里集中跟进</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============= 我的数据（仪表盘） ============= -->
+            <div x-show="currentView === 'my-data'" class="view" x-cloak>
+
+                <div x-show="statsLoading" class="empty-state">
+                    <div class="empty-icon">⟳</div>
+                    <div class="empty-title">加载数据中…</div>
+                </div>
+
+                <template x-if="myStats">
+                <div x-show="!statsLoading">
+                    <!-- 总览统计卡 -->
+                    <div class="stat-grid">
+                        <div class="stat-card" style="--accent-color: var(--signal-green)">
+                            <div class="stat-label">总 PR 数</div>
+                            <div class="stat-value" x-text="myStats.summary.total_prs"></div>
+                            <div class="stat-trend" x-text="myStats.summary.merged_prs + ' 已合并 · ' + myStats.summary.merge_rate + '% 合并率'"></div>
+                        </div>
+                        <div class="stat-card" style="--accent-color: var(--signal-blue)">
+                            <div class="stat-label">总 Issue 数</div>
+                            <div class="stat-value" x-text="myStats.summary.total_issues"></div>
+                            <div class="stat-trend" x-text="myStats.summary.open_issues + ' 开放 · ' + myStats.summary.closed_issues + ' 已关闭'"></div>
+                        </div>
+                        <div class="stat-card" style="--accent-color: var(--amber)">
+                            <div class="stat-label">贡献时长</div>
+                            <div class="stat-value" x-text="myStats.summary.days_active + ' 天'"></div>
+                            <div class="stat-trend" x-text="'首次贡献于 ' + timeAgo(myStats.summary.first_contribution)"></div>
+                        </div>
+                        <div class="stat-card" style="--accent-color: var(--signal-purple)">
+                            <div class="stat-label">近 30 天活跃</div>
+                            <div class="stat-value" x-text="myStats.activity.recent_30d_prs + myStats.activity.recent_30d_issues"></div>
+                            <div class="stat-trend" x-text="myStats.activity.recent_30d_prs + ' PR · ' + myStats.activity.recent_30d_issues + ' Issue'"></div>
+                        </div>
+                    </div>
+
+                    <!-- PR 状态分布 -->
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">PR 状态分布</div>
+                            <div class="panel-actions">
+                                <button class="btn btn-sm" @click="loadMyStats()" :disabled="statsLoading">
+                                    <span x-show="!statsLoading">刷新</span>
+                                    <span x-show="statsLoading">加载中…</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="stat-grid" style="margin-bottom: 0;">
+                                <div class="stat-card" style="--accent-color: var(--signal-green)">
+                                    <div class="stat-label">已合并</div>
+                                    <div class="stat-value" x-text="myStats.summary.merged_prs"></div>
+                                </div>
+                                <div class="stat-card" style="--accent-color: var(--signal-blue)">
+                                    <div class="stat-label">开放中</div>
+                                    <div class="stat-value" x-text="myStats.summary.open_prs"></div>
+                                </div>
+                                <div class="stat-card" style="--accent-color: var(--signal-red)">
+                                    <div class="stat-label">已关闭未合并</div>
+                                    <div class="stat-value" x-text="myStats.summary.closed_prs"></div>
+                                </div>
+                                <div class="stat-card" style="--accent-color: var(--amber)">
+                                    <div class="stat-label">合并率</div>
+                                    <div class="stat-value" x-text="myStats.summary.merge_rate + '%'"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 月度贡献趋势 -->
+                    <div class="panel" x-show="Object.keys(myStats.monthly?.created || {}).length > 0">
+                        <div class="panel-header">
+                            <div class="panel-title">月度贡献趋势</div>
+                            <div class="panel-actions" style="font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono);">
+                                <span>横向滚动查看更多 →</span>
+                            </div>
+                        </div>
+                        <div class="panel-body" style="padding: 16px;">
+                            <div style="overflow-x: auto; padding-bottom: 8px;">
+                                <div style="display: flex; gap: 6px; align-items: flex-end; height: 140px; padding: 12px 4px 28px; min-width: 100%;">
+                                    <template x-for="(count, month) in myStats.monthly.created" :key="month">
+                                        <div style="flex: 0 0 36px; display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative;">
+                                            <span class="text-mono" style="font-size: 10px; color: var(--text-secondary);" x-text="count || ''"></span>
+                                            <div :style="'width: 28px; height: ' + Math.max(2, monthBarHeight(count, myStats.monthly.created)) + 'px; background: ' + (count > 0 ? 'var(--amber)' : 'var(--border-faint)') + '; border-radius: 2px 2px 0 0; transition: height 0.3s;'"
+                                                 :title="month + ': ' + count + ' PR'"></div>
+                                            <span class="text-mono" style="font-size: 9px; color: var(--text-tertiary); position: absolute; bottom: -22px; white-space: nowrap;" x-text="formatMonthLabel(month)"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 16px; margin-top: 14px; font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono);">
+                                <span>■ <span style="color: var(--amber)">活跃月份</span></span>
+                                <span>■ <span style="color: var(--text-tertiary)">无活动</span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 最近 PR -->
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">最近 PR</div>
+                        </div>
+                        <div class="panel-body" style="padding: 0;">
+                            <div class="list">
+                                <template x-for="pr in myStats.recent_prs" :key="pr.number">
+                                    <div class="list-item" @click="window.open(pr.url, '_blank')">
+                                        <span class="item-number pr" x-text="'#' + pr.number"></span>
+                                        <div class="item-main">
+                                            <a :href="pr.url" target="_blank" class="item-title" @click.stop="" x-text="pr.title"></a>
+                                            <div class="item-meta">
+                                                <span class="badge" :class="pr.merged ? 'badge-state-merged' : pr.state === 'open' ? 'badge-state-open' : 'badge-state-closed'"
+                                                      x-text="pr.merged ? '已合并' : pr.state === 'open' ? '开放' : '已关闭'"></span>
+                                                <span class="tt-host" style="display: inline-block;" x-show="pr.created_at">
+                                                    <span x-text="timeAgo(pr.created_at)"></span>
+                                                    <span class="tt" x-text="exactTime(pr.created_at)"></span>
+                                                </span>
+                                                <span class="meta-item" x-show="pr.comments > 0">
+                                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                                    <span x-text="pr.comments"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="item-side">
+                                            <button class="btn btn-sm" :class="isWatched(pr.number, 'pr') ? 'btn-primary' : 'btn-ghost'"
+                                                @click.stop="toggleWatch(pr.number, 'pr', pr.title, pr.url, {area: pr.area, state: pr.state})"
+                                                    :title="isWatched(pr.number, 'pr') ? '取消特别关注' : '加入特别关注'">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" :fill="isWatched(pr.number, 'pr') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                </template>
+            </div>
+
+
+        </main>
+    </div>
+
+    <!-- ===== PR Detail Drawer ===== -->
+    <div x-show="selectedPR" x-cloak class="modal-backdrop" @click.self="closePR()">
+        <div class="drawer" x-show="selectedPR" x-transition:enter="drawer">
+            <div class="drawer-header">
+                <div class="drawer-title">
+                    <div class="pr-id">
+                        <span x-text="'PR #' + (selectedPR?.pr_number || '')"></span>
+                        <span x-show="selectedPR?.state" style="margin-left: 8px;">
+                            <span class="badge" :class="'badge-state-' + (selectedPR?.state || '')" x-text="prStateLabel(selectedPR?.state)"></span>
+                        </span>
+                    </div>
+                    <h2 x-text="selectedPR?.title"></h2>
+                    <div class="item-meta mt-2" x-show="selectedPR?.branch">
+                        <span class="meta-item">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                            <span class="text-mono" x-text="selectedPR?.branch"></span>
+                        </span>
+                        <template x-if="selectedPR && (selectedPR.additions || selectedPR.deletions)">
+                            <span class="diffstat">
+                                <span class="add" x-text="'+' + (selectedPR?.additions || 0)"></span>
+                                <span class="del" x-text="'-' + (selectedPR?.deletions || 0)"></span>
+                                <span x-text="(selectedPR?.changed_files || 0) + ' 文件'"></span>
+                            </span>
+                        </template>
+                    </div>
+                </div>
+                <button class="drawer-close" @click="closePR()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="drawer-body">
+                <!-- AI 工具栏 -->
+                <div class="flex gap-2 flex-wrap mb-4">
+                    <button class="btn btn-primary btn-sm" @click="generateSummary('pr')" :disabled="aiSummaryLoading">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                        <span x-show="!aiSummaryLoading && !aiSummary">AI 总结</span>
+                        <span x-show="!aiSummaryLoading && aiSummary">重新总结</span>
+                        <span x-show="aiSummaryLoading">总结中…</span>
+                    </button>
+                    <button class="btn btn-primary btn-sm" @click="generateReview()" :disabled="aiReviewLoading">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        <span x-show="!aiReviewLoading && !aiReview">AI Review</span>
+                        <span x-show="!aiReviewLoading && aiReview">重新 Review</span>
+                        <span x-show="aiReviewLoading">Review 中…</span>
+                    </button>
+                    <a class="btn btn-sm" :href="'https://github.com/vllm-project/vllm/pull/' + selectedPR?.pr_number" target="_blank" x-show="selectedPR">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        在 GitHub 打开
+                    </a>
+                </div>
+
+                <p class="text-tertiary" style="font-size: 11px; font-family: var(--font-mono); margin: 0 0 12px;">
+                    ⚠️ AI 输出仅本地展示，不会自动在 GitHub 评论
+                </p>
+
+                <!-- AI 总结（可折叠） -->
+                <div x-show="aiSummary || aiSummaryLoading" x-transition class="mb-4">
+                    <div class="ai-result">
+                        <div class="ai-result-header ai-result-header-clickable" @click="aiSummaryCollapsed = !aiSummaryCollapsed">
+                            <div class="ai-result-title">
+                                <span class="collapse-arrow" :class="{'is-collapsed': aiSummaryCollapsed}" x-show="aiSummary && !aiSummaryLoading">▸</span>
+                                AI 总结
+                            </div>
+                        </div>
+                        <div class="ai-result-body" x-show="!aiSummaryCollapsed" x-html="aiSummary || '<p style=\'color: var(--text-tertiary);\'>⏳ 正在生成总结…</p>'"></div>
+                    </div>
+                </div>
+
+                <!-- AI Review（可折叠） -->
+                <div x-show="aiReview || aiReviewLoading" x-transition class="mb-4">
+                    <div class="ai-result">
+                        <div class="ai-result-header ai-result-header-clickable" @click="aiReviewCollapsed = !aiReviewCollapsed">
+                            <div class="ai-result-title">
+                                <span class="collapse-arrow" :class="{'is-collapsed': aiReviewCollapsed}" x-show="aiReview && !aiReviewLoading">▸</span>
+                                AI Review
+                            </div>
+                        </div>
+                        <div class="ai-result-body" x-show="!aiReviewCollapsed">
+                            <template x-if="aiReviewLoading">
+                                <p style="color: var(--text-tertiary);">⏳ 正在分析 PR diff 并生成 Review，通常需要 30-90 秒…</p>
+                            </template>
+                            <template x-if="aiReview && !aiReviewLoading">
+                                <div x-html="renderReview(aiReview)"></div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="loadingDetails" class="empty-state">
+                    <div class="empty-icon">⟳</div>
+                    <div class="empty-title">加载 PR 详情中…</div>
+                </div>
+
+                <!-- PR body (Markdown) -->
+                <div x-show="prDetails && !loadingDetails">
+                    <template x-if="prDetails?.body">
+                        <div class="pr-body" x-html="renderMarkdown(prDetails.body)"></div>
+                    </template>
+
+                    <h4 class="text-mono" style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-tertiary); margin: 16px 0 8px;">
+                        变更文件 <span style="color: var(--text-secondary);" x-text="'(' + (prDetails?.files?.length || 0) + ')'"></span>
+                    </h4>
+                    <ul class="file-list">
+                        <template x-for="f in prDetails?.files || []" :key="f.filename">
+                            <li>
+                                <span class="file-stats diffstat">
+                                    <span class="add" x-text="'+' + (f.additions || 0)"></span>
+                                    <span class="del" x-text="'-' + (f.deletions || 0)"></span>
+                                </span>
+                                <span class="file-name" x-text="f.filename"></span>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Issue Detail Drawer ===== -->
+    <div x-show="selectedIssue" x-cloak class="modal-backdrop" @click.self="closeIssue()">
+        <div class="drawer" x-show="selectedIssue" x-transition:enter="drawer">
+            <div class="drawer-header">
+                <div class="drawer-title">
+                    <div class="pr-id">
+                        <span x-text="'Issue #' + (selectedIssue?.number || '')"></span>
+                        <span x-show="selectedIssue?.state" style="margin-left: 8px;">
+                            <span class="badge" :class="selectedIssue?.state === 'open' ? 'badge-state-open' : 'badge-state-closed'" x-text="issueStateLabel(selectedIssue?.state)"></span>
+                        </span>
+                    </div>
+                    <h2 x-text="selectedIssue?.title"></h2>
+                    <div class="item-meta mt-2">
+                        <span class="meta-item" x-show="selectedIssue?.author">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+                            <span x-text="selectedIssue?.author"></span>
+                        </span>
+                        <span class="meta-item" x-show="selectedIssue?.created_at">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/></svg>
+                            <span class="tt-host" style="display: inline-block;">
+                                <span x-text="timeAgo(selectedIssue?.created_at)"></span>
+                                <span class="tt" x-text="exactTime(selectedIssue?.created_at)"></span>
+                            </span>
+                        </span>
+                        <span class="meta-item" x-show="selectedIssue?.comments > 0">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                            <span x-text="selectedIssue?.comments + ' 评论'"></span>
+                        </span>
+                    </div>
+                </div>
+                <button class="drawer-close" @click="closeIssue()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="drawer-body">
+                <div class="flex gap-2 flex-wrap mb-4">
+                    <button class="btn btn-primary btn-sm" @click="generateSummary('issue')" :disabled="aiSummaryLoading">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                        <span x-show="!aiSummaryLoading && !aiSummary">AI 总结</span>
+                        <span x-show="!aiSummaryLoading && aiSummary">重新总结</span>
+                        <span x-show="aiSummaryLoading">总结中…</span>
+                    </button>
+                    <a class="btn btn-sm" :href="selectedIssue?.url" target="_blank" x-show="selectedIssue">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        在 GitHub 打开
+                    </a>
+                </div>
+
+                <p class="text-tertiary" style="font-size: 11px; font-family: var(--font-mono); margin: 0 0 12px;">
+                    ⚠️ AI 输出仅本地展示，不会自动在 GitHub 评论
+                </p>
+
+                <div x-show="aiSummary || aiSummaryLoading" x-transition class="mb-4">
+                    <div class="ai-result">
+                        <div class="ai-result-header ai-result-header-clickable" @click="aiSummaryCollapsed = !aiSummaryCollapsed">
+                            <div class="ai-result-title">
+                                <span class="collapse-arrow" :class="{'is-collapsed': aiSummaryCollapsed}" x-show="aiSummary && !aiSummaryLoading">▸</span>
+                                AI 总结
+                            </div>
+                        </div>
+                        <div class="ai-result-body" x-show="!aiSummaryCollapsed" x-html="aiSummary || '<p style=\'color: var(--text-tertiary);\'>⏳ 正在生成总结…</p>'"></div>
+                    </div>
+                </div>
+
+                <div x-show="loadingIssue" class="empty-state">
+                    <div class="empty-icon">⟳</div>
+                    <div class="empty-title">加载 Issue 详情中…</div>
+                </div>
+
+                <div x-show="issueDetails && !loadingIssue">
+                    <template x-if="issueDetails?.body">
+                        <div class="pr-body" x-html="renderMarkdown(issueDetails.body)"></div>
+                    </template>
+                    <div x-show="!issueDetails?.body" class="empty-state" style="padding: 24px;">
+                        <div class="empty-desc">（无正文）</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Toasts ===== -->
+    <div class="toast-container">
+        <template x-for="t in toasts" :key="t.id">
+            <div class="toast" :class="t.type">
+                <span class="toast-icon" x-text="t.type === 'error' ? '!' : t.type === 'success' ? '✓' : 'i'"></span>
+                <div class="toast-body">
+                    <div class="toast-title" x-text="t.title"></div>
+                    <div class="toast-msg" x-show="t.msg" x-text="t.msg"></div>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <script src="/static/js/app.js?v=13"></script>
+    <script src="/static/js/community.js?v=13"></script>
+    <script src="/static/js/pr_center.js?v=13"></script>
+    <script src="/static/js/my_data.js?v=13"></script>
+</body>
+</html>
