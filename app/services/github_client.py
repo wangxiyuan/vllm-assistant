@@ -74,7 +74,11 @@ class GitHubClient:
     def __init__(self):
         self.base_url = Config.get_base_url()
         self.headers = Config.get_github_headers()
+        # 连接池大小适配并行 tool calls 场景（默认 10 不够用）
+        adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
         self.session = requests.Session()
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self.session.headers.update(self.headers)
 
     def _do_request(self, method: str, url: str, params, kwargs) -> Any:

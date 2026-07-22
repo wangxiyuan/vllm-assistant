@@ -53,6 +53,14 @@ class Config:
     # User
     USERNAME: str = os.getenv("GITHUB_USERNAME", "")
 
+    # Personal TODO - 去重检查默认仓库（DESIGN-PERSONAL-TODO.md 7）
+    DEFAULT_DEDUP_REPOS: List[str] = os.getenv(
+        "DEFAULT_DEDUP_REPOS", "vllm-project/vllm"
+    ).split(",")
+
+    # Personal TODO - 洞察报告异步超时（秒）
+    INTELLIGENCE_REPORT_TIMEOUT: int = int(os.getenv("INTELLIGENCE_REPORT_TIMEOUT", "180"))
+
     @classmethod
     def validate(cls) -> bool:
         if not cls.GITHUB_PAT:

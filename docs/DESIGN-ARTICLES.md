@@ -17,6 +17,7 @@
 ### 1.2 目标
 - 提供内置 Markdown 编辑器，集中存储学习文章
 - 支持相对路径 + 行号格式的代码引用（如 `vllm/engine/core.py:10-20`）
+- **渲染文章时自动嵌入对应代码片段**，无需手动复制粘贴
 - 定时后台验证代码引用的有效性
 - 页面内标记过时内容，提醒用户更新
 
@@ -25,6 +26,7 @@
 - 不需要完整的版本历史记录
 - 不实现文章发布/分享功能
 - 不支持图片/附件上传
+- 不是完整的 IDE，只做代码片段嵌入预览
 
 ---
 
@@ -70,7 +72,7 @@ class CodeReference(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     article_id = Column(Integer, ForeignKey("articles.id"), nullable=False)
 
-    # 引用位置（在文章中的位置）
+    # 引用位置（在文章中的位置，用于快速定位）
     article_line_start = Column(Integer)                # 起始行号（文章内容中的行）
     article_line_end = Column(Integer)                  # 结束行号
 
@@ -79,13 +81,10 @@ class CodeReference(Base):
     line_start = Column(Integer, nullable=False)        # 起始行号
     line_end = Column(Integer)                          # 结束行号
 
-    # 引用时的快照
-    referenced_content = Column(Text)                    # 引用时的代码内容
-
     # 验证状态
     last_checked_at = Column(DateTime)
     is_valid = Column(Boolean, default=True)            # 当前是否有效
-    current_content = Column(Text)                      # 当前代码内容（用于对比）
+    current_content = Column(Text)                      # 当前代码内容（用于渲染预览）
     diff_summary = Column(Text)                         # 变化摘要
 ```
 
@@ -98,7 +97,7 @@ class LocalCodeCache(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     file_path = Column(String(500), unique=True, nullable=False)  # 相对路径
-    content = Column(Text)                               # 文件内容
+    content = Column(Text)                               # 文件完整内容
     last_synced_at = Column(DateTime, nullable=False)
     checksum = Column(String(64))                        # SHA256 校验
     total_lines = Column(Integer)                       # 总行数
@@ -115,6 +114,7 @@ GET    /api/articles
 POST   /api/articles
 PUT    /api/articles/{article_id}
 DELETE /api/articles/{article_id}
+GET    /api/articles/{article_id}/rendered  # 渲染后的文章（含嵌入代码）
 ```
 
 #### GET /api/articles
@@ -197,6 +197,34 @@ DELETE /api/articles/{article_id}
   "id": 1,
   "title": "vLLM Engine 架构解析（更新版）",
   "updated_at": "2024-01-25T14:30:00Z"
+}
+```
+
+#### GET /api/articles/{article_id}/rendered
+
+获取渲染后的文章 HTML，代码引用会被替换为实际代码片段。
+
+**Query Parameters:**
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| sync_code | boolean | 是否先同步本地代码再渲染（默认 false） |
+
+**Response:**
+```json
+{
+  "id": 1,
+  "title": "vLLM Engine 架构解析",
+  "html": "<h1>vLLM Engine 架构</h1><p>核心循环位于：</p><pre><code class=\"embedded-code\" data-ref-id=\"123\"><span class=\"line-number\">10: </span><span class=\"code-content\">def core_loop():</span>\n<span class=\"line-number\">11: </span><span class=\"code-content\">    ...</span></code></pre>",
+  "embedded_codes": [
+    {
+      "ref_id": 123,
+      "file_path": "vllm/engine/core.py",
+      "line_start": 10,
+      "line_end": 20,
+      "is_valid": true,
+      "total_lines": 150
+    }
+  ]
 }
 ```
 
@@ -300,10 +328,11 @@ GET    /api/sync/status
 }
 ```
 
-### 3.4 代码文件访问
+### 3.4 代码片段渲染
 
 ```
 GET    /api/code/{file_path:path}
+POST   /api/code/embed
 ```
 
 #### GET /api/code/{file_path}
@@ -324,6 +353,44 @@ GET    /api/code/{file_path:path}
   "total_lines": 150,
   "checksum": "abc123...",
   "last_synced_at": "2024-01-25T14:40:00Z"
+}
+```
+
+#### POST /api/code/embed
+
+批量获取多个代码片段，用于文章渲染时嵌入。
+
+**Request Body:**
+```json
+{
+  "refs": [
+    {"file_path": "vllm/engine/core.py", "line_start": 10, "line_end": 20},
+    {"file_path": "vllm/scheduler/policy.py", "line_start": 1, "line_end": 5}
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "snippets": [
+    {
+      "file_path": "vllm/engine/core.py",
+      "line_start": 10,
+      "line_end": 20,
+      "is_valid": true,
+      "content": "def core_loop():\n    ...",
+      "html": "<pre><code>...</code></pre>"
+    },
+    {
+      "file_path": "vllm/scheduler/policy.py",
+      "line_start": 1,
+      "line_end": 5,
+      "is_valid": false,
+      "reason": "line_out_of_range",
+      "message": "行号超出范围，文件当前共 3 行"
+    }
+  ]
 }
 ```
 
@@ -452,11 +519,12 @@ import re
 from typing import List, Tuple, Dict
 
 class CodeRefParser:
-    """解析 Markdown 中的代码引用"""
+    """解析 Markdown 中的代码引用，支持多种格式"""
 
     # 匹配模式：vllm/engine/core.py:10-20 或 vllm/engine/core.py:10
+    # 也支持 vllm/engine/core.py#L10 或 vllm/engine/core.py:L10-L20
     REF_PATTERN = re.compile(
-        r'`?vllm/([^`\s]+)[:#]L?(\d+)(?:[-~](\d+))?`?'
+        r'`?vllm/([^`\s]+)[:#]L?(\d+)(?:[-~]L?(\d+))?`?'
     )
 
     def parse_article(self, content: str) -> List[Dict]:
@@ -530,6 +598,37 @@ class CodeRefParser:
             "total_lines": total_lines
         }
 
+    def get_snippet_html(
+        self,
+        file_path: str,
+        start_line: int,
+        end_line: int,
+        cache_service: LocalCodeSyncService,
+        show_line_numbers: bool = True
+    ) -> str:
+        """生成代码片段的 HTML"""
+        lines = cache_service.get_file_lines(file_path)
+
+        if lines is None:
+            return '<div class="code-embed-error">文件未缓存</div>'
+
+        total_lines = len(lines)
+        if start_line > total_lines or end_line > total_lines:
+            return f'<div class="code-embed-error">行号超出范围（文件共 {total_lines} 行）</div>'
+
+        snippet_lines = lines[start_line - 1:end_line]
+        html_parts = ['<pre><code class="embedded-code">']
+
+        for i, line in enumerate(snippet_lines, start_line):
+            if show_line_numbers:
+                html_parts.append(f'<span class="line-number">{i}: </span>')
+            # HTML 转义
+            escaped = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            html_parts.append(f'<span class="code-content">{escaped}</span>\n')
+
+        html_parts.append('</code></pre>')
+        return ''.join(html_parts)
+
     def update_article_refs(
         self,
         article_id: int,
@@ -572,6 +671,9 @@ class CodeRefParser:
                 db.delete(ref)
 
         # 新增或更新引用
+        valid_count = 0
+        invalid_count = 0
+
         for ref in current_refs:
             key = (ref["file_path"], ref["line_start"], ref["line_end"])
             existing = db.query(CodeReference).filter(
@@ -581,18 +683,21 @@ class CodeRefParser:
                 CodeReference.line_end == ref["line_end"]
             ).first()
 
+            validation = self.validate_ref(
+                ref["file_path"],
+                ref["line_start"],
+                ref["line_end"],
+                cache_service
+            )
+
             if existing:
-                # 更新引用位置
-                existing.article_line_start = ref["article_line"]
+                # 更新引用状态
+                existing.is_valid = validation["valid"]
+                existing.last_checked_at = datetime.utcnow()
+                if validation.get("content"):
+                    existing.current_content = validation["content"]
             else:
                 # 创建新引用
-                validation = self.validate_ref(
-                    ref["file_path"],
-                    ref["line_start"],
-                    ref["line_end"],
-                    cache_service
-                )
-
                 db.add(CodeReference(
                     article_id=article_id,
                     article_line_start=ref["article_line"],
@@ -600,21 +705,29 @@ class CodeRefParser:
                     line_start=ref["line_start"],
                     line_end=ref["line_end"],
                     is_valid=validation["valid"],
-                    last_checked_at=datetime.utcnow()
+                    last_checked_at=datetime.utcnow(),
+                    current_content=validation.get("content")
                 ))
+
+            if validation["valid"]:
+                valid_count += 1
+            else:
+                invalid_count += 1
 
         # 更新文章统计
         article = db.query(Article).filter(Article.id == article_id).first()
         if article:
             article.code_refs_count = len(current_refs)
+            article.valid_refs_count = valid_count
+            article.outdated_refs_count = invalid_count
             article.last_verified_at = datetime.utcnow()
 
         db.commit()
 
         return {
             "total_refs": len(current_refs),
-            "valid_refs": sum(1 for r in current_refs if ...),
-            "invalid_refs": sum(1 for r in current_refs if ...)
+            "valid_refs": valid_count,
+            "invalid_refs": invalid_count
         }
 ```
 
@@ -670,8 +783,8 @@ class ArticleValidator:
             if db_ref:
                 db_ref.is_valid = validation["valid"]
                 db_ref.last_checked_at = datetime.utcnow()
-                if validation.get("current_content"):
-                    db_ref.current_content = validation["current_content"]
+                if validation.get("content"):
+                    db_ref.current_content = validation["content"]
 
             if validation["valid"]:
                 valid_count += 1
@@ -729,11 +842,148 @@ class ArticleValidator:
         return results
 ```
 
+### 4.4 ArticleRenderer（文章渲染器）
+
+```python
+# app/services/article_renderer.py
+
+import re
+from typing import Dict, List
+from markdown import markdown
+
+class ArticleRenderer:
+    """渲染文章，将代码引用替换为实际代码片段"""
+
+    def __init__(self, cache_service: LocalCodeSyncService, db: Session):
+        self.cache_service = cache_service
+        self.db = db
+        self.parser = CodeRefParser()
+
+    def render_article(self, article_id: int, sync_code: bool = False) -> Dict:
+        """
+        渲染文章，嵌入代码片段
+
+        Args:
+            article_id: 文章 ID
+            sync_code: 是否先同步本地代码
+
+        Returns:
+            {
+                "html": 渲染后的 HTML,
+                "embedded_codes": 嵌入的代码信息列表
+            }
+        """
+        article = self.db.query(Article).filter(Article.id == article_id).first()
+        if not article:
+            return {"error": "Article not found"}
+
+        # 可选：先同步代码
+        if sync_code:
+            self.cache_service.sync_all()
+
+        # 解析引用
+        refs = self.parser.parse_article(article.content)
+
+        # 构建引用映射：原始文本 -> HTML 片段
+        ref_map = {}
+        embedded_info = []
+
+        for ref in refs:
+            key = ref["raw_match"]
+
+            # 尝试从缓存获取已存储的内容
+            db_ref = self.db.query(CodeReference).filter(
+                CodeReference.article_id == article_id,
+                CodeReference.file_path == ref["file_path"],
+                CodeReference.line_start == ref["line_start"],
+                CodeReference.line_end == ref["line_end"]
+            ).first()
+
+            if db_ref and db_ref.is_valid and db_ref.current_content:
+                # 使用缓存的内容生成 HTML
+                html = self._generate_code_html(
+                    db_ref.current_content,
+                    ref["line_start"],
+                    ref["line_end"]
+                )
+            else:
+                # 实时从缓存文件获取
+                validation = self.parser.validate_ref(
+                    ref["file_path"],
+                    ref["line_start"],
+                    ref["line_end"],
+                    self.cache_service
+                )
+
+                if validation["valid"]:
+                    html = self._generate_code_html(
+                        validation["content"],
+                        ref["line_start"],
+                        ref["line_end"]
+                    )
+                else:
+                    # 无效引用，显示错误提示
+                    html = f'<div class="code-embed-error">⚠️ {validation.get("message", "引用无效")}</div>'
+
+            ref_map[key] = html
+            embedded_info.append({
+                "file_path": ref["file_path"],
+                "line_start": ref["line_start"],
+                "line_end": ref["line_end"],
+                "is_valid": db_ref.is_valid if db_ref else validation["valid"]
+            })
+
+        # 替换 Markdown 中的引用
+        rendered_content = article.content
+        for raw_match, html in ref_map.items():
+            # 在 Markdown 中，引用通常在反引号内
+            rendered_content = rendered_content.replace(
+                f"`{raw_match}`",
+                html
+            )
+
+        # 转换为 HTML
+        full_html = markdown(rendered_content)
+
+        return {
+            "html": full_html,
+            "embedded_codes": embedded_info
+        }
+
+    def _generate_code_html(
+        self,
+        content: str,
+        start_line: int,
+        end_line: int
+    ) -> str:
+        """生成带行号的代码 HTML"""
+        lines = content.split("\n")
+        html_parts = ['<pre><code class="embedded-code">']
+
+        for i, line in enumerate(lines, start_line):
+            html_parts.append(f'<span class="line-number">{i}: </span>')
+            # HTML 转义
+            escaped = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            html_parts.append(f'<span class="code-content">{escaped}</span>\n')
+
+        html_parts.append('</code></pre>')
+        return ''.join(html_parts)
+```
+
 ---
 
 ## 5. 前端设计
 
-### 5.1 视图结构
+### 5.1 技术选型
+
+| 组件 | 选择 | 理由 |
+|------|------|------|
+| 框架 | Alpine.js 3.x | 与现有项目一致，无需引入新依赖 |
+| 编辑器 | CodeMirror 6 (CDN) | 轻量、支持 Markdown 模式、可扩展 |
+| 代码高亮 | highlight.js (CDN) | 自动检测语言、主题统一 |
+| Markdown 渲染 | marked.js (CDN) | 轻量快速，与现有项目一致 |
+
+### 5.2 视图结构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -767,6 +1017,20 @@ class ArticleValidator:
 │  │ │ [插入代码引用] [预览] [保存] [验证]                  │ │ │
 │  │ └─────────────────────────────────────────────────────┘ │ │
 │  └─────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ 文章预览（渲染后，代码自动嵌入）                           │ │
+│  │ ┌─────────────────────────────────────────────────────┐ │ │
+│  │ │ <h1>vLLM Engine 架构</h1>                          │ │ │
+│  │ │ <p>核心循环位于：</p>                               │ │ │
+│  │ │ <pre><code class="embedded-code">                 │ │ │
+│  │ │   <span class="line-number">10: </span>            │ │ │
+│  │ │   <span class="code-content">def core_loop():</span>│ │ │
+│  │ │   <span class="line-number">11: </span>            │ │ │
+│  │ │   <span class="code-content">    ...</span>        │ │ │
+│  │ │ </code></pre>                                       │ │ │
+│  │ └─────────────────────────────────────────────────────┘ │ │
+│  └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -774,6 +1038,18 @@ class ArticleValidator:
 
 ```javascript
 // static/js/article_editor.js
+
+// CodeMirror 初始化
+let editor;
+function initEditor() {
+    editor = CodeMirror(document.getElementById('editor'), {
+        mode: 'markdown',
+        lineNumbers: true,
+        theme: 'default',
+        indentUnit: 2,
+        tabSize: 2,
+    });
+}
 
 function insertCodeRef() {
     // 弹出选择器让用户选择文件和行号
@@ -785,38 +1061,74 @@ function insertCodeRef() {
 
     const ref = `vllm/${selectedFile.path}:${startLine}${endLine ? '-' + endLine : ''}`;
 
-    // 插入到编辑器
-    insertAtCursor(`\`${ref}\``);
+    // 插入到编辑器当前位置
+    const pos = editor.getCursor();
+    editor.replaceRange(`\`${ref}\``, pos);
+}
+
+// 文件选择器 - 从本地缓存中浏览
+function showFilePicker() {
+    // 调用 API 获取已缓存的文件列表
+    fetch('/api/sync/status')
+        .then(r => r.json())
+        .then(data => {
+            // 显示文件树模态框
+            showModal(data.cached_files);
+        });
 }
 ```
 
-### 5.3 过时引用高亮显示
+### 5.3 嵌入式代码渲染样式
 
 ```css
-/* 在预览区域高亮过时的引用 */
-.code-ref {
-    color: var(--signal-green);
-    cursor: pointer;
-    border-bottom: 1px dashed var(--signal-green);
-}
-
-.code-ref.outdated {
-    color: var(--signal-red);
-    border-bottom-color: var(--signal-red);
-    background: rgba(255, 80, 80, 0.1);
-    padding: 2px 4px;
-    border-radius: 3px;
-}
-
-.code-ref.outdated:hover::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-    padding: 8px 12px;
+/* 嵌入的代码片段样式 */
+pre code.embedded-code {
+    display: block;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
     border-radius: 6px;
+    padding: 12px 16px;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+pre code.embedded-code .line-number {
+    color: var(--text-tertiary);
+    user-select: none;
+    min-width: 40px;
+    display: inline-block;
+}
+
+pre code.embedded-code .code-content {
+    color: var(--text-primary);
+}
+
+/* 过时引用高亮 */
+pre code.embedded-code.outdated {
+    border-color: var(--signal-red);
+    background: rgba(255, 80, 80, 0.05);
+}
+
+pre code.embedded-code.outdated::before {
+    content: "⚠️ 此代码引用可能已过时";
+    display: block;
+    color: var(--signal-red);
     font-size: 12px;
-    white-space: nowrap;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--signal-red);
+}
+
+/* 错误提示 */
+.code-embed-error {
+    background: rgba(255, 80, 80, 0.1);
+    border: 1px solid var(--signal-red);
+    border-radius: 6px;
+    padding: 12px 16px;
+    color: var(--signal-red);
+    font-size: 14px;
 }
 ```
 
@@ -848,6 +1160,26 @@ function insertCodeRef() {
         </template>
     </div>
 </div>
+```
+
+### 5.5 文章预览组件
+
+```javascript
+// 文章预览 - 渲染时自动嵌入代码
+async function renderArticlePreview(articleId) {
+    const response = await fetch(`/api/articles/${articleId}/rendered?sync_code=true`);
+    const data = await response.json();
+
+    // 直接渲染 HTML（包含嵌入的代码）
+    document.getElementById('preview-container').innerHTML = data.html;
+
+    // 显示嵌入统计
+    if (data.embedded_codes && data.embedded_codes.length > 0) {
+        const validCount = data.embedded_codes.filter(c => c.is_valid).length;
+        const invalidCount = data.embedded_codes.length - validCount;
+        showNotification(`已嵌入 ${data.embedded_codes.length} 个代码片段 (${validCount} 有效, ${invalidCount} 无效)`);
+    }
+}
 ```
 
 ---
@@ -945,34 +1277,102 @@ scheduler.add_job(
 
 ---
 
-## 8. 路由注册
+## 8. 安全设计
+
+### 8.1 路径遍历防护
+
+```python
+# app/services/security.py
+
+from pathlib import Path
+
+def get_safe_path(base_path: str, file_path: str) -> Path:
+    """
+    确保文件路径在仓库范围内，防止路径遍历攻击
+
+    Args:
+        base_path: 基础路径（如本地 vLLM 仓库路径）
+        file_path: 用户提供的文件相对路径
+
+    Returns:
+        安全的绝对路径
+
+    Raises:
+        ValueError: 如果路径超出范围
+    """
+    base = Path(base_path).resolve()
+    target = (base / file_path).resolve()
+
+    if not target.is_relative_to(base):
+        raise ValueError(f"Path traversal detected: {file_path}")
+
+    return target
+```
+
+### 8.2 API 安全检查
+
+```python
+# app/api/sync.py
+
+from fastapi import HTTPException
+from app.services.security import get_safe_path
+
+@router.post("/sync/local-code")
+async def sync_local_code(request: SyncRequest):
+    # 验证仓库路径
+    if not Config.LOCAL_VLLM_REPO_PATH:
+        raise HTTPException(status_code=400, detail="LOCAL_VLLM_REPO_PATH not configured")
+
+    # 确保 watch_dirs 都在仓库范围内
+    for watch_dir in request.watch_dirs or Config.WATCH_DIRS:
+        try:
+            safe_path = get_safe_path(Config.LOCAL_VLLM_REPO_PATH, watch_dir)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # ... 执行同步
+```
+
+---
+
+## 9. 路由注册
 
 ```python
 # app/main.py 修改
 
 from app.api.articles import router as articles_router
 from app.api.sync import router as sync_router
+from app.api.render import router as render_router
 
 app.include_router(articles_router, prefix="/api/articles", tags=["Articles"])
 app.include_router(sync_router, prefix="/api/sync", tags=["Sync"])
+app.include_router(render_router, prefix="/api/render", tags=["Render"])
 ```
 
 ---
 
-## 9. 实施计划
+## 10. 实施计划
 
 | 阶段 | 内容 | 预计工时 |
 |------|------|----------|
 | Phase 1 | 数据模型 + CRUD API | 1 天 |
 | Phase 2 | 本地代码缓存同步服务 | 1 天 |
-| Phase 3 | 代码引用解析 + 验证服务 | 1.5 天 |
-| Phase 4 | 前端编辑器 + 预览 | 1.5 天 |
-| Phase 5 | 定时任务集成 | 0.5 天 |
+| Phase 3 | 代码引用解析 + 渲染服务 | 1.5 天 |
+| Phase 4 | 前端编辑器 + 预览（含嵌入代码） | 1.5 天 |
+| Phase 5 | 定时任务集成 + 安全加固 | 0.5 天 |
 | **总计** | | **5.5 天** |
+
+### 测试策略
+
+| 类型 | 覆盖范围 |
+|------|----------|
+| 单元测试 | CodeRefParser 正则匹配、LocalCodeSyncService 同步逻辑 |
+| 集成测试 | API 端点、渲染流程 |
+| 手动测试 | 前端编辑器交互、代码嵌入渲染效果 |
 
 ---
 
-## 10. 未来扩展
+## 11. 未来扩展
 
 - 支持更多代码引用格式（GitHub URL、PR 链接等）
 - 代码变更自动通知（邮件/IM）

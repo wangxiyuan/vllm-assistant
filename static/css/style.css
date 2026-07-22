@@ -684,6 +684,43 @@ body {
     border-color: var(--amber-dim);
     box-shadow: 0 0 0 3px var(--amber-glow);
 }
+/* Date input - ensure native date picker works */
+.input[type="date"] {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    cursor: pointer;
+    min-width: 140px;
+    color-scheme: dark;
+}
+.input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+    padding: 2px;
+}
+.input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
+/* Safari date input fix - ensure it looks clickable */
+@supports (-webkit-touch-callout: none) {
+    .input[type="date"] {
+        -webkit-appearance: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b95a7' stroke-width='2'%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3Cline x1='16' y1='2' x2='16' y2='6'/%3E%3Cline x1='8' y1='2' x2='8' y2='6'/%3E%3Cline x1='3' y1='10' x2='21' y2='10'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 8px center;
+        padding-right: 32px;
+    }
+}
+/* Firefox fallback for date input */
+@supports not selector(input[type="date"]) {
+    .input[type="date"] {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b95a7' stroke-width='2'%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3Cline x1='16' y1='2' x2='16' y2='6'/%3E%3Cline x1='8' y1='2' x2='8' y2='6'/%3E%3Cline x1='3' y1='10' x2='21' y2='10'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 8px center;
+        padding-right: 32px;
+    }
+}
 .input-mono {
     font-family: var(--font-mono);
     font-size: 12px;
@@ -1407,3 +1444,266 @@ body {
     .search-bar { max-width: none; }
     .view-title { display: none; }
 }
+
+/* ===== Personal TODO - 添加任务表单 ===== */
+.todo-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.todo-form-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.todo-form-row .select,
+.todo-form-row .input {
+    flex: 1;
+    min-width: 120px;
+}
+.todo-tags-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: var(--bg-elev-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.tag-chip button {
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+}
+.tag-chip button:hover { color: var(--signal-red); }
+.todo-form-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* ===== Personal TODO - Kanban 看板 ===== */
+.kanban {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding: 16px;
+    min-height: 300px;
+}
+.kanban-col {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border-faint);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.kanban-col-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-faint);
+    background: var(--bg-elev-2);
+}
+.kanban-col-header .count {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+}
+.kanban-col-body {
+    flex: 1;
+    padding: 8px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 500px;
+}
+.kanban-empty {
+    text-align: center;
+    color: var(--text-disabled);
+    font-size: 12px;
+    padding: 24px 0;
+}
+
+/* ===== Personal TODO - 任务卡片 ===== */
+.task-card {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-faint);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    position: relative;
+}
+.task-card:hover {
+    border-color: var(--border-bright);
+    background: var(--bg-elev-3);
+}
+.task-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.task-card-title {
+    font-size: 13px;
+    font-weight: 500;
+    margin: 0 0 6px;
+    color: var(--text-primary);
+    line-height: 1.4;
+}
+.task-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-bottom: 6px;
+}
+.task-card-badges {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+.task-card-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.task-card:hover .task-card-actions {
+    opacity: 1;
+}
+
+/* ===== 优先级徽章 ===== */
+.priority-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    letter-spacing: 0.05em;
+}
+.priority-p0 { background: rgba(255, 123, 114, 0.15); color: var(--signal-red); border: 1px solid rgba(255, 123, 114, 0.3); }
+.priority-p1 { background: rgba(255, 180, 84, 0.15); color: var(--amber); border: 1px solid rgba(255, 180, 84, 0.3); }
+.priority-p2 { background: rgba(121, 192, 255, 0.12); color: var(--signal-blue); border: 1px solid rgba(121, 192, 255, 0.25); }
+.priority-p3 { background: var(--bg-elev-3); color: var(--text-tertiary); border: 1px solid var(--border); }
+
+/* ===== 状态徽章 ===== */
+.status-badge {
+    display: inline-flex;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 500;
+}
+.status-todo { background: rgba(121, 192, 255, 0.12); color: var(--signal-blue); }
+.status-in_progress { background: rgba(255, 180, 84, 0.12); color: var(--amber); }
+.status-done { background: rgba(126, 231, 135, 0.12); color: var(--signal-green); }
+.status-cancelled { background: var(--bg-elev-3); color: var(--text-tertiary); }
+
+/* ===== 通用徽章变体 ===== */
+.badge-warning { background: rgba(255, 180, 84, 0.12); color: var(--amber); }
+.badge-success { background: rgba(126, 231, 135, 0.12); color: var(--signal-green); }
+.badge-info { background: rgba(121, 192, 255, 0.12); color: var(--signal-blue); }
+.badge-state-generating { background: rgba(255, 180, 84, 0.15); color: var(--amber); }
+.badge-state-completed { background: rgba(126, 231, 135, 0.12); color: var(--signal-green); }
+.badge-state-failed { background: rgba(255, 123, 114, 0.12); color: var(--signal-red); }
+
+/* ===== 去重检查结果项 ===== */
+.dedup-item {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-faint);
+}
+.dedup-item:last-child { border-bottom: none; }
+.dedup-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+}
+
+/* ===== 情报面板 - 生成表单 ===== */
+.intel-gen-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.intel-form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.intel-form-row > label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+.intel-form-row .select,
+.intel-form-row .input {
+    width: 100%;
+}
+.intel-sources {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.intel-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* ===== 情报面板 - 报告卡片 ===== */
+.report-card .report-icon {
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+/* ===== 来源徽章 ===== */
+.badge-source {
+    font-size: 10px;
+    padding: 1px 5px;
+}
+.source-vllm { background: rgba(121, 192, 255, 0.12); color: var(--signal-blue); }
+.source-vllm-ascend { background: rgba(210, 168, 255, 0.12); color: var(--signal-purple); }
+.source-sglang { background: rgba(126, 231, 135, 0.12); color: var(--signal-green); }
+.source-academic { background: rgba(242, 204, 96, 0.12); color: var(--signal-yellow); }
+.source-news { background: rgba(86, 212, 221, 0.12); color: var(--signal-cyan); }
+
+/* ===== 宽抽屉（报告查看）===== */
+.drawer-wide {
+    width: 70vw;
+    max-width: 900px;
+}
+
+@media (max-width: 880px) {
+    .kanban {
+        grid-template-columns: 1fr;
+    }
+    .drawer-wide {
+        width: 100vw;
+        max-width: none;
+    }
+}
+

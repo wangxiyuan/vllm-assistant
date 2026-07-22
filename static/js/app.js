@@ -70,6 +70,8 @@ function app() {
                 'pr-center': '我的贡献',
                 'watchlist': '特别关注',
                 'my-data': '我的数据',
+                'personal-todo': '个人 TODO',
+                'intelligence': '情报面板',
             }[this.currentView] || '';
         },
         get currentViewSub() {
@@ -78,6 +80,8 @@ function app() {
                 'pr-center': '管理你的 PR 和 Issue',
                 'watchlist': '重点跟进的 issue 和 PR',
                 'my-data': '贡献数据仪表盘',
+                'personal-todo': '集中管理个人任务',
+                'intelligence': 'AI 洞察报告',
             }[this.currentView] || '';
         },
         get searchPlaceholder() {
@@ -86,6 +90,8 @@ function app() {
                 'pr-center': '搜索你的 PR 和 Issue…',
                 'watchlist': '搜索关注项…',
                 'my-data': '搜索…',
+                'personal-todo': '搜索任务…',
+                'intelligence': '搜索报告…',
             };
             return map[this.currentView] || '搜索…';
         },
@@ -399,11 +405,20 @@ function app() {
             if (view === 'my-data' && !this.myStats && !this.statsLoading) {
                 this.loadMyStats();
             }
+            // 切到个人 TODO 时自动加载
+            if (view === 'personal-todo') {
+                this.loadTodoTasks();
+            }
+            // 切到情报面板时自动加载
+            if (view === 'intelligence') {
+                this.loadIntelReports();
+                this.loadIntelTasks();
+            }
         },
 
         // ===== Global keyboard shortcuts =====
         handleGlobalShortcut(e) {
-            // Number keys 1-4 to switch views (when not in input)
+            // Number keys 1-6 to switch views (when not in input)
             const tag = e.target.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
             if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -412,6 +427,8 @@ function app() {
             else if (e.key === '2') { e.preventDefault(); this.switchView('pr-center'); }
             else if (e.key === '3') { e.preventDefault(); this.switchView('watchlist'); }
             else if (e.key === '4') { e.preventDefault(); this.switchView('my-data'); }
+            else if (e.key === '5') { e.preventDefault(); this.switchView('personal-todo'); }
+            else if (e.key === '6') { e.preventDefault(); this.switchView('intelligence'); }
             else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); this.refreshAll(); }
         },
 
@@ -525,7 +542,7 @@ function app() {
 // 让整个合并失败 -> 所有变量未定义。
 // 用 defineProperty 复制 descriptor 能保留 getter，后续 Alpine 访问时才求值。
 window.buildApp = function() {
-    const sources = [app(), communityMixin(), prCenterMixin(), myDataMixin()];
+    const sources = [app(), communityMixin(), prCenterMixin(), myDataMixin(), personalTodoMixin(), intelligenceMixin()];
     const result = {};
     for (const src of sources) {
         const descs = Object.getOwnPropertyDescriptors(src);

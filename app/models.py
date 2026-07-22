@@ -4,13 +4,14 @@ SQLAlchemy ORM 模型
 """
 import json
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 from sqlalchemy import (
     Column,
     Integer,
     String,
     DateTime,
+    Date,
     Boolean,
     Text,
     ForeignKey,
@@ -237,3 +238,112 @@ class AICache(Base):
     __table_args__ = (
         UniqueConstraint("item_type", "number", "action", name="uq_ai_cache_key"),
     )
+
+
+class PersonalTask(Base):
+    """个人任务（DESIGN-PERSONAL-TODO.md 2.1）"""
+
+    __tablename__ = "personal_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(Text, nullable=False)
+    description = Column(Text)
+
+    # 来源分类: 'self' / 'team' / 'community' / 'meeting'
+    source = Column(String(50), nullable=False)
+    # 优先级: P0 / P1 / P2 / P3
+    priority = Column(String(10), nullable=False, default="P2")
+    # 状态: todo / in_progress / done / cancelled
+    status = Column(String(20), nullable=False, default="todo")
+
+    # 关联外部资源
+    related_issue_number = Column(Integer)
+    related_pr_number = Column(Integer)
+    related_url = Column(String(500))
+
+    # 分类
+    area = Column(String(50))
+    tags = Column(Text)  # JSON array
+
+    # 时间追踪
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    due_date = Column(Date)
+    completed_at = Column(DateTime)
+
+    # AI 辅助字段
+    dedup_check_result = Column(Text)  # JSON: 去重检查结果
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "description": self.description or "",
+            "source": self.source,
+            "priority": self.priority,
+            "status": self.status,
+            "related_issue_number": self.related_issue_number,
+            "related_pr_number": self.related_pr_number,
+            "related_url": self.related_url,
+            "area": self.area,
+            "tags": json.loads(self.tags) if self.tags else [],
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "completed_at": _iso_utc(self.completed_at),
+            "dedup_check_result": json.loads(self.dedup_check_result) if self.dedup_check_result else None,
+        }
+
+
+class TaskDedupCache(Base):
+    """去重检查缓存（DESIGN-PERSONAL-TODO.md 2.2）"""
+
+    __tablename__ = "task_dedup_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("personal_tasks.id"))
+    check_type = Column(String(20))  # 'keyword' / 'semantic' / 'hybrid'
+    matched_items = Column(Text)  # JSON: 匹配到的 issue/PR 列表
+    checked_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+class IntelligenceReport(Base):
+    """洞察报告（DESIGN-PERSONAL-TODO.md 2.3）"""
+
+    __tablename__ = "intelligence_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(Text, nullable=False)
+    content = Column(Text)  # nullable: generating/failed 状态时可能为空
+
+    # 关联信息
+    task_id = Column(Integer, ForeignKey("personal_tasks.id"))
+
+    # 来源范围 JSON 数组: ["vllm", "vllm-ascend", "sglang", "academic", "news"]
+    sources = Column(Text, nullable=False)
+    excluded_sources = Column(Text)  # JSON array
+    extra_prompt = Column(Text)
+
+    # 元信息
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    status = Column(String(20), default="completed")  # generating / completed / failed
+    error_message = Column(Text)
+
+    def to_dict(self, include_content: bool = False, task_title: str = None) -> Dict[str, Any]:
+        d = {
+            "id": self.id,
+            "title": self.title,
+            "task_id": self.task_id,
+            "sources": json.loads(self.sources) if self.sources else [],
+            "excluded_sources": json.loads(self.excluded_sources) if self.excluded_sources else [],
+            "extra_prompt": self.extra_prompt or "",
+            "created_at": _iso_utc(self.created_at),
+            "status": self.status,
+            "error_message": self.error_message,
+            "word_count": len((self.content or "").split()) if self.content else 0,
+        }
+        if task_title is not None:
+            d["task_title"] = task_title
+        if include_content:
+            d["content"] = self.content or ""
+        return d
