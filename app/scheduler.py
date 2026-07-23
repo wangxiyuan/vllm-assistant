@@ -620,6 +620,14 @@ def start_scheduler():
             replace_existing=True,
         )
 
+        scheduler.add_job(
+            sync_file_change_history_job,
+            trigger=IntervalTrigger(hours=1),  # 每小时同步一次
+            id="sync_file_history",
+            name="Sync File Change History",
+            replace_existing=True,
+        )
+
     scheduler.start()
     logger.info(f"Scheduler started with interval {Config.POLLING_INTERVAL} minutes")
 
@@ -713,6 +721,69 @@ def sync_all_repos_job():
         manager.validate_all_refs()
     except Exception:
         logger.exception("Error validating refs after sync")
+
+
+def sync_file_change_history_job():
+    """定时任务：同步文件变更历史到 FileChangeHistory 表
+
+    遍历 my_prs 中已同步的 PR，获取每个 PR 的变更文件列表并记录。
+    实现 O(1) 的文件 → PR 查询，替代全表扫描 + GitHub API 调用的低效方案。
+    """
+    from app.models import FileChangeHistory
+    from app.services.github_client import GitHubClient
+
+    client = GitHubClient()
+    db = SessionLocal()
+    try:
+        prs = db.query(MyPR).filter(MyPR.state == "open").all()
+        # 也同步最近合并的 PR（前 50 个）
+        merged_prs = db.query(MyPR).filter(MyPR.state == "merged").order_by(
+            MyPR.last_sync.desc()).limit(50).all()
+        all_prs = prs + merged_prs
+
+        synced_count = 0
+        for pr in all_prs:
+            try:
+                files = client.get_pull_files(pr.pr_number)
+                if not files:
+                    continue
+
+                # 清除该 PR 的旧记录，重新写入
+                db.query(FileChangeHistory).filter(
+                    FileChangeHistory.pr_number == pr.pr_number).delete()
+                db.flush()
+
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                for f in files:
+                    fname = f.get("filename") if isinstance(f, dict) else None
+                    if not fname:
+                        continue
+                    db.add(FileChangeHistory(
+                        repo="vllm",
+                        file_path=fname,
+                        pr_number=pr.pr_number,
+                        pr_title=pr.title,
+                        pr_state=pr.state,
+                        additions=f.get("additions", 0) if isinstance(f, dict) else 0,
+                        deletions=f.get("deletions", 0) if isinstance(f, dict) else 0,
+                        change_status=f.get("status", "modified") if isinstance(f, dict) else "modified",
+                        last_synced_at=now,
+                    ))
+                synced_count += 1
+            except Exception:
+                logger.exception(f"Failed to sync file changes for PR #{pr.pr_number}")
+                continue
+
+            # 每 10 个 PR 提交一次，避免大事务
+            if synced_count % 10 == 0:
+                db.commit()
+
+        db.commit()
+        logger.info(f"File change history synced for {synced_count} PRs")
+    except Exception:
+        logger.exception("Error syncing file change history")
+    finally:
+        db.close()
 
 
 def validate_articles_job():

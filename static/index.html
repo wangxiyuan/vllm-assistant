@@ -39,6 +39,9 @@
     </script>
     <!-- Alpine.js (CDN) -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- 语法高亮 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body x-data="buildApp()"
       x-init="init()"
@@ -106,6 +109,10 @@
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     <span class="nav-kbd">6</span><span>学习文章</span>
                 </button>
+                <button class="nav-item" :class="{active: currentView === 'code-browser'}" @click="switchView('code-browser')">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                    <span class="nav-kbd">7</span><span>代码浏览</span>
+                </button>
             </nav>
 
             <div class="sidebar-footer">
@@ -113,9 +120,9 @@
                     vLLM Assistant v1.0
                 </div>
                 <div class="tt-host" style="position: relative; margin-top: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--text-disabled); cursor: help;">
-                    <span>快捷键: 1-6 切换 · R 同步</span>
+                    <span>快捷键: 1-7 切换 · R 同步</span>
                     <span class="tt" style="white-space: nowrap; bottom: calc(100% + 6px); left: 0; transform: none;">
-                        <span class="tt-line"><span class="tt-k">1-6</span> <span class="tt-v">切换视图</span></span>
+                        <span class="tt-line"><span class="tt-k">1-7</span> <span class="tt-v">切换视图</span></span>
                         <span class="tt-line"><span class="tt-k">R</span> <span class="tt-v">手动同步</span></span>
                         <span class="tt-line"><span class="tt-k">/</span> <span class="tt-v">聚焦搜索</span></span>
                         <span class="tt-line"><span class="tt-k">Esc</span> <span class="tt-v">关闭弹窗/抽屉</span></span>
@@ -161,6 +168,10 @@
                     <button class="nav-item" :class="{active: currentView === 'articles'}" @click="switchView('articles'); mobileMenuOpen = false">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                         <span class="nav-kbd">6</span><span>学习文章</span>
+                    </button>
+                    <button class="nav-item" :class="{active: currentView === 'code-browser'}" @click="switchView('code-browser'); mobileMenuOpen = false">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                        <span class="nav-kbd">7</span><span>代码浏览</span>
                     </button>
                 </nav>
             </div>
@@ -1187,7 +1198,279 @@
                         <div class="empty-title">加载渲染内容…</div>
                     </div>
 
-                    <div x-show="!articleDetailLoading && articleRenderedHtml" class="pr-body" x-html="articleRenderedHtml"></div>
+                    <div x-show="!articleDetailLoading && articleRenderedHtml" class="article-content-wrapper">
+                        <!-- TOC 侧边栏 -->
+                        <div class="article-toc-sidebar" :class="{'mobile-open': articleTocOpen}" x-show="articleToc.length > 0">
+                            <div class="article-toc-title">📖 目录</div>
+                            <template x-for="item in articleToc" :key="item.id">
+                                <a class="article-toc-item" :class="'level-' + item.level"
+                                   :href="'#' + item.id"
+                                   x-text="item.text"
+                                   @click.prevent="scrollToHeading(item.id)"></a>
+                            </template>
+                        </div>
+                        <!-- 文章正文 -->
+                        <div class="article-content-body">
+                            <button class="article-toc-toggle" x-show="articleToc.length > 0" @click="articleTocOpen = !articleTocOpen">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                                <span x-text="articleTocOpen ? '收起目录' : '显示目录 (' + articleToc.length + ')'"></span>
+                            </button>
+                            <div class="pr-body" x-html="articleRenderedHtml"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============= 代码浏览 ============= -->
+            <div x-show="currentView === 'code-browser'" class="view code-browser-view" x-cloak
+                 x-init="initCodeBrowser()">
+                <div class="code-browser-layout">
+                    <!-- 左侧目录树 -->
+                    <div class="cb-tree-panel">
+                        <div class="cb-panel-header">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                            <span class="cb-panel-title">文件</span>
+                            <!-- 仓库切换下拉 -->
+                            <select class="cb-repo-select" x-model="cbRepo"
+                                    @change="cbSwitchRepo(cbRepo)"
+                                    x-show="cbRepos.length > 1">
+                                <template x-for="r in cbRepos" :key="r">
+                                    <option x-text="r" :value="r"></option>
+                                </template>
+                            </select>
+                            <span class="cb-panel-repo" x-text="cbRepo" x-show="cbRepos.length <= 1"></span>
+                            <!-- 搜索按钮 -->
+                            <button class="cb-search-toggle" @click="cbToggleSearch()"
+                                    :title="cbSearchOpen ? '关闭搜索' : '搜索代码'">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            </button>
+                        </div>
+
+                        <!-- 搜索模式 -->
+                        <div x-show="cbSearchOpen" class="cb-search-panel" x-cloak>
+                            <div class="cb-search-bar">
+                                <input class="cb-search-input" type="text"
+                                       placeholder="搜索文件名或代码内容…"
+                                       x-model="cbSearchQuery"
+                                       @keydown.enter="cbDoSearch()"/>
+                                <button class="btn btn-sm btn-primary" @click="cbDoSearch()"
+                                        x-text="cbSearchLoading ? '搜索中…' : '搜索'"></button>
+                            </div>
+                            <div x-show="cbSearchLoading" class="cb-tree-loading">
+                                <span>搜索中…</span>
+                            </div>
+                            <div x-show="!cbSearchLoading && cbSearchResults.length > 0" class="cb-search-results">
+                                <template x-for="r in cbSearchResults" :key="r.path + ':' + r.line_no">
+                                    <div class="cb-search-result-item" @click="cbSearchResultClick(r)">
+                                        <span class="cb-search-result-file">
+                                            <span class="cb-file-icon" x-text="cbFileIcon(r.extension)"></span>
+                                            <span x-text="r.path"></span>
+                                        </span>
+                                        <span class="cb-search-result-line">
+                                            <span class="cb-search-result-lineno" x-text="':' + r.line_no"></span>
+                                            <span class="cb-search-result-text" x-text="r.text"></span>
+                                        </span>
+                                    </div>
+                                </template>
+                                <div x-show="cbSearchResults.length > 0 && cbSearchResults.length >= 50" class="cb-tree-loading">
+                                    <span>结果已截断（仅显示前 50 条）</span>
+                                </div>
+                            </div>
+                            <div x-show="!cbSearchLoading && cbSearchQuery && cbSearchResults.length === 0" class="cb-tree-loading">
+                                <span>无匹配结果</span>
+                            </div>
+                            <div x-show="!cbSearchLoading && !cbSearchQuery" class="cb-tree-loading">
+                                <span>输入关键词搜索代码</span>
+                            </div>
+                        </div>
+
+                        <!-- 目录树主体 -->
+                        <div class="cb-tree-body" x-show="!cbSearchOpen">
+                            <!-- 文件名快速过滤 -->
+                            <div class="cb-filter-bar" x-show="cbTree.dirs.length > 10 || cbTree.files.length > 10">
+                                <input class="cb-filter-input" type="text"
+                                       placeholder="过滤文件…"
+                                       x-model="cbFilterQuery"/>
+                            </div>
+                            <!-- 根目录入口 — 显示当前路径层级 -->
+                            <template x-if="cbPath">
+                                <div>
+                                    <div class="cb-tree-item cb-tree-dir cb-tree-parent"
+                                         @click="cbNavigateTo(cbBreadcrumb.length > 1 ? cbBreadcrumb.slice(0, -1).map(x => x.path).join('/') : '')">
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="transform: rotate(180deg);"><path d="M8 5l8 7-8 7z"/></svg>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                        <span class="cb-tree-name">.. / 上级</span>
+                                    </div>
+                                    <!-- 当前路径面包屑（在目录树顶部展示） -->
+                                    <div class="cb-tree-pathbar">
+                                        <span class="cb-tree-path-item" @click="cbNavigateTo('')" x-text="cbRepo"></span>
+                                        <template x-for="(crumb, idx) in cbBreadcrumb" :key="crumb.path">
+                                            <span class="cb-tree-path-item">
+                                                <span style="color: var(--text-tertiary);">/</span>
+                                                <span :class="{'cb-tree-path-current': idx === cbBreadcrumb.length - 1}"
+                                                      @click="cbNavigateBreadcrumb(crumb.path)"
+                                                      style="cursor: pointer;">
+                                                    <span x-text="crumb.name"></span>
+                                                </span>
+                                            </span>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                            <template x-if="!cbPath">
+                                <div class="cb-tree-item cb-tree-root" @click="cbNavigateTo('')">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                    <span class="cb-tree-name" x-text="cbRepo"></span>
+                                </div>
+                            </template>
+
+                            <template x-for="d in cbGetFilteredDirs()" :key="d.path">
+                                <div class="cb-tree-item cb-tree-dir"
+                                     :class="{'cb-tree-active': cbPath === d.path}"
+                                     @click="cbNavigateTo(d.path)">
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5l8 7-8 7z"/></svg>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                    <span class="cb-tree-name" x-text="d.name"></span>
+                                </div>
+                            </template>
+
+                            <template x-for="f in cbGetFilteredFiles()" :key="f.path">
+                                <div class="cb-tree-item cb-tree-file"
+                                     :class="{'cb-tree-active': cbFile?.path === f.path}"
+                                     @click="cbOpenFile(f.path)">
+                                    <span class="cb-file-icon" x-text="cbFileIcon(f.path.split('.').pop() ? '.' + f.path.split('.').pop() : '')"></span>
+                                    <span class="cb-tree-name" x-text="f.name"></span>
+                                </div>
+                            </template>
+
+                            <div x-show="cbTreeLoading" class="cb-tree-loading">
+                                <span>加载中…</span>
+                            </div>
+                            <div x-show="!cbTreeLoading && cbGetFilteredDirs().length === 0 && cbGetFilteredFiles().length === 0 && cbPath !== ''" class="cb-tree-loading">
+                                <span>空目录</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 中间文件查看器 -->
+                    <div class="cb-file-panel">
+                        <!-- 面包屑导航 -->
+                        <div class="cb-breadcrumb" x-show="cbBreadcrumb.length > 0">
+                            <span class="cb-breadcrumb-item cb-breadcrumb-home" @click="cbNavigateTo('')" title="回到根目录">~</span>
+                            <template x-for="(crumb, idx) in cbBreadcrumb" :key="crumb.path">
+                                <span class="cb-breadcrumb-item">
+                                    <span style="color: var(--text-tertiary); margin: 0 4px;">/</span>
+                                    <span :class="{'cb-breadcrumb-active': idx === cbBreadcrumb.length - 1}"
+                                          @click="cbNavigateBreadcrumb(crumb.path)"
+                                          style="cursor: pointer;">
+                                        <span x-text="crumb.name"></span>
+                                    </span>
+                                </span>
+                            </template>
+                        </div>
+
+                        <!-- 文件内容 -->
+                        <div x-show="cbFileLoading" class="empty-state">
+                            <div class="empty-icon">⟳</div>
+                            <div class="empty-title">加载文件中…</div>
+                        </div>
+
+                        <div x-show="!cbFileLoading && cbFile" class="cb-file-content-wrapper">
+                            <div class="cb-file-header">
+                                <span class="cb-file-icon-lg" x-text="cbFileIcon(cbFile.extension)"></span>
+                                <span class="cb-file-path" x-text="cbFile.path"></span>
+                                <span class="cb-file-meta">
+                                    <span x-text="cbFile.total_lines + ' 行'"></span>
+                                    <span x-show="cbFile.size !== undefined" x-text="' · ' + cbFormatSize(cbFile.size)"></span>
+                                </span>
+                                <!-- Blame 切换按钮 -->
+                                <button class="btn btn-sm btn-ghost" @click="cbToggleBlame()"
+                                        :title="cbBlameVisible ? '隐藏 Blame' : '显示 Blame'"
+                                        :class="{'btn-active': cbBlameVisible}">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    <span x-text="cbBlameVisible ? '隐藏 Blame' : 'Blame'"></span>
+                                </button>
+                                <!-- 历史切换按钮 -->
+                                <button class="btn btn-sm btn-ghost" @click="cbToggleHistory()"
+                                        :title="cbHistoryOpen ? '收起历史' : '展开历史'"
+                                        x-show="cbHistory.length > 0">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    <span x-text="cbHistoryOpen ? '收起历史' : '历史 (' + cbHistory.length + ')'"></span>
+                                </button>
+                            </div>
+                            <div class="cb-file-code">
+                                <div class="cb-file-code-scroll">
+                                    <div class="cb-line-numbers" x-html="cbRenderLineNumbers()"></div>
+                                    <!-- Blame 信息列（跟随代码同步滚动） -->
+                                    <div class="cb-blame-column" x-show="cbBlameVisible" x-cloak>
+                                        <template x-for="(line, idx) in cbFileLines()" :key="'b' + idx">
+                                            <div class="cb-blame-cell"
+                                                 @click="cbBlameClick(idx)"
+                                                 :title="cbBlameTitle(idx)">
+                                                <span x-text="cbBlameCell(idx)"></span>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    <pre class="cb-code-content"><code x-html="cbHighlightedContent()"></code></pre>
+                                </div>
+                            </div>
+                            <!-- Diff 覆盖层（在文件查看器区域展示，空间更大） -->
+                            <div class="cb-diff-overlay" x-show="cbDiffOpen" x-cloak>
+                                <div class="cb-diff-overlay-header">
+                                    <span class="cb-diff-overlay-title">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                                        文件变更
+                                        <span class="cb-commit-hash" style="margin-left: 8px; font-size: 13px;" x-text="cbDiff?.commit_hash?.substring(0, 7)"></span>
+                                    </span>
+                                    <button class="btn btn-sm btn-ghost" @click="cbCloseDiff()">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                        关闭
+                                    </button>
+                                </div>
+                                <div x-show="cbDiffLoading" class="cb-diff-overlay-loading">
+                                    <span>加载 diff…</span>
+                                </div>
+                                <div x-show="!cbDiffLoading && cbDiff" class="cb-diff-overlay-content">
+                                    <div class="cb-diff-render" x-html="cbRenderDiff()"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div x-show="!cbFileLoading && !cbFile && !cbTreeLoading && !cbSearchOpen" class="empty-state">
+                            <div class="empty-icon">&lt;/&gt;</div>
+                            <div class="empty-title">选择一个文件查看内容</div>
+                            <div class="empty-desc">从左侧目录树中选择一个文件</div>
+                        </div>
+                    </div>
+
+                    <!-- 右侧变更历史面板 -->
+                    <div class="cb-history-panel" x-show="cbHistoryOpen && cbHistory.length > 0" x-cloak>
+                        <div class="cb-panel-header">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            <span class="cb-panel-title">变更历史</span>
+                            <span class="cb-panel-count" x-text="cbHistory.length + ' commit'"></span>
+                            <button class="modal-close" @click="cbHistoryOpen = false" style="position: static;">&times;</button>
+                        </div>
+                        <div class="cb-history-body">
+                            <!-- Commit 列表 -->
+                            <template x-for="commit in cbHistory" :key="commit.hash">
+                                <div class="cb-commit-item" @click="cbShowDiff(commit)">
+                                    <div class="cb-commit-item-header">
+                                        <span class="cb-commit-hash" x-text="commit.short_hash"></span>
+                                        <span class="cb-commit-author" x-text="commit.author"></span>
+                                        <span class="cb-commit-date" x-text="cbFormatRelativeDate(commit.date)"></span>
+                                    </div>
+                                    <div class="cb-commit-msg" x-text="commit.message"></div>
+                                    <div class="cb-commit-meta" x-show="commit.pr_number">
+                                        <span class="badge badge-state-merged" x-show="commit.pr_state === 'merged'" x-text="'PR #' + commit.pr_number"></span>
+                                        <span class="badge badge-state-open" x-show="commit.pr_state === 'open'" x-text="'PR #' + commit.pr_number"></span>
+                                        <span class="badge badge-state-closed" x-show="commit.pr_state === 'closed'" x-text="'PR #' + commit.pr_number"></span>
+                                        <span class="cb-commit-pr-title" x-text="commit.pr_title" x-show="commit.pr_title"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1289,7 +1572,20 @@
                         <span style="color: var(--signal-red);" x-show="previewRefs.filter(r => !r.is_valid).length > 0" x-text="previewRefs.filter(r => !r.is_valid).length + ' 无效'"></span>
                     </div>
 
-                    <div class="pr-body" x-html="previewHtml"></div>
+                    <!-- 预览内容 + TOC -->
+                    <div class="article-content-wrapper">
+                        <div class="article-content-body">
+                            <div class="pr-body" x-html="previewHtml"></div>
+                        </div>
+                        <div class="article-toc-sidebar" x-show="articleToc.length > 0" style="margin-top: 0;">
+                            <div class="article-toc-title">📖 目录预览</div>
+                            <template x-for="item in articleToc" :key="item.id">
+                                <a class="article-toc-item" :class="'level-' + item.level"
+                                   :href="'#' + item.id"
+                                   x-text="item.text"></a>
+                            </template>
+                        </div>
+                    </div>
 
                     <div x-show="!previewHtml" class="empty-state">
                         <div class="empty-icon">⟳</div>
@@ -1418,6 +1714,10 @@
                                     <span class="del" x-text="'-' + (f.deletions || 0)"></span>
                                 </span>
                                 <span class="file-name" x-text="f.filename"></span>
+                                <button class="btn btn-sm btn-ghost" @click.stop="openFileHistory(f.filename, getRepoFromPR())" title="查看文件变更历史" style="padding: 2px 5px; font-size: 11px;">
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                    历史
+                                </button>
                             </li>
                         </template>
                     </ul>
@@ -1774,6 +2074,72 @@
         </div>
     </div>
 
+    <!-- ===== File History Drawer ===== -->
+    <div x-show="fileHistoryData || fileHistoryLoading" x-cloak class="modal-backdrop" @click.self="closeFileHistory()">
+        <div class="drawer drawer-wide" x-show="fileHistoryData || fileHistoryLoading" x-transition:enter="drawer">
+            <div class="drawer-header">
+                <div class="drawer-title">
+                    <div class="pr-id">
+                        <span class="text-mono" style="color: var(--text-tertiary); font-size: 12px;">FILE HISTORY</span>
+                    </div>
+                    <h2 class="text-mono" style="font-size: 18px; word-break: break-all;" x-text="fileHistoryFilePath"></h2>
+                    <div class="item-meta mt-2" x-show="fileHistoryData">
+                        <span class="meta-item" x-text="'共 ' + fileHistoryData?.total_prs + ' 个相关 PR'"></span>
+                        <span class="meta-item" x-text="fileHistoryData?.repo || 'vllm'"></span>
+                    </div>
+                </div>
+                <button class="drawer-close" @click="closeFileHistory()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="drawer-body">
+                <div x-show="fileHistoryLoading" class="empty-state">
+                    <div class="empty-icon">⟳</div>
+                    <div class="empty-title">查询文件变更历史中…</div>
+                    <div class="empty-desc">正在从 GitHub 获取 PR 文件列表</div>
+                </div>
+
+                <div x-show="!fileHistoryLoading && fileHistoryData" class="list">
+                    <template x-for="pr in (fileHistoryData?.prs || [])" :key="pr.pr_number">
+                        <div class="list-item" @click="openPR({pr_number: pr.pr_number, title: pr.title, state: pr.state})">
+                            <span class="item-number pr" x-text="'#' + pr.pr_number"></span>
+                            <div class="item-main">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="item-title" style="cursor: pointer;" x-text="pr.title"></span>
+                                    <span class="badge" :class="'badge-state-' + (pr.state || 'open')" x-text="prStateLabel(pr.state)"></span>
+                                    <span class="badge" x-show="pr.matched_by === 'file_list'" style="background: rgba(255, 180, 84, 0.15); color: var(--amber); border-color: var(--amber-dim);">精确匹配</span>
+                                </div>
+                                <div class="item-meta">
+                                    <span class="meta-item" x-show="pr.branch">
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                                        <span x-text="pr.branch"></span>
+                                    </span>
+                                    <template x-if="pr.additions !== undefined">
+                                        <span class="diffstat">
+                                            <span class="add" x-text="'+' + (pr.additions || 0)"></span>
+                                            <span class="del" x-text="'-' + (pr.deletions || 0)"></span>
+                                            <span x-text="pr.status"></span>
+                                        </span>
+                                    </template>
+                                    <span class="meta-item" x-text="pr.source === 'my_pr' ? '我的 PR' : '社区 PR'"></span>
+                                </div>
+                            </div>
+                            <div class="item-side">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-tertiary)"><polyline points="9 18 15 12 9 6"/></svg>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <div x-show="!fileHistoryLoading && fileHistoryData && fileHistoryData.prs.length === 0" class="empty-state">
+                    <div class="empty-icon">🔍</div>
+                    <div class="empty-title">未找到变更记录</div>
+                    <div class="empty-desc">该文件可能没有被任何缓存的 PR 改过，或暂时不在同步范围内</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== Toasts ===== -->
     <div class="toast-container">
         <template x-for="t in toasts" :key="t.id">
@@ -1793,5 +2159,6 @@
     <script src="/static/js/personal_todo.js?v=15"></script>
     <script src="/static/js/intelligence.js?v=15"></script>
     <script src="/static/js/articles.js?v=1"></script>
+    <script src="/static/js/code_browser.js?v=1"></script>
 </body>
 </html>

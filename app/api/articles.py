@@ -204,6 +204,7 @@ async def preview_article(req: PreviewRequest, db: Session = Depends(get_db)):
     return {
         "html": result["html"],
         "refs": result["refs"],
+        "toc": result.get("toc", []),
     }
 
 
@@ -226,6 +227,7 @@ async def render_article(article_id: int, sync_code: bool = Query(False), db: Se
         "title": article.title,
         "html": result["html"],
         "embedded_codes": result["embedded_codes"],
+        "toc": result.get("toc", []),
     }
 
 

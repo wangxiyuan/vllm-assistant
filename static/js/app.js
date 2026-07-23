@@ -91,6 +91,7 @@ function app() {
                 'watchlist': '搜索关注项…',
                 'personal-todo': '搜索任务…',
                 'intelligence': '搜索报告…',
+                'code-browser': '搜索文件…',
             };
             return map[this.currentView] || '搜索…';
         },
@@ -492,7 +493,7 @@ function app() {
 
         // ===== Global keyboard shortcuts =====
         handleGlobalShortcut(e) {
-            // Number keys 1-6 to switch views (when not in input)
+            // Number keys 1-7 to switch views (when not in input)
             const tag = e.target.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
             if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -503,6 +504,7 @@ function app() {
             else if (e.key === '4') { e.preventDefault(); this.switchView('personal-todo'); }
             else if (e.key === '5') { e.preventDefault(); this.switchView('intelligence'); }
             else if (e.key === '6') { e.preventDefault(); this.switchView('articles'); }
+            else if (e.key === '7') { e.preventDefault(); this.switchView('code-browser'); }
             else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); this.refreshAll(); }
         },
 
@@ -628,7 +630,7 @@ function app() {
 // 让整个合并失败 -> 所有变量未定义。
 // 用 defineProperty 复制 descriptor 能保留 getter，后续 Alpine 访问时才求值。
 window.buildApp = function() {
-    const sources = [app(), communityMixin(), prCenterMixin(), personalTodoMixin(), intelligenceMixin(), articlesMixin()];
+    const sources = [app(), communityMixin(), prCenterMixin(), personalTodoMixin(), intelligenceMixin(), articlesMixin(), codeBrowserMixin()];
     const result = {};
     for (const src of sources) {
         const descs = Object.getOwnPropertyDescriptors(src);

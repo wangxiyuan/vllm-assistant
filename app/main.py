@@ -120,6 +120,7 @@ from app.api.personal_todo import router as personal_todo_router
 from app.api.intelligence import router as intelligence_router
 from app.api.articles import router as articles_router
 from app.api.sync import router as sync_router
+from app.api.code_browser import router as code_browser_router
 
 app.include_router(community_router, prefix="/api/community", tags=["Community Pulse"])
 app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command Center"])
@@ -130,6 +131,7 @@ app.include_router(personal_todo_router, prefix="/api/personal-todo", tags=["Per
 app.include_router(intelligence_router, prefix="/api/intelligence", tags=["Intelligence Reports"])
 app.include_router(articles_router, prefix="/api/articles", tags=["Articles"])
 app.include_router(sync_router, prefix="/api/sync", tags=["Sync"])
+app.include_router(code_browser_router, prefix="/api/code-browser", tags=["Code Browser"])
 
 
 # 静态文件

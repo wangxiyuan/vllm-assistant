@@ -36,9 +36,7 @@ env/
 .env
 
 # Database
-data/*.db
-data/*.sqlite3
-
+data/
 # Testing
 .pytest_cache/
 .coverage

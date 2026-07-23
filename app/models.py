@@ -15,6 +15,7 @@ from sqlalchemy import (
     Boolean,
     Text,
     ForeignKey,
+    Index,
     UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, relationship
@@ -458,3 +459,28 @@ class RepoCache(Base):
     branch = Column(String(50), default="main")
     last_synced_at = Column(DateTime)
     commit_sha = Column(String(40))
+
+
+class FileChangeHistory(Base):
+    """文件变更历史记录（scheduler 同步时填充）
+
+    记录每个 PR 变更了哪些文件，用于 O(1) 查询文件变更历史。
+    避免了全表扫描 + GitHub API 调用的低效方案。
+    """
+    __tablename__ = "file_change_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    repo = Column(String(100), nullable=False, default="vllm")
+    file_path = Column(String(500), nullable=False)
+    pr_number = Column(Integer, nullable=False)
+    pr_title = Column(Text)
+    pr_state = Column(String(20))
+    additions = Column(Integer, default=0)
+    deletions = Column(Integer, default=0)
+    change_status = Column(String(20), default="modified")  # added / modified / removed
+    last_synced_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    __table_args__ = (
+        Index("idx_fch_repo_file", "repo", "file_path", mysql_length=255),
+        Index("idx_fch_pr_number", "pr_number"),
+    )

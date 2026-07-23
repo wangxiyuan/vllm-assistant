@@ -38,6 +38,10 @@ function articlesMixin() {
         articleDetailLoading: false,
         articleRenderedHtml: '',
         articleEmbeddedCodes: [],
+        articleToc: [],
+        articleTocOpen: false,
+        _tocObserver: null,
+        _tocTimer: null,
 
         // ===== 验证 =====
         validating: false,
@@ -255,6 +259,7 @@ function articlesMixin() {
                 });
                 this.previewHtml = data.html || '';
                 this.previewRefs = data.refs || [];
+                this.articleToc = data.toc || [];
                 this.articleEditorSubView = 'preview';
             } catch (e) {
                 this.showToast('预览失败', e.message, 'error');
@@ -264,6 +269,7 @@ function articlesMixin() {
             this.articleEditorSubView = 'editor';
             this.previewHtml = '';
             this.previewRefs = [];
+            this.articleToc = [];
         },
 
         // ===== 查看文章详情（渲染后）=====
@@ -273,10 +279,15 @@ function articlesMixin() {
             this.articleDetailLoading = true;
             this.articleRenderedHtml = '';
             this.articleEmbeddedCodes = [];
+            this.articleToc = [];
+            this.articleTocOpen = false;
             try {
                 const data = await this.api(`/api/articles/${article.id}/rendered?sync_code=false`);
                 this.articleRenderedHtml = data.html || '';
                 this.articleEmbeddedCodes = data.embedded_codes || [];
+                this.articleToc = data.toc || [];
+                // 设置 TOC 活动项跟踪（延迟等待 DOM 渲染）
+                setTimeout(() => this._setupTocObserver(), 100);
             } catch (e) {
                 this.articleRenderedHtml = `<div class="code-embed-error">加载失败: ${this.esc(e.message)}</div>`;
             } finally {
@@ -288,6 +299,62 @@ function articlesMixin() {
             this.selectedArticle = null;
             this.articleRenderedHtml = '';
             this.articleEmbeddedCodes = [];
+            this.articleToc = [];
+            this.articleTocOpen = false;
+            this._cleanupToc();
+        },
+
+        // ===== TOC 锚点跳转 =====
+        scrollToHeading(id) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                this.articleTocOpen = false;
+            }
+        },
+
+        // ===== TOC 活动项追踪（高亮当前阅读的章节）=====
+        _setupTocObserver() {
+            if (this._tocTimer) {
+                clearTimeout(this._tocTimer);
+                this._tocTimer = null;
+            }
+            this._tocTimer = setTimeout(() => {
+                this._tocTimer = null;
+                if (this._tocObserver) {
+                    this._tocObserver.disconnect();
+                }
+                const links = document.querySelectorAll('.article-toc-item');
+                if (!links.length) return;
+                const headings = [];
+                for (const item of this.articleToc) {
+                    const el = document.getElementById(item.id);
+                    if (el) headings.push(el);
+                }
+                if (!headings.length) return;
+                this._tocObserver = new IntersectionObserver((entries) => {
+                    const visible = entries.filter(e => e.isIntersecting);
+                    if (visible.length > 0) {
+                        const top = visible.reduce((a, b) => a.boundingClientRect.top < b.boundingClientRect.top ? a : b);
+                        const id = top.target.id;
+                        links.forEach(link => {
+                            link.classList.toggle('active', link.getAttribute('href') === '#' + id);
+                        });
+                    }
+                }, { rootMargin: '-80px 0px -60% 0px' });
+                headings.forEach(el => this._tocObserver.observe(el));
+            }, 100);
+        },
+
+        _cleanupToc() {
+            if (this._tocTimer) {
+                clearTimeout(this._tocTimer);
+                this._tocTimer = null;
+            }
+            if (this._tocObserver) {
+                this._tocObserver.disconnect();
+                this._tocObserver = null;
+            }
         },
 
         // ===== 验证文章 =====

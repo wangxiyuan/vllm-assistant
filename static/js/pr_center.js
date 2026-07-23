@@ -651,6 +651,39 @@ function prCenterMixin() {
             }
         },
 
+        // ===== File history state =====
+        fileHistoryData: null,
+        fileHistoryLoading: false,
+        fileHistoryFilePath: '',
+
+        async openFileHistory(filePath, repo = 'vllm') {
+            this.fileHistoryFilePath = filePath;
+            this.fileHistoryData = null;
+            this.fileHistoryLoading = true;
+            try {
+                this.fileHistoryData = await this.api(`/api/sync/file-history?repo=${encodeURIComponent(repo)}&file_path=${encodeURIComponent(filePath)}`, {}, 60000);
+            } catch (e) {
+                this.showToast('加载文件历史失败', e.message, 'error');
+            } finally {
+                this.fileHistoryLoading = false;
+            }
+        },
+
+        closeFileHistory() {
+            this.fileHistoryData = null;
+            this.fileHistoryFilePath = '';
+        },
+
+        // 从当前选中的 PR 的 URL 中提取仓库名
+        getRepoFromPR() {
+            const pr = this.selectedPR || this.prDetails?.pr;
+            if (pr?.url) {
+                const m = pr.url.match(/github\.com\/([^/]+\/[^/]+)\//);
+                if (m) return m[1].split('/')[1];  // repo name only
+            }
+            return 'vllm';
+        },
+
         // 月度柱状图高度计算（百分比归一化）
         monthBarHeight(count, allMonthly) {
             const max = Math.max(...Object.values(allMonthly), 1);

@@ -4,10 +4,11 @@
 
 渲染文章，将代码引用替换为实际代码片段
 """
-from typing import Dict, List
+from html.parser import HTMLParser
+from typing import Dict, List, Tuple
 import re
 
-from markdown import markdown
+from markdown import markdown, Markdown
 
 from app.models import Article, CodeReference
 from app.services.code_ref_parser import CodeRefParser
@@ -40,6 +41,53 @@ def _preprocess_math(content: str) -> str:
         content,
     )
     return content
+
+
+def _toc_html_to_json(toc_html: str) -> List[dict]:
+    """将 markdown toc extension 输出的 HTML 目录树解析为结构化 JSON。
+
+    输入: md.toc 输出的 <div class="toc"><ul><li>...</li></ul></div>
+    输出: [{"level": 1, "id": "heading-id", "text": "标题文本"}, ...]
+    """
+    items = []
+
+    class TocParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.current_level = 0
+            self.in_anchor = False
+            self.anchor_text = ""
+            self.anchor_href = ""
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "ul":
+                self.current_level += 1
+            elif tag == "a":
+                self.in_anchor = True
+                self.anchor_text = ""
+                self.anchor_href = ""
+                for name, value in attrs:
+                    if name == "href":
+                        self.anchor_href = (value or "").lstrip("#")
+
+        def handle_endtag(self, tag):
+            if tag == "ul":
+                self.current_level -= 1
+            elif tag == "a":
+                self.in_anchor = False
+                if self.anchor_href:
+                    items.append({
+                        "level": self.current_level,
+                        "id": self.anchor_href,
+                        "text": self.anchor_text.strip(),
+                    })
+
+        def handle_data(self, data):
+            if self.in_anchor:
+                self.anchor_text += data
+
+    TocParser().feed(toc_html)
+    return items
 
 
 class ArticleRenderer:
@@ -147,12 +195,17 @@ class ArticleRenderer:
         # 预处理数学公式
         rendered_content = _preprocess_math(rendered_content)
 
-        # 转换为 HTML（启用围栏代码块和代码高亮扩展）
-        full_html = markdown(rendered_content, extensions=['fenced_code', 'codehilite', 'tables'])
+        # 转换为 HTML（启用围栏代码块、代码高亮、表格和目录扩展）
+        md_engine = Markdown(extensions=['fenced_code', 'codehilite', 'tables', 'toc'],
+                             extension_configs={'toc': {'toc_depth': '1-3', 'anchorlink': False}})
+        full_html = md_engine.convert(rendered_content)
+        # 从 md.toc 解析结构化目录
+        toc = _toc_html_to_json(md_engine.toc)
 
         return {
             "html": full_html,
             "embedded_codes": embedded_info,
+            "toc": toc,
         }
 
     def render_preview(self, content: str) -> Dict:
@@ -197,9 +250,14 @@ class ArticleRenderer:
         # 预处理数学公式
         rendered_content = _preprocess_math(rendered_content)
 
-        full_html = markdown(rendered_content, extensions=['fenced_code', 'codehilite', 'tables'])
+        # 转换为 HTML（启用围栏代码块、代码高亮、表格和目录扩展）
+        md_engine = Markdown(extensions=['fenced_code', 'codehilite', 'tables', 'toc'],
+                             extension_configs={'toc': {'toc_depth': '1-3', 'anchorlink': False}})
+        full_html = md_engine.convert(rendered_content)
+        # 从 md.toc 解析结构化目录
+        toc = _toc_html_to_json(md_engine.toc)
 
-        return {"html": full_html, "refs": ref_details}
+        return {"html": full_html, "refs": ref_details, "toc": toc}
 
     def _generate_code_html(self, content: str, start_line: int, end_line: int,
                             is_outdated: bool = False,
