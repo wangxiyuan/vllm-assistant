@@ -5,12 +5,41 @@
 渲染文章，将代码引用替换为实际代码片段
 """
 from typing import Dict, List
+import re
 
 from markdown import markdown
 
 from app.models import Article, CodeReference
 from app.services.code_ref_parser import CodeRefParser
 from app.services.local_code_sync import LocalCodeSyncService
+
+
+def _preprocess_math(content: str) -> str:
+    """将 $$...$$、$...$、\[...\] 数学公式包裹为 HTML，避免 markdown 引擎破坏内容"""
+    # 用 HTML 实体 &#92; 代替反斜杠，避免 markdown 引擎吃掉 \ 字符
+    BS = '&#92;'
+
+    # 先处理块级公式 \[...\]
+    content = re.sub(
+        r'\\\[(.+?)\\\]',
+        rf'<div class="math-block">{BS}[\1{BS}]</div>',
+        content,
+        flags=re.DOTALL,
+    )
+    # 再处理块级公式 $$...$$
+    content = re.sub(
+        r'\$\$(.+?)\$\$',
+        rf'<div class="math-block">{BS}[\1{BS}]</div>',
+        content,
+        flags=re.DOTALL,
+    )
+    # 最后处理行内公式 $...$（避免匹配到已被替换的）
+    content = re.sub(
+        r'(?<!\$)\$(.+?)\$(?!\$)',
+        rf'<span class="math-inline">{BS}(\1{BS})</span>',
+        content,
+    )
+    return content
 
 
 class ArticleRenderer:
@@ -115,8 +144,11 @@ class ArticleRenderer:
                 f"`{raw_match}`", html
             )
 
-        # 转换为 HTML
-        full_html = markdown(rendered_content)
+        # 预处理数学公式
+        rendered_content = _preprocess_math(rendered_content)
+
+        # 转换为 HTML（启用围栏代码块和代码高亮扩展）
+        full_html = markdown(rendered_content, extensions=['fenced_code', 'codehilite', 'tables'])
 
         return {
             "html": full_html,
@@ -162,7 +194,10 @@ class ArticleRenderer:
         for raw_match, html in ref_map.items():
             rendered_content = rendered_content.replace(f"`{raw_match}`", html)
 
-        full_html = markdown(rendered_content)
+        # 预处理数学公式
+        rendered_content = _preprocess_math(rendered_content)
+
+        full_html = markdown(rendered_content, extensions=['fenced_code', 'codehilite', 'tables'])
 
         return {"html": full_html, "refs": ref_details}
 

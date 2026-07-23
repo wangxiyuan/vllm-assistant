@@ -5,8 +5,11 @@ function prCenterMixin() {
         // ===== PR detail drawer state =====
         selectedPR: null,
         prDetails: null,
+        prLoadError: null,
         aiReview: null,
         aiReviewLoading: false,  // AI Review 加载中
+        aiReviewElapsed: 0,  // AI Review 已耗时（秒）
+        aiReviewTimer: null,
         aiSummary: null,  // PR/Issue AI 总结
         aiSummaryLoading: false,  // AI 总结加载中
         aiSummaryCollapsed: false,  // AI 总结折叠状态
@@ -19,6 +22,7 @@ function prCenterMixin() {
         // ===== Issue detail drawer state =====
         selectedIssue: null,
         issueDetails: null,
+        issueLoadError: null,
         loadingIssue: false,
 
         // ===== 我的贡献 tab =====
@@ -149,6 +153,7 @@ function prCenterMixin() {
         async openPR(pr) {
             this.selectedPR = pr;
             this.prDetails = null;
+            this.prLoadError = null;
             this.aiReview = null;
             this.aiSummary = null;
             this.aiSummaryCollapsed = false;
@@ -162,18 +167,23 @@ function prCenterMixin() {
                 // 异步读取 AI 缓存（不阻塞详情加载）
                 this._loadCachedAI('pr', pr.pr_number);
             } catch (e) {
+                this.prLoadError = e.message;
                 this.showToast('加载 PR 详情失败', e.message, 'error');
             } finally {
                 this.loadingDetails = false;
             }
+            this._scrollDrawerToTop();
         },
 
         closePR() {
             this.selectedPR = null;
             this.prDetails = null;
+            this.prLoadError = null;
             this.aiReview = null;
             this.aiSummary = null;
             this.loadingDetails = false;
+            if (this.aiReviewTimer) { clearInterval(this.aiReviewTimer); this.aiReviewTimer = null; }
+            this.aiReviewElapsed = 0;
             // 不重置 pendingReviews/pendingSummaries，让进行中的请求继续
             // 不重置 aiReviewLoading/aiSummaryLoading（下次 openPR 会根据 pending 状态恢复）
         },
@@ -182,6 +192,7 @@ function prCenterMixin() {
         async openIssue(issue) {
             this.selectedIssue = issue;
             this.issueDetails = issue.body ? issue : null;
+            this.issueLoadError = null;
             this.aiSummary = null;
             this.aiSummaryCollapsed = false;
             this.aiSummaryLoading = !!this.pendingSummaries['issue:' + issue.number];
@@ -193,15 +204,18 @@ function prCenterMixin() {
                 // 异步读取 AI 缓存
                 this._loadCachedAI('issue', issue.number);
             } catch (e) {
+                this.issueLoadError = e.message;
                 this.showToast('加载 Issue 失败', e.message, 'error');
             } finally {
                 this.loadingIssue = false;
             }
+            this._scrollDrawerToTop();
         },
 
         closeIssue() {
             this.selectedIssue = null;
             this.issueDetails = null;
+            this.issueLoadError = null;
             this.aiSummary = null;
             this.loadingIssue = false;
         },
@@ -416,10 +430,15 @@ function prCenterMixin() {
             s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
             // 斜体
             s = s.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
-            // 链接 [text](url)
-            s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-            // 裸链接
-            s = s.replace(/(?<!["'>])(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+            // 链接 [text](url) — 只允许 http/https/mailto 协议，防止 javascript: XSS
+            s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, text, url) {
+                if (/^(https?:|mailto:)/i.test(url)) {
+                    return '<a href="' + url + '" target="_blank" rel="noopener">' + text + '</a>';
+                }
+                return text;
+            });
+            // 裸链接 — 只允许 http/https
+            s = s.replace(/(^|[^"\'>=])(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
             return s;
         },
 
@@ -433,8 +452,14 @@ function prCenterMixin() {
             const prNumber = this.selectedPR.pr_number;
             this.aiReview = null;
             this.aiReviewLoading = true;
+            this.aiReviewElapsed = 0;
             this.aiReviewCollapsed = false;
             this.pendingReviews[prNumber] = true;
+            // 启动计时器
+            if (this.aiReviewTimer) clearInterval(this.aiReviewTimer);
+            this.aiReviewTimer = setInterval(() => {
+                this.aiReviewElapsed++;
+            }, 1000);
             // 先清除旧缓存，确保重新生成
             try {
                 await this.api('/api/ai-assistant/clear-cache', {
@@ -464,6 +489,7 @@ function prCenterMixin() {
                 }
             } finally {
                 delete this.pendingReviews[prNumber];
+                if (this.aiReviewTimer) { clearInterval(this.aiReviewTimer); this.aiReviewTimer = null; }
                 if (this.selectedPR?.pr_number === prNumber) {
                     this.aiReviewLoading = false;
                 }
@@ -512,6 +538,14 @@ function prCenterMixin() {
         },
 
         // ===== 状态标签文本（中文）=====
+
+        _scrollDrawerToTop() {
+            // 使用 nextTick 确保 DOM 已更新
+            setTimeout(() => {
+                const drawerBody = document.querySelector('.drawer-body');
+                if (drawerBody) drawerBody.scrollTop = 0;
+            }, 50);
+        },
 
         ciLabel(status) {
             return {'pass': 'CI 通过', 'fail': 'CI 失败', 'pending': 'CI 进行中', 'unknown': 'CI 未知'}[status] || 'CI';

@@ -15,6 +15,8 @@ function communityMixin() {
         },
 
         async loadCommunityData() {
+            this.communityPage = 1;
+            this.communityLoadingMore = false;
             try {
                 const params = new URLSearchParams();
                 params.set('sort_by', this.sortBy);

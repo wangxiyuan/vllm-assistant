@@ -60,6 +60,28 @@ fi
 # 检查依赖
 print_info "检查依赖..."
 pip install -q -r requirements.txt
+
+# 验证所有依赖是否已安装（用临时文件传递缺失列表，避免 subshell 变量为空）
+python3 -c "
+import pkg_resources, sys
+with open('requirements.txt') as f:
+    reqs = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+missing = []
+for req in reqs:
+    try:
+        pkg_resources.require(req)
+    except (pkg_resources.DistributionNotFound, pkg_resources.VersionConflict):
+        missing.append(req)
+if missing:
+    print(' '.join(missing))
+    sys.exit(0)
+else:
+    sys.exit(1)
+" 2>/dev/null && {
+    print_warning "检测到未安装的依赖，尝试重新安装..."
+    pip install -U -r requirements.txt
+    print_success "缺失依赖已安装"
+}
 print_success "依赖检查完成"
 
 # 检查环境变量文件
@@ -75,8 +97,25 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
-# 加载环境变量
-export $(grep -v '^#' .env | xargs)
+# 加载环境变量（安全方式：使用 set -a 自动导出所有变量，支持含空格的值）
+set -a
+source .env
+set +a
+
+# 清理旧进程
+old_pids=$(lsof -ti:${PORT:-8000} 2>/dev/null) || true
+if [ -n "$old_pids" ]; then
+    print_info "检测到端口 ${PORT:-8000} 已被占用，停止旧进程..."
+    # 先发 SIGTERM，等待后强制退出
+    for pid in $old_pids; do
+        kill "$pid" 2>/dev/null || true
+    done
+    sleep 2
+    for pid in $old_pids; do
+        kill -9 "$pid" 2>/dev/null || true
+    done
+    print_success "旧进程已停止"
+fi
 
 # 验证必要配置
 if [ -z "$VLLM_ASSISTANT_PAT" ]; then
@@ -97,4 +136,4 @@ print_info "访问地址: http://localhost:${PORT:-8000}"
 print_info "API文档: http://localhost:${PORT:-8000}/docs"
 echo ""
 
-python -m app.main
+python3 -m app.main

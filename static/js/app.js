@@ -11,6 +11,7 @@ function app() {
         // ===== View state =====
         currentView: 'community',
         loading: false,
+        mobileMenuOpen: false,
 
         // ===== Data =====
         areas: [],
@@ -25,6 +26,7 @@ function app() {
         communityPage: 1,
         pageSize: 25,
         searchQuery: '',
+        communityLoadingMore: false,
 
         // ===== PR Center filters =====
         prState: 'open',
@@ -184,6 +186,10 @@ function app() {
             const total = this.filteredIssues.length + this.filteredPRs.length;
             return shown < total;
         },
+        get filteredListEmpty() {
+            if (this.communityTab === 'prs') return this.filteredPRs.length === 0;
+            return this.filteredIssues.length === 0;
+        },
         get filteredWatchlist() {
             const q = (this.searchQuery || '').toLowerCase().trim();
             let list = this.watchlist;
@@ -201,6 +207,19 @@ function app() {
 
         // ===== Init =====
         async init() {
+            // 先检查是否 DEBUG 模式（不校验 token）
+            try {
+                const healthRes = await fetch('/health');
+                if (healthRes.ok) {
+                    const healthData = await healthRes.json();
+                    if (healthData.debug) {
+                        this.authenticated = true;
+                        this._startApp();
+                        return;
+                    }
+                }
+            } catch (_) {}
+
             // 尝试从 localStorage 恢复 token
             const saved = localStorage.getItem('vllm_auth_token');
             if (saved) {
@@ -220,7 +239,10 @@ function app() {
                 }
             }
             if (!this.authenticated) return;
+            this._startApp();
+        },
 
+        async _startApp() {
             this.showLoading();
             try {
                 await Promise.all([
@@ -305,10 +327,12 @@ function app() {
                 if (this.authToken) {
                     headers['Authorization'] = 'Bearer ' + this.authToken;
                 }
+                // 提取 options 中的 headers/signal，防止被 ...options 覆盖安全字段
+                const { headers: extraHeaders, signal: _, ...restOptions } = options;
                 const res = await fetch(path, {
-                    headers,
+                    headers: { ...headers, ...extraHeaders },
                     signal: controller.signal,
-                    ...options,
+                    ...restOptions,
                 });
                 if (res.status === 401) {
                     localStorage.removeItem('vllm_auth_token');
@@ -488,7 +512,11 @@ function app() {
         },
 
         // ===== Refresh all data =====
+        _refreshing: false,
+
         async refreshAll() {
+            if (this._refreshing) return;
+            this._refreshing = true;
             this.syncStatus = 'syncing';
             this.showLoading();
             try {
@@ -496,16 +524,23 @@ function app() {
                 this.showToast('已触发同步', '后台同步已启动，数据稍后将更新', 'success');
                 // 等待几秒后重新加载
                 setTimeout(async () => {
-                    await this.silentRefresh();
-                    this.lastSync = new Date().toISOString();
-                    this.syncStatus = 'idle';
-                    await this.loadSyncStatus();
+                    try {
+                        await this.silentRefresh();
+                        this.lastSync = new Date().toISOString();
+                        this.syncStatus = 'idle';
+                        await this.loadSyncStatus();
+                    } catch (_) {
+                        this.syncStatus = 'error';
+                    } finally {
+                        this.hideLoading();
+                        this._refreshing = false;
+                    }
                 }, 3000);
             } catch (e) {
                 this.showToast('同步失败', e.message, 'error');
                 this.syncStatus = 'error';
-            } finally {
                 this.hideLoading();
+                this._refreshing = false;
             }
         },
 
@@ -516,6 +551,7 @@ function app() {
                     this.loadMyPRs(),
                 ]);
                 this.lastSync = new Date().toISOString();
+                this.communityLoadingMore = false;
             } catch (_) {}
         },
 

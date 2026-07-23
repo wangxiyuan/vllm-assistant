@@ -215,6 +215,7 @@ function intelligenceMixin() {
                 const payload = {
                     task_id: report.task_id,
                     sources: report.sources || ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'],
+                    excluded_sources: report.excluded_sources || [],
                     extra_prompt: report.extra_prompt || '',
                 };
                 const result = await this.api('/api/intelligence/generate', {

@@ -28,6 +28,9 @@ logging.basicConfig(
 
 static_dir = Path(__file__).parent.parent / "static"
 
+# 用于持有后台 asyncio tasks，防止被 GC 回收
+_background_tasks = set()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -47,7 +50,9 @@ async def lifespan(app: FastAPI):
 
     # 后台异步初始化代码仓库（学习文章功能）
     if Config.REPOS:
-        asyncio.create_task(_init_repo_caches())
+        task = asyncio.create_task(_init_repo_caches())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     yield
 
@@ -147,6 +152,7 @@ async def health_check():
     return {
         "status": "ok",
         "version": "0.1.0",
+        "debug": Config.DEBUG,
         "configured": bool(Config.GITHUB_PAT),
         "username_configured": bool(Config.USERNAME),
     }

@@ -360,7 +360,6 @@ class TaskDedupChecker:
         # 尝试逐层补全括号
         for repair in [
             text + "]}",
-            text + "]}",
             text + "}",
             text + '"}]}',
             text + '"]}',

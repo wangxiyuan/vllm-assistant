@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 
 from app.services._shared import get_github_client
@@ -462,7 +462,7 @@ class IntelligenceReportGenerator:
         keywords = self._extract_keywords(task_title + " " + task_description)
         all_items = []
         for repo in repos:
-            since = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            since = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
             query_parts = [f"repo:{repo}", f"created:>={since}"]
             if keywords:
                 query_parts.extend(keywords[:5])
@@ -650,7 +650,7 @@ class IntelligenceReportGenerator:
 
         days_back = args.get("days_back", 90)
         if days_back:
-            since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            since = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
             query_parts.append(f"created:>={since}")
 
         keywords = args.get("query", "").strip()
@@ -680,12 +680,25 @@ class IntelligenceReportGenerator:
 
         return {"results": results, "total": len(items), "query": query}
 
+    def _get_allowed_repos(self) -> list:
+        """获取所有允许的 GitHub 仓库列表"""
+        repos = []
+        for cfg in self.SOURCE_CONFIG.values():
+            repos.extend(cfg.get("repos", []))
+        return repos
+
+    def _validate_repo(self, repo: str) -> bool:
+        """验证仓库名是否在允许列表中"""
+        return repo in self._get_allowed_repos()
+
     def _tool_get_issue_detail(self, args: dict) -> dict:
         """获取 issue/PR 正文"""
         repo = args.get("repo", "")
         number = args.get("number")
         if not repo or not number:
             return {"error": "repo and number are required"}
+        if not self._validate_repo(repo):
+            return {"error": f"repo '{repo}' is not in the allowed list"}
 
         # 临时构建 URL（支持任意仓库）
         url = f"https://api.github.com/repos/{repo}/issues/{number}"
@@ -733,6 +746,8 @@ class IntelligenceReportGenerator:
         number = args.get("number")
         if not repo or not number:
             return {"error": "repo and number are required"}
+        if not self._validate_repo(repo):
+            return {"error": f"repo '{repo}' is not in the allowed list"}
 
         url = f"https://api.github.com/repos/{repo}/pulls/{number}"
         diff = self.client._request_with_retry(
@@ -761,7 +776,7 @@ class IntelligenceReportGenerator:
         max_results = min(args.get("max_results", 5), 10)
         # arXiv API: http://export.arxiv.org/api/query?search_query=all:xxx&max_results=N
         encoded = urllib.parse.quote(query)
-        url = f"http://export.arxiv.org/api/query?search_query=all:{encoded}&max_results={max_results}&sortBy=relevance"
+        url = f"https://export.arxiv.org/api/query?search_query=all:{encoded}&max_results={max_results}&sortBy=relevance"
 
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "vllm-assistant/1.0"})
@@ -831,6 +846,8 @@ class IntelligenceReportGenerator:
         self, sources: List[str], excluded_sources: Optional[List[str]] = None
     ) -> List[str]:
         """解析最终使用的来源列表"""
+        # 只保留已知的 source
+        result = [s for s in sources if s in self.SOURCE_CONFIG]
         if excluded_sources:
-            return [s for s in sources if s not in excluded_sources]
-        return [s for s in sources if s in self.SOURCE_CONFIG]
+            result = [s for s in result if s not in excluded_sources]
+        return result

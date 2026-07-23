@@ -45,7 +45,7 @@ function personalTodoMixin() {
             try {
                 const params = new URLSearchParams();
                 params.set('status', this.todoFilterStatus);
-                params.set('priority', this.todoFilterPriority);
+                if (this.todoFilterPriority !== 'all') params.set('priority', this.todoFilterPriority);
                 params.set('sort_by', this.todoSortBy);
                 params.set('sort_order', this.todoSortOrder);
                 params.set('per_page', '50');
@@ -68,7 +68,8 @@ function personalTodoMixin() {
             if (this.newTaskLoading) return;
             this.newTaskLoading = true;
             try {
-                const payload = { ...this.newTask };
+                // 分离前端控制字段，不发送到 API
+                const { trigger_dedup_check, ...payload } = this.newTask;
                 if (!payload.due_date) delete payload.due_date;
                 if (!payload.area) delete payload.area;
                 const result = await this.api('/api/personal-todo/tasks', {
@@ -113,6 +114,11 @@ function personalTodoMixin() {
         },
 
         async loadTaskDetails(taskId) {
+            if (!taskId) {
+                this.showToast('无效任务', '任务ID为空', 'error');
+                this.taskDrawerLoading = false;
+                return;
+            }
             this.taskDrawerLoading = true;
             try {
                 const details = await this.api(`/api/personal-todo/tasks/${taskId}`);
@@ -137,6 +143,10 @@ function personalTodoMixin() {
         },
         async saveTask() {
             if (!this.selectedTaskDetails) return;
+            if (!this.editTaskForm.title || !this.editTaskForm.title.trim()) {
+                this.showToast('标题不能为空', '', 'error');
+                return;
+            }
             try {
                 const updates = {};
                 const fields = ['title', 'description', 'source', 'priority', 'status', 'area', 'due_date', 'related_issue_number', 'related_pr_number', 'related_url'];
@@ -186,11 +196,17 @@ function personalTodoMixin() {
 
         // ===== 标记完成 / 恢复未完成 =====
         async toggleTaskDone(task) {
-            const isDone = task.status === 'done';
+            // 已取消的任务点击切换时设为待处理，而不是已完成
+            let newStatus;
+            if (task.status === 'cancelled') {
+                newStatus = 'todo';
+            } else {
+                newStatus = task.status === 'done' ? 'todo' : 'done';
+            }
             try {
                 const result = await this.api(`/api/personal-todo/tasks/${task.id}`, {
                     method: 'PUT',
-                    body: JSON.stringify({ status: isDone ? 'todo' : 'done' }),
+                    body: JSON.stringify({ status: newStatus }),
                 });
                 const idx = this.todoTasks.findIndex(t => t.id === task.id);
                 if (idx >= 0) {
@@ -199,7 +215,8 @@ function personalTodoMixin() {
                 if (this.selectedTaskDetails && this.selectedTaskDetails.id === task.id) {
                     this.selectedTaskDetails = result;
                 }
-                this.showToast(isDone ? '已恢复' : '已完成', isDone ? '任务已恢复为未完成' : '任务已标记为完成', 'success');
+                const isDone = newStatus === 'done';
+                this.showToast(isDone ? '已完成' : '已恢复', isDone ? '任务已标记为完成' : '任务已恢复为未完成', 'success');
             } catch (e) {
                 this.showToast('操作失败', e.message, 'error');
             }

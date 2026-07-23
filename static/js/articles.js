@@ -12,8 +12,9 @@ function articlesMixin() {
         articleSortBy: 'updated',
         articleSortOrder: 'desc',
 
-        // ===== 编辑器状态 =====
+        // ===== 编辑器状态（全屏子视图）=====
         articleEditorOpen: false,
+        articleEditorSubView: 'editor',  // 'editor' | 'preview'
         articleEditorMode: 'create',  // 'create' | 'edit'
         articleForm: {
             id: null,
@@ -23,14 +24,16 @@ function articlesMixin() {
             tags: [],
             status: 'draft',
         },
+        // 脏状态追踪：表单初始内容的快照，用于检测未保存修改
+        articleFormSnapshot: null,
         editorTagInput: '',
 
         // ===== 预览 =====
-        showPreview: false,
         previewHtml: '',
         previewRefs: [],
 
-        // ===== 文章详情 drawer =====
+        // ===== 文章详情 =====
+        articleViewOpen: false,
         selectedArticle: null,
         articleDetailLoading: false,
         articleRenderedHtml: '',
@@ -39,6 +42,7 @@ function articlesMixin() {
         // ===== 验证 =====
         validating: false,
         validationResult: null,
+        deletingArticle: false,
 
         // ===== 插入代码引用对话框 =====
         showInsertRef: false,
@@ -79,18 +83,53 @@ function articlesMixin() {
             }
         },
 
+        // ===== 脏状态检测（未保存修改）=====
+        get articleFormDirty() {
+            if (!this.articleFormSnapshot) return false;
+            const snap = this.articleFormSnapshot;
+            return snap.title !== this.articleForm.title
+                || snap.content !== this.articleForm.content
+                || snap.area !== this.articleForm.area
+                || snap.status !== this.articleForm.status
+                || JSON.stringify(snap.tags) !== JSON.stringify(this.articleForm.tags);
+        },
+
+        _takeFormSnapshot() {
+            this.articleFormSnapshot = {
+                title: this.articleForm.title,
+                content: this.articleForm.content,
+                area: this.articleForm.area,
+                status: this.articleForm.status,
+                tags: [...this.articleForm.tags],
+            };
+        },
+
+        _confirmDiscard() {
+            if (this.articleFormDirty) {
+                if (!confirm('有未保存的修改，确定要放弃吗？')) return false;
+            }
+            return true;
+        },
+
         // ===== 新建文章 =====
         openNewArticle() {
+            if (!this._confirmDiscard()) return;
             this.articleEditorMode = 'create';
             this.articleForm = { id: null, title: '', content: '', area: '', tags: [], status: 'draft' };
             this.editorTagInput = '';
+            this.articleViewOpen = false;
+            this.selectedArticle = null;
             this.articleEditorOpen = true;
-            this.showPreview = false;
-            setTimeout(() => this.initCodeMirror(), 100);
+            this.articleEditorSubView = 'editor';
+            this.previewHtml = '';
+            this.previewRefs = [];
+            this._takeFormSnapshot();
+            this._focusEditor();
         },
 
         // ===== 编辑文章 =====
         openEditArticle(article) {
+            if (!this._confirmDiscard()) return;
             this.articleEditorMode = 'edit';
             this.articleForm = {
                 id: article.id,
@@ -101,65 +140,30 @@ function articlesMixin() {
                 status: article.status || 'draft',
             };
             this.editorTagInput = '';
+            this.articleViewOpen = false;
+            this.selectedArticle = null;
             this.articleEditorOpen = true;
-            this.showPreview = false;
-            setTimeout(() => this.initCodeMirror(), 100);
+            this.articleEditorSubView = 'editor';
+            this.previewHtml = '';
+            this.previewRefs = [];
+            this._takeFormSnapshot();
+            this._focusEditor();
         },
 
-        // ===== CodeMirror 初始化 =====
+        // ===== 编辑器初始化 =====
         cmEditor: null,
+        _focusEditor() {
+            setTimeout(() => {
+                this.initCodeMirror();
+                const el = document.getElementById('article-editor');
+                if (el) el.focus();
+            }, 100);
+        },
         async initCodeMirror() {
             const el = document.getElementById('article-editor');
             if (!el) return;
-
-            // 动态加载 CodeMirror CDN
-            if (typeof window.CodeMirror === 'undefined') {
-                await this._loadScript('https://cdn.jsdelivr.net/npm/codemirror@6.0.1/dist/index.min.js');
-                await this._loadScript('https://cdn.jsdelivr.net/npm/@codemirror/lang-markdown@6.0.0/dist/index.min.js');
-                await this._loadStyle('https://cdn.jsdelivr.net/npm/codemirror@6.0.1/dist/theme/dark.min.css');
-            }
-
-            if (this.cmEditor) {
-                this.cmEditor.destroy();
-            }
-
-            // 使用 textarea 简易模式（CodeMirror 6 完整加载较复杂，用 textarea + highlight 替代）
-            // 实际项目中可用 CodeMirror 6，这里简化为 textarea
             el.value = this.articleForm.content;
-            this.cmEditor = el; // 存引用
-        },
-
-        _loadScript(src) {
-            return new Promise((resolve, reject) => {
-                const s = document.createElement('script');
-                s.src = src;
-                s.onload = resolve;
-                s.onerror = reject;
-                document.head.appendChild(s);
-            });
-        },
-        _loadStyle(href) {
-            return new Promise((resolve, reject) => {
-                const l = document.createElement('link');
-                l.rel = 'stylesheet';
-                l.href = href;
-                l.onload = resolve;
-                l.onerror = reject;
-                document.head.appendChild(l);
-            });
-        },
-
-        get editorContent() {
-            if (this.cmEditor && typeof this.cmEditor === 'object' && this.cmEditor.value !== undefined) {
-                return this.cmEditor.value;
-            }
-            return this.articleForm.content;
-        },
-        set editorContent(v) {
-            this.articleForm.content = v;
-            if (this.cmEditor && typeof this.cmEditor === 'object') {
-                this.cmEditor.value = v;
-            }
+            this.cmEditor = el;
         },
 
         onEditorInput(e) {
@@ -210,6 +214,8 @@ function articlesMixin() {
                     this.showToast('文章已更新', '', 'success');
                 }
                 this.articleEditorOpen = false;
+                this.articleEditorSubView = 'editor';
+                this.articleFormSnapshot = null;
                 await this.loadArticles();
             } catch (e) {
                 this.showToast('保存失败', e.message, 'error');
@@ -218,16 +224,20 @@ function articlesMixin() {
 
         // ===== 删除文章 =====
         async deleteArticle(article) {
+            if (this.deletingArticle) return;
             if (!confirm(`确定删除文章「${article.title}」？此操作不可撤销。`)) return;
+            this.deletingArticle = true;
             try {
                 await this.api(`/api/articles/${article.id}`, { method: 'DELETE' });
                 this.showToast('文章已删除', '', 'success');
                 if (this.selectedArticle && this.selectedArticle.id === article.id) {
-                    this.selectedArticle = null;
+                    this.closeArticleView();
                 }
                 await this.loadArticles();
             } catch (e) {
                 this.showToast('删除失败', e.message, 'error');
+            } finally {
+                this.deletingArticle = false;
             }
         },
 
@@ -239,30 +249,26 @@ function articlesMixin() {
                 return;
             }
             try {
-                // 如果是编辑模式，用已有 article_id
-                const url = this.articleEditorMode === 'edit' && this.articleForm.id
-                    ? `/api/articles/${this.articleForm.id}/preview`
-                    : `/api/articles/0/preview`; // 兜底
-
-                const data = await this.api(url, {
+                const data = await this.api('/api/articles/preview', {
                     method: 'POST',
                     body: JSON.stringify({ content }),
                 });
                 this.previewHtml = data.html || '';
                 this.previewRefs = data.refs || [];
-                this.showPreview = true;
+                this.articleEditorSubView = 'preview';
             } catch (e) {
                 this.showToast('预览失败', e.message, 'error');
             }
         },
         closePreview() {
-            this.showPreview = false;
+            this.articleEditorSubView = 'editor';
             this.previewHtml = '';
             this.previewRefs = [];
         },
 
         // ===== 查看文章详情（渲染后）=====
         async viewArticle(article) {
+            this.articleViewOpen = true;
             this.selectedArticle = article;
             this.articleDetailLoading = true;
             this.articleRenderedHtml = '';
@@ -278,6 +284,7 @@ function articlesMixin() {
             }
         },
         closeArticleView() {
+            this.articleViewOpen = false;
             this.selectedArticle = null;
             this.articleRenderedHtml = '';
             this.articleEmbeddedCodes = [];
@@ -373,16 +380,20 @@ function articlesMixin() {
                 e.preventDefault();
                 this.saveArticle();
             }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+                e.preventDefault();
+                this.previewArticle();
+            }
             if (e.key === 'Escape') {
-                if (this.showPreview) this.closePreview();
+                if (this.articleEditorOpen && this.articleEditorSubView === 'preview') this.closePreview();
                 else if (this.showInsertRef) this.closeInsertRef();
                 else if (this.selectedArticle) this.closeArticleView();
-                else if (this.articleEditorOpen) this.articleEditorOpen = false;
+                else if (this.articleEditorOpen && this._confirmDiscard()) { this.articleEditorOpen = false; this.articleFormSnapshot = null; }
             }
         },
     };
 }
 
-// 给标签添加 renderMarkdown 支持（复用 app.js 的 renderMarkdown）
+// 给标签添加 renderMarkdown 支持（复用 pr_center.js 的 renderMarkdown）
 // 注册到全局
 window.articlesMixin = articlesMixin;

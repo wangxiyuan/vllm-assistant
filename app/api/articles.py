@@ -81,7 +81,9 @@ async def list_articles(
     if status and status != "all":
         query = query.filter(Article.status == status)
     if tag:
-        query = query.filter(Article.tags.contains(tag))
+        # 转义 SQL LIKE 通配符，防止被利用
+        escaped_tag = tag.replace("%", "\\%").replace("_", "\\_")
+        query = query.filter(Article.tags.contains(escaped_tag))
 
     # 排序
     sort_col = {
@@ -192,6 +194,19 @@ async def get_article(article_id: int, db: Session = Depends(get_db)):
 
 # ===== 渲染 =====
 
+@router.post("/preview")
+async def preview_article(req: PreviewRequest, db: Session = Depends(get_db)):
+    """预览文章渲染结果（不依赖 article_id，不保存到数据库）"""
+    cache_service = LocalCodeSyncService(db)
+    renderer = ArticleRenderer(cache_service, db)
+    result = renderer.render_preview(req.content)
+
+    return {
+        "html": result["html"],
+        "refs": result["refs"],
+    }
+
+
 @router.get("/{article_id}/rendered")
 async def render_article(article_id: int, sync_code: bool = Query(False), db: Session = Depends(get_db)):
     """获取渲染后的文章 HTML，代码引用被替换为实际代码片段"""
@@ -211,23 +226,6 @@ async def render_article(article_id: int, sync_code: bool = Query(False), db: Se
         "title": article.title,
         "html": result["html"],
         "embedded_codes": result["embedded_codes"],
-    }
-
-
-@router.post("/{article_id}/preview")
-async def preview_article(article_id: int, req: PreviewRequest, db: Session = Depends(get_db)):
-    """预览文章渲染结果（不保存到数据库）"""
-    article = db.query(Article).filter(Article.id == article_id).first()
-    if not article:
-        raise HTTPException(status_code=404, detail="Article not found")
-
-    cache_service = LocalCodeSyncService(db)
-    renderer = ArticleRenderer(cache_service, db)
-    result = renderer.render_preview(req.content)
-
-    return {
-        "html": result["html"],
-        "refs": result["refs"],
     }
 
 
