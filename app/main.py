@@ -1,6 +1,7 @@
 """
 vLLM Assistant - FastAPI 主应用
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -48,6 +49,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to start scheduler; service will run without background sync")
 
+    # 异步初始化预置算子
+    try:
+        task = asyncio.create_task(_init_preset_operators())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except Exception:
+        logger.exception("Failed to schedule preset operator initialization")
+
     # 后台异步初始化代码仓库（学习文章功能）
     if Config.REPOS:
         task = asyncio.create_task(_init_repo_caches())
@@ -73,6 +82,20 @@ async def _init_repo_caches():
             await manager.async_ensure_cloned(repo_name, clone_url, branch="main")
         except Exception:
             logger.exception(f"Failed to clone repo {repo_name}")
+
+
+async def _init_preset_operators():
+    """异步初始化预置算子（不阻塞服务启动）"""
+    from app.database import SessionLocal
+    from app.api.model_anatomy import init_preset_operators
+
+    db = SessionLocal()
+    try:
+        init_preset_operators(db)
+    except Exception:
+        logger.exception("Failed to initialize preset operators")
+    finally:
+        db.close()
 
 
 app = FastAPI(
@@ -121,6 +144,7 @@ from app.api.intelligence import router as intelligence_router
 from app.api.articles import router as articles_router
 from app.api.sync import router as sync_router
 from app.api.code_browser import router as code_browser_router
+from app.api.model_anatomy import router as model_anatomy_router
 
 app.include_router(community_router, prefix="/api/community", tags=["Community Pulse"])
 app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command Center"])
@@ -132,6 +156,7 @@ app.include_router(intelligence_router, prefix="/api/intelligence", tags=["Intel
 app.include_router(articles_router, prefix="/api/articles", tags=["Articles"])
 app.include_router(sync_router, prefix="/api/sync", tags=["Sync"])
 app.include_router(code_browser_router, prefix="/api/code-browser", tags=["Code Browser"])
+app.include_router(model_anatomy_router, prefix="/api/anatomy", tags=["Model Anatomy"])
 
 
 # 静态文件

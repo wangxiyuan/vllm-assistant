@@ -162,13 +162,9 @@ async def update_article(article_id: int, req: ArticleUpdate, db: Session = Depe
     article.rendered_html = None
 
     db.commit()
+    db.refresh(article)
 
-    return {
-        "id": article.id,
-        "title": article.title,
-        "updated_at": article.updated_at.isoformat(),
-        "refs_count": refs_result["total_refs"],
-    }
+    return _article_to_response(article)
 
 
 @router.delete("/{article_id}")

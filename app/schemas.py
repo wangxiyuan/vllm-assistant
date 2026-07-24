@@ -169,3 +169,107 @@ class IntelligenceGenerateRequest(BaseModel):
         if v <= 0:
             raise ValueError("task_id must be positive")
         return v
+
+
+# ===== 模型拆解（docs/model_anatomy.md）=====
+
+
+class CategoryCreate(BaseModel):
+    """创建分类"""
+    name: str
+    display_name: str
+    description: str = ""
+    sort_order: int = 0
+
+
+class CategoryUpdate(BaseModel):
+    """更新分类"""
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class OperatorCreate(BaseModel):
+    """创建算子"""
+    name: str
+    display_name: str
+    description: str = ""
+    category: str = "other"
+    params_schema: dict = {}
+    input_shape_desc: str = ""
+    output_shape_desc: str = ""
+    vllm_code_refs: list = []
+    tags: list[str] = []
+
+
+class OperatorUpdate(BaseModel):
+    """更新算子（所有字段可选）"""
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    params_schema: Optional[dict] = None
+    input_shape_desc: Optional[str] = None
+    output_shape_desc: Optional[str] = None
+    vllm_code_refs: Optional[list] = None
+    tags: Optional[list[str]] = None
+
+
+class OperatorResponse(BaseModel):
+    """算子响应"""
+    id: int
+    name: str
+    display_name: str
+    description: str = ""
+    category: str
+    params_schema: dict = {}
+    input_shape_desc: str = ""
+    output_shape_desc: str = ""
+    vllm_code_refs: list = []
+    tags: list[str] = []
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ModelAnatomyCreate(BaseModel):
+    """创建模型"""
+    name: str
+    display_name: str
+    description: str = ""
+    category: str = "other"
+    architecture: list = []
+    params_summary: dict = {}
+    tags: list[str] = []
+
+
+class ModelAnatomyUpdate(BaseModel):
+    """更新模型（所有字段可选）"""
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    architecture: Optional[list] = None
+    params_summary: Optional[dict] = None
+    tags: Optional[list[str]] = None
+
+
+class ModelAnatomyResponse(BaseModel):
+    """模型响应"""
+    id: int
+    name: str
+    display_name: str
+    description: str = ""
+    category: str = "other"
+    architecture: list = []
+    params_summary: dict = {}
+    operators_count: int = 0
+    tags: list[str] = []
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True

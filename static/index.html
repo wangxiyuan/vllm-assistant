@@ -120,6 +120,10 @@
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
                     <span class="nav-kbd">7</span><span>代码浏览</span>
                 </button>
+                <button class="nav-item" :class="{active: currentView === 'anatomy'}" @click="switchView('anatomy')">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                    <span class="nav-kbd">8</span><span>模型拆解</span>
+                </button>
             </nav>
 
             <div class="sidebar-footer">
@@ -179,6 +183,10 @@
                     <button class="nav-item" :class="{active: currentView === 'code-browser'}" @click="switchView('code-browser'); mobileMenuOpen = false">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
                         <span class="nav-kbd">7</span><span>代码浏览</span>
+                    </button>
+                    <button class="nav-item" :class="{active: currentView === 'anatomy'}" @click="switchView('anatomy'); mobileMenuOpen = false">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                        <span class="nav-kbd">8</span><span>模型拆解</span>
                     </button>
                 </nav>
             </div>
@@ -833,7 +841,7 @@
                                                 </div>
                                                 <div class="task-card-badges" x-show="task.has_dedup_check || task.has_ai_insight">
                                                     <span class="badge badge-warning" x-show="task.has_dedup_check && task.dedup_check_result && task.dedup_check_result.matches && task.dedup_check_result.matches.length > 0">
-                                                        <span x-text="task.dedup_check_result.matches.length + ' 重复'"></span>
+                                                        <span x-text="(task.dedup_check_result?.matches?.length ?? 0) + ' 重复'"></span>
                                                     </span>
                                                     <span class="badge badge-success" x-show="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)">无重复</span>
                                                     <span class="badge badge-info" x-show="task.has_ai_insight">有洞察</span>
@@ -872,7 +880,7 @@
                                     </div>
                                     <div class="item-side">
                                         <span class="badge badge-warning" x-show="task.has_dedup_check && task.dedup_check_result && task.dedup_check_result.matches && task.dedup_check_result.matches.length > 0">
-                                            <span x-text="task.dedup_check_result.matches.length + ' 重复'"></span>
+                                            <span x-text="(task.dedup_check_result?.matches?.length ?? 0) + ' 重复'"></span>
                                         </span>
                                         <span class="badge badge-info" x-show="task.has_ai_insight">有洞察</span>
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-tertiary)"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1228,6 +1236,692 @@
                 </div>
             </div>
 
+            <!-- ============= 模型拆解 ============= -->
+            <div x-show="currentView === 'anatomy'" class="view" x-cloak>
+
+                <!-- 子视图切换 -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">
+                            <div class="tabs">
+                                <button class="tab" :class="{active: anatomyTab === 'operators'}" @click="switchAnatomyTab('operators')">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                                    算子管理 <span class="badge" x-text="operators.length"></span>
+                                </button>
+                                <button class="tab" :class="{active: anatomyTab === 'models'}" @click="switchAnatomyTab('models')">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                                    模型搭建 <span class="badge" x-text="models.length"></span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="panel-actions">
+                            <template x-if="anatomyTab === 'operators'">
+                                <button class="btn btn-primary btn-sm" @click="openNewOperator()">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    新建算子
+                                </button>
+                            </template>
+                            <template x-if="anatomyTab === 'models'">
+                                <button class="btn btn-primary btn-sm" @click="openNewModel()">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    新建模型
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== 算子管理子视图 ===== -->
+                <div x-show="anatomyTab === 'operators'" x-cloak>
+                    <!-- 筛选 -->
+                    <div class="panel" style="margin-bottom: 12px;">
+                        <div class="panel-header" style="border-bottom: 1px solid var(--border-faint);">
+                            <div class="panel-actions">
+                                <select class="select select-sm" x-model="operatorFilterCategory" @change="loadOperators()">
+                                    <option value="">所有分类</option>
+                                    <template x-for="cat in operatorCategoryOptions" :key="cat.value">
+                                        <option :value="cat.value" x-text="cat.label"></option>
+                                    </template>
+                                </select>
+                                <input class="input input-sm" type="text" placeholder="搜索算子…" x-model="operatorSearch" @input.debounce="loadOperators()" x-ref="operatorSearch" style="width: 200px;">
+                                    <button class="btn btn-sm btn-ghost" @click="openCategoryManager()" title="管理分类" style="margin-left: 4px;">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                                        管理分类
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                    <!-- 算子列表 -->
+                    <div class="panel">
+                        <div class="panel-body" style="padding: 0;">
+                            <div x-show="operatorsLoading" class="empty-state">
+                                <div class="empty-icon">⟳</div>
+                                <div class="empty-title">加载中…</div>
+                            </div>
+                            <div x-show="!operatorsLoading && operators.length === 0" class="empty-state">
+                                <div class="empty-icon">∅</div>
+                                <div class="empty-title">暂无算子</div>
+                                <div class="empty-desc">点击上方「新建算子」创建你的第一个积木块</div>
+                            </div>
+                            <div x-show="!operatorsLoading && operators.length > 0" style="padding: 12px;">
+                                <!-- 按分类分组 -->
+                                <template x-for="(cat, catIdx) in operatorCategoryOptions" :key="cat.value">
+                                    <div x-show="(operators.filter(o => o.category === cat.value)).length > 0"
+                                         class="op-category-group"
+                                         :style="'--group-color: ' + (cat.color || 'var(--signal-blue)')">
+                                        <div class="op-category-header">
+                                            <span class="op-category-dot"></span>
+                                            <span class="op-category-name" x-text="cat.label"></span>
+                                            <span class="op-category-count" x-text="(operators.filter(o => o.category === cat.value)).length + ' 个'"></span>
+                                        </div>
+                                        <template x-for="op in operators.filter(o => o.category === cat.value)" :key="op.id">
+                                            <div class="op-card">
+                                                <div class="op-card-main" @click="viewOperatorDetail(op)">
+                                                    <div class="op-card-title">
+                                                        <span class="op-name" x-text="op.display_name"></span>
+                                                        <span class="op-tech-name" x-text="op.name"></span>
+                                                    </div>
+                                                    <div class="op-card-desc" x-show="op.description" x-text="op.description"></div>
+                                                    <div class="op-card-meta">
+                                                        <span class="shape-badge input" x-show="op.input_shape_desc" x-text="'in: ' + op.input_shape_desc"></span>
+                                                        <span class="shape-badge output" x-show="op.output_shape_desc" x-text="'out: ' + op.output_shape_desc"></span>
+                                                        <template x-for="tag in (op.tags || []).slice(0, 3)" :key="tag">
+                                                            <span class="tag-badge" x-text="tag"></span>
+                                                        </template>
+                                                    </div>
+                                                </div>
+                                                <div class="op-card-actions">
+                                                    <button class="btn btn-sm btn-ghost" @click.stop="openEditOperator(op)" title="编辑" style="padding: 3px 6px;">
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                                    </button>
+                                                    <button class="btn btn-sm btn-ghost" @click.stop="deleteOperator(op)" title="删除" style="color: var(--signal-red); padding: 3px 6px;">
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== 算子详情弹窗 ===== -->
+                <div x-show="showOperatorDetail && selectedOperator" x-cloak class="modal-backdrop" @click.self="closeOperatorDetail()">
+                    <div class="modal" @click.stop style="max-width: 680px; width: 90%;">
+                        <div class="modal-header">
+                            <h3>
+                                <span x-text="selectedOperator?.display_name"></span>
+                                <span class="badge badge-info" style="font-family: var(--font-mono); font-size: 10px; margin-left: 8px;" x-text="selectedOperator?.name"></span>
+                                <span class="badge" style="margin-left: 4px; font-size: 10px;" x-text="selectedOperator?.category"></span>
+                            </h3>
+                            <button class="modal-close" @click="closeOperatorDetail()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <!-- 描述 -->
+                            <div x-show="selectedOperator?.description" style="margin-bottom: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 6px; color: var(--text-secondary); font-size: 13px; line-height: 1.6;">
+                                <span x-text="selectedOperator?.description"></span>
+                            </div>
+
+                            <!-- 形状信息 -->
+                            <div x-show="selectedOperator?.input_shape_desc || selectedOperator?.output_shape_desc" style="margin-bottom: 16px; display: flex; gap: 12px; flex-wrap: wrap;">
+                                <div x-show="selectedOperator?.input_shape_desc" class="stat-card" style="--accent-color: var(--signal-blue); padding: 8px 16px; min-width: 120px;">
+                                    <div class="stat-label" style="font-size: 11px;">输入形状</div>
+                                    <div class="stat-value" style="font-size: 13px; font-family: var(--font-mono);" x-text="selectedOperator?.input_shape_desc"></div>
+                                </div>
+                                <div x-show="selectedOperator?.output_shape_desc" class="stat-card" style="--accent-color: var(--signal-green); padding: 8px 16px; min-width: 120px;">
+                                    <div class="stat-label" style="font-size: 11px;">输出形状</div>
+                                    <div class="stat-value" style="font-size: 13px; font-family: var(--font-mono);" x-text="selectedOperator?.output_shape_desc"></div>
+                                </div>
+                            </div>
+
+                            <!-- 参数 Schema → 解析为参数表格 -->
+                            <div x-show="selectedOperator?.params_schema?.properties && Object.keys(selectedOperator.params_schema.properties || {}).length > 0" style="margin-bottom: 16px;">
+                                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">参数</label>
+                                <div style="background: var(--bg-secondary); border: 1px solid var(--border-faint); border-radius: 6px; overflow: hidden;">
+                                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                                        <thead>
+                                            <tr style="background: var(--bg-tertiary);">
+                                                <th style="padding: 6px 10px; text-align: left; color: var(--text-secondary); font-weight: 500; border-bottom: 1px solid var(--border-faint);">参数名</th>
+                                                <th style="padding: 6px 10px; text-align: left; color: var(--text-secondary); font-weight: 500; border-bottom: 1px solid var(--border-faint);">类型</th>
+                                                <th style="padding: 6px 10px; text-align: left; color: var(--text-secondary); font-weight: 500; border-bottom: 1px solid var(--border-faint);">默认值</th>
+                                                <th style="padding: 6px 10px; text-align: left; color: var(--text-secondary); font-weight: 500; border-bottom: 1px solid var(--border-faint);">说明</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <template x-for="(prop, pname) in selectedOperator?.params_schema?.properties" :key="pname">
+                                                <tr style="border-bottom: 1px solid var(--border-faint);">
+                                                    <td style="padding: 6px 10px; font-family: var(--font-mono);"><span x-text="pname"></span></td>
+                                                    <td style="padding: 6px 10px; color: var(--signal-cyan);"><span x-text="prop.type || '-'"></span></td>
+                                                    <td style="padding: 6px 10px; color: var(--text-secondary);"><span x-text="prop.default !== undefined ? prop.default : '-'"></span></td>
+                                                    <td style="padding: 6px 10px; color: var(--text-secondary);"><span x-text="prop.description || ''"></span></td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- 代码引用（列表展示，仅非空时显示） -->
+                            <div x-show="selectedOperator?.vllm_code_refs && selectedOperator.vllm_code_refs.length > 0" style="margin-bottom: 16px;">
+                                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">vLLM 代码引用</label>
+                                <div style="display: flex; flex-direction: column; gap: 4px;">
+                                    <template x-for="(ref, ri) in selectedOperator?.vllm_code_refs" :key="ri">
+                                        <div style="background: var(--bg-secondary); border: 1px solid var(--border-faint); border-radius: 4px; padding: 6px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);">
+                                            <span x-text="ref"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <!-- 标签 -->
+                            <div x-show="(selectedOperator?.tags || []).length > 0">
+                                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">标签</label>
+                                <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                                    <template x-for="tag in (selectedOperator?.tags || [])" :key="tag">
+                                        <span class="badge" x-text="tag"></span>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn" @click="closeOperatorDetail()">关闭</button>
+                            <button class="btn btn-ghost" @click="deleteOperator(selectedOperator)" style="color: var(--signal-red);">删除</button>
+                            <button class="btn btn-primary" @click="editFromDetail()">编辑</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== 算子编辑弹窗 ===== -->
+                <div x-show="showOperatorEditor" x-cloak class="modal-backdrop" @click.self="closeOperatorEditor()">
+                    <div class="modal" @click.stop style="max-width: 720px; width: 90%;">
+                        <div class="modal-header">
+                            <h3 x-text="operatorEditorMode === 'create' ? '新建算子' : '编辑算子'"></h3>
+                            <button class="modal-close" @click="closeOperatorEditor()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                                <div>
+                                    <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">名称 *</label>
+                                    <input class="input" type="text" placeholder="如 RMSNorm" x-model="operatorForm.name">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">显示名称 *</label>
+                                    <input class="input" type="text" placeholder="如 RMS 归一化" x-model="operatorForm.display_name">
+                                </div>
+                            </div>
+                            <div style="margin-top: 12px;">
+                                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">描述</label>
+                                <textarea class="input" placeholder="算子功能描述" x-model="operatorForm.description" rows="2" style="width: 100%;"></textarea>
+                            </div>
+                            <div style="margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                                <div>
+                                    <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">分类</label>
+                                    <select class="select" x-model="operatorForm.category" style="width: 100%;">
+                                        <template x-for="cat in operatorCategoryOptions" :key="cat.value">
+                                            <option :value="cat.value" x-text="cat.label"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">标签</label>
+                                    <div style="display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 4px;">
+                                        <template x-for="tag in operatorForm.tags" :key="tag">
+                                            <span class="badge" style="cursor: pointer;" @click="removeOperatorTag(tag)">
+                                                <span x-text="tag"></span>
+                                                <span style="margin-left: 4px;">&times;</span>
+                                            </span>
+                                        </template>
+                                    </div>
+                                    <input class="input input-sm" type="text" placeholder="回车添加标签" x-model="operatorTagInput" @keydown.enter.prevent="addOperatorTag()" style="width: 100%;">
+                                </div>
+                            </div>
+                            <div style="margin-top: 12px;">
+                                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">参数 Schema（JSON）</label>
+                                <textarea class="input" x-model="operatorForm.params_schema" rows="10" style="width: 100%; font-family: var(--font-mono); font-size: 12px;"></textarea>
+                                <div x-show="!operatorParamsSchemaValid" style="color: var(--signal-red); font-size: 11px; margin-top: 4px;" x-text="'JSON 格式错误: ' + operatorParamsSchemaError"></div>
+                            </div>
+                            <div style="margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                                <div>
+                                    <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">输入形状</label>
+                                    <input class="input" type="text" placeholder="(batch, seq_len, hidden_size)" x-model="operatorForm.input_shape_desc" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">输出形状</label>
+                                    <input class="input" type="text" placeholder="(batch, seq_len, hidden_size)" x-model="operatorForm.output_shape_desc" style="width: 100%;">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn" @click="closeOperatorEditor()">取消</button>
+                            <button class="btn btn-primary" @click="saveOperator()" :disabled="!operatorForm.name.trim() || !operatorForm.display_name.trim()">保存</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== 分类管理弹窗 ===== -->
+                <div x-show="showCategoryManager" x-cloak class="modal-backdrop" @click.self="showCategoryManager = false">
+                    <div class="modal" @click.stop style="max-width: 600px;">
+                        <div class="modal-header">
+                            <h3>管理算子分类</h3>
+                            <button class="modal-close" @click="showCategoryManager = false">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <!-- 添加/编辑表单 -->
+                            <div style="display: flex; gap: 8px; margin-bottom: 16px; align-items: flex-end;">
+                                <div style="flex: 1;">
+                                    <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">标识</label>
+                                    <input class="input input-sm" type="text" placeholder="如 attention" x-model="categoryForm.name" style="width: 100%;">
+                                </div>
+                                <div style="flex: 1;">
+                                    <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">显示名称</label>
+                                    <input class="input input-sm" type="text" placeholder="如 Attention" x-model="categoryForm.display_name" style="width: 100%;">
+                                </div>
+                                <div style="flex: 0 0 60px;">
+                                    <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">排序</label>
+                                    <input class="input input-sm" type="number" x-model="categoryForm.sort_order" style="width: 100%;">
+                                </div>
+                                <button class="btn btn-primary btn-sm" @click="saveCategory()" :disabled="!categoryForm.name.trim() || !categoryForm.display_name.trim()">
+                                    <span x-text="categoryFormMode === 'create' ? '添加' : '更新'"></span>
+                                </button>
+                            </div>
+
+                            <!-- 分类列表 -->
+                            <div x-show="categoryManagerLoading" style="text-align: center; padding: 24px; color: var(--text-tertiary);">加载中…</div>
+                            <div x-show="!categoryManagerLoading && categoryList.length === 0" style="text-align: center; padding: 24px; color: var(--text-tertiary);">暂无分类</div>
+                            <div class="list" x-show="!categoryManagerLoading && categoryList.length > 0">
+                                <template x-for="cat in categoryList" :key="cat.id">
+                                    <div class="list-item">
+                                        <div class="item-main">
+                                            <div class="flex items-center gap-2 flex-wrap">
+                                                <span class="item-title" x-text="cat.display_name"></span>
+                                                <span class="badge badge-info" style="font-family: var(--font-mono); font-size: 10px;" x-text="cat.name"></span>
+                                            </div>
+                                            <div class="item-meta">
+                                                <span x-show="cat.description" x-text="cat.description"></span>
+                                                <span x-text="'排序: ' + cat.sort_order"></span>
+                                            </div>
+                                        </div>
+                                        <div class="item-side">
+                                            <button class="btn btn-sm btn-ghost" @click="moveCategory(cat, 'up')" title="上移" :disabled="cat === categoryList[0]">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+                                            </button>
+                                            <button class="btn btn-sm btn-ghost" @click="moveCategory(cat, 'down')" title="下移" :disabled="cat === categoryList[categoryList.length - 1]">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                            </button>
+                                            <button class="btn btn-sm btn-ghost" @click="openEditCategory(cat)" title="编辑">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                            </button>
+                                            <button class="btn btn-sm btn-ghost" @click="deleteCategory(cat)" title="删除" style="color: var(--signal-red);">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn" @click="showCategoryManager = false">关闭</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== 模型搭建子视图 ===== -->
+                <div x-show="anatomyTab === 'models'" x-cloak>
+                    <div style="display: flex; gap: 16px;">
+                        <!-- 左侧模型列表 -->
+                        <div style="flex: 0 0 320px;">
+                            <div class="panel">
+                                <div class="panel-header" style="border-bottom: 1px solid var(--border-faint); flex-direction: column; gap: 8px;">
+                                    <div class="panel-actions" style="width: 100%;">
+                                        <input class="input input-sm" type="text" placeholder="搜索模型…" x-model="modelSearch" @input.debounce="loadModels()" style="width: 100%;">
+                                    </div>
+                                    <div class="panel-actions" style="width: 100%;">
+                                        <select class="select select-sm" x-model="modelFilterCategory" @change="loadModels()" style="width: 100%;">
+                                            <option value="">所有架构</option>
+                                            <template x-for="cat in modelCategoryOptions" :key="cat.value">
+                                                <option :value="cat.value" x-text="cat.label"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="panel-body" style="padding: 0; max-height: 600px; overflow-y: auto;">
+                                    <div x-show="modelsLoading" class="empty-state" style="padding: 24px;">
+                                        <div class="empty-title">加载中…</div>
+                                    </div>
+                                    <div x-show="!modelsLoading && models.length === 0" class="empty-state" style="padding: 24px;">
+                                        <div class="empty-icon">∅</div>
+                                        <div class="empty-title">暂无模型</div>
+                                        <div class="empty-desc">点击「新建模型」开始搭建</div>
+                                    </div>
+                                    <div class="model-list-grid">
+                                        <template x-for="m in models" :key="m.id">
+                                            <div class="model-card" :class="{'selected': selectedModel && selectedModel.id === m.id}" @click="viewModel(m)">
+                                                <div class="model-card-icon">
+                                                    <span x-show="m.category === 'moe'">🧩</span>
+                                                    <span x-show="m.category === 'dense'">⬛</span>
+                                                    <span x-show="m.category === 'hybrid'">🔀</span>
+                                                    <span x-show="m.category === 'state_space'">〰️</span>
+                                                    <span x-show="!m.category || m.category === 'other'">🧱</span>
+                                                </div>
+                                                <div class="model-card-body">
+                                                    <div class="model-card-title">
+                                                        <span class="model-name" x-text="m.display_name"></span>
+                                                        <span class="model-tech-name" x-text="m.name"></span>
+                                                    </div>
+                                                    <div class="model-card-meta">
+                                                        <span x-show="m.category && m.category !== 'other'" style="font-weight: 500; color: var(--amber); text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em;" x-text="m.category"></span>
+                                                        <span class="meta-dot" x-show="m.category && m.category !== 'other'"></span>
+                                                        <span x-show="m.operators_count > 0" x-text="m.operators_count + ' 种算子'"></span>
+                                                        <span class="meta-dot" x-show="m.operators_count > 0"></span>
+                                                        <span x-show="m.architecture && m.architecture.length > 0" x-text="m.architecture.length + ' 个阶段'"></span>
+                                                        <span class="meta-dot" x-show="m.architecture && m.architecture.length > 0"></span>
+                                                        <span x-text="timeAgo(m.updated_at)"></span>
+                                                    </div>
+                                                </div>
+                                                <svg class="model-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 右侧模型详情 -->
+                        <div style="flex: 1; min-width: 0;">
+                            <!-- 空状态：未选择模型 -->
+                            <div x-show="!showModelDetail && !showModelEditor" class="panel">
+                                <div class="panel-body" style="padding: 40px; text-align: center;">
+                                    <div style="font-size: 36px; margin-bottom: 12px; opacity: 0.4;">🧱</div>
+                                    <div style="color: var(--text-tertiary);">从左侧选择一个模型查看详情，或点击「新建模型」开始搭建</div>
+                                </div>
+                            </div>
+
+                            <!-- 详情模式 -->
+                            <div x-show="showModelDetail && selectedModel && !showModelEditor" class="panel">
+                                <div class="panel-header">
+                                    <div class="panel-title">
+                                        <span x-text="selectedModel?.display_name"></span>
+                                        <span class="badge badge-info" style="font-family: var(--font-mono); font-size: 10px; margin-left: 8px;" x-text="selectedModel?.name"></span>
+                                        <span class="badge" :class="'badge-' + ((selectedModel?.category) || 'other')" style="margin-left: 4px;" x-text="selectedModel?.category || 'other'"></span>
+                                    </div>
+                                    <div class="panel-actions">
+                                        <button class="btn btn-sm" @click="openEditModel()" title="编辑模型">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                            编辑
+                                        </button>
+                                        <button class="btn btn-sm btn-ghost" @click="deleteModel(selectedModel)" title="删除" style="color: var(--signal-red);">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                            删除
+                                        </button>
+                                    </div>
+                                </div>
+                                <div x-show="modelDetailLoading" class="empty-state">
+                                    <div class="empty-icon">⟳</div>
+                                    <div class="empty-title">加载中…</div>
+                                </div>
+                                <div x-show="!modelDetailLoading" class="panel-body" style="padding: 16px;">
+                                    <!-- 描述 -->
+                                    <div x-show="selectedModel?.description" style="margin-bottom: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 6px; color: var(--text-secondary); font-size: 13px; line-height: 1.6;">
+                                        <span x-text="selectedModel?.description"></span>
+                                    </div>
+
+                                    <!-- 参数汇总 -->
+                                    <div x-show="selectedModel?.params_summary && typeof selectedModel.params_summary === 'object' && Object.keys(selectedModel.params_summary || {}).length > 0" style="margin-bottom: 16px;">
+                                        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                                            <template x-for="(val, key) in (typeof selectedModel?.params_summary === 'object' ? selectedModel.params_summary : {})" :key="key">
+                                                <div class="stat-card" style="--accent-color: var(--signal-blue); padding: 8px 16px; min-width: 100px;">
+                                                    <div class="stat-label" style="font-size: 11px;" x-text="key"></div>
+                                                    <div class="stat-value" style="font-size: 16px;" x-text="val"></div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <!-- 结构树可视化 -->
+                                    <div style="font-size: 13px;">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                                            <strong>模型结构</strong>
+                                            <span class="badge" x-text="countModelLayers(selectedModel?.architecture) + ' 层'"></span>
+                                        </div>
+                                        <div style="overflow-x: auto;">
+                                            <div x-html="renderArchitectureTree(selectedModel?.architecture)"></div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 标签 -->
+                                    <div x-show="(selectedModel?.tags || []).length > 0" style="margin-top: 16px;">
+                                        <template x-for="tag in (selectedModel?.tags || [])" :key="tag">
+                                            <span class="badge" x-text="tag" style="margin-right: 4px;"></span>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 编辑器模式 -->
+                            <div x-show="showModelEditor" class="panel">
+                                <div class="panel-header">
+                                    <div class="panel-title">
+                                        <span x-text="modelEditorMode === 'create' ? '新建模型' : '编辑模型'"></span>
+                                        <span class="badge" :class="modelFormDirty ? 'badge-warning' : ''" x-show="modelFormDirty" style="margin-left: 8px;">有未保存修改</span>
+                                    </div>
+                                    <div class="panel-actions">
+                                        <button class="btn btn-sm" @click="closeModelEditor()">取消</button>
+                                        <button class="btn btn-primary btn-sm" @click="saveModel()" :disabled="!modelForm.name.trim() || !modelForm.display_name.trim()">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                            保存
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="panel-body" style="padding: 16px;">
+                                    <!-- 基本信息 -->
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                                        <div>
+                                            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">模型名称 *</label>
+                                            <input class="input" type="text" placeholder="如 qwen3.5" x-model="modelForm.name" style="width: 100%;">
+                                        </div>
+                                        <div>
+                                            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">显示名称 *</label>
+                                            <input class="input" type="text" placeholder="如 通义千问 3.5" x-model="modelForm.display_name" style="width: 100%;">
+                                        </div>
+                                    </div>
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                                        <div>
+                                            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">架构分类</label>
+                                            <select class="select" x-model="modelForm.category" style="width: 100%;">
+                                                <template x-for="cat in modelCategoryOptions" :key="cat.value">
+                                                    <option :value="cat.value" x-text="cat.label"></option>
+                                                </template>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">描述</label>
+                                            <textarea class="input" placeholder="模型概述" x-model="modelForm.description" rows="2" style="width: 100%;"></textarea>
+                                        </div>
+                                    </div>
+
+                                    <!-- 标签 -->
+                                    <div style="margin-bottom: 16px;">
+                                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">标签</label>
+                                        <div style="display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 4px;">
+                                            <template x-for="tag in modelForm.tags" :key="tag">
+                                                <span class="badge" style="cursor: pointer;" @click="removeModelTag(tag)">
+                                                    <span x-text="tag"></span>
+                                                    <span style="margin-left: 4px;">&times;</span>
+                                                </span>
+                                            </template>
+                                        </div>
+                                        <input class="input input-sm" type="text" placeholder="输入标签后回车" x-model="modelTagInput" @keydown.enter.prevent="addModelTag()" style="width: 200px;">
+                                    </div>
+
+                                    <!-- 参数汇总 -->
+                                    <div style="margin-bottom: 16px;">
+                                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">参数汇总（JSON，如 {"total_params": "7B", "hidden_size": 4096}）</label>
+                                        <textarea class="input" placeholder='{"total_params": "7B", "hidden_size": 4096}' x-model="modelForm.params_summary" rows="5" style="width: 100%; font-family: var(--font-mono); font-size: 12px;"></textarea>
+                                    </div>
+
+                                    <!-- 阶段列表编辑器 -->
+                                    <div style="margin-bottom: 16px;">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                            <strong>阶段列表</strong>
+                                            <span class="badge" x-text="editingArchitecture.length + ' 个阶段'"></span>
+                                            <span style="flex: 1;"></span>
+                                            <button class="btn btn-sm" @click="addStage()" title="添加单算子">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                                添加算子
+                                            </button>
+                                            <button class="btn btn-sm" @click="addRepeatBlock()" title="添加重复块">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                                添加重复块
+                                            </button>
+                                        </div>
+
+                                        <!-- 阶段列表 -->
+                                        <div style="background: var(--bg-secondary); border-radius: 6px; padding: 8px;">
+                                            <template x-for="(stage, idx) in editingArchitecture" :key="idx">
+                                                <div class="arch-stage-wrapper">
+                                                    <!-- 插入栏：在此阶段之前插入 -->
+                                                    <div class="arch-insert-bar">
+                                                        <div class="arch-insert-line"></div>
+                                                        <button class="btn" @click="addStageBefore(idx)">+ 算子</button>
+                                                        <button class="btn" @click="addRepeatBlockBefore(idx)">+ 重复块</button>
+                                                    </div>
+                                                    <div style="border: 1px solid var(--border-faint); border-radius: 4px; margin-bottom: 6px; padding: 8px; background: var(--bg-primary);">
+                                                    <!-- 阶段头部 -->
+                                                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                                                        <span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary);" x-text="'#' + (idx + 1)"></span>
+                                                        <span class="badge" :class="stage.type === 'operator' ? 'badge-info' : 'badge-warning'" x-text="stage.type === 'operator' ? '算子' : '重复块'"></span>
+                                                        <span style="flex: 1;"></span>
+                                                        <button class="btn btn-sm btn-ghost" @click="moveStageUp(idx)" :disabled="idx === 0" title="上移" style="padding: 2px;">
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+                                                        </button>
+                                                        <button class="btn btn-sm btn-ghost" @click="moveStageDown(idx)" :disabled="idx === editingArchitecture.length - 1" title="下移" style="padding: 2px;">
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                                        </button>
+                                                        <button class="btn btn-sm btn-ghost" @click="removeStage(idx)" title="删除" style="color: var(--signal-red); padding: 2px;">
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                                        </button>
+                                                    </div>
+
+                                                    <!-- 单算子表单 -->
+                                                    <template x-if="stage.type === 'operator'">
+                                                        <div>
+                                                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px;">
+                                                                <div>
+                                                                    <label style="font-size: 11px; color: var(--text-secondary);">选择算子 *</label>
+                                                                    <select class="select select-sm" x-model="stage.operator_id" @change="onStageOperatorChange(stage)" style="width: 100%;">
+                                                                        <option value="">请选择算子…</option>
+                                                                        <template x-for="op in operators" :key="op.id">
+                                                                            <option :value="op.id" x-text="op.display_name + ' (' + op.name + ')'"></option>
+                                                                        </template>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label style="font-size: 11px; color: var(--text-secondary);">标签（可选）</label>
+                                                                    <input class="input input-sm" type="text" placeholder="如 Pre-Attention Norm" x-model="stage.label" style="width: 100%;">
+                                                                </div>
+                                                            </div>
+                                                            <!-- 参数动态表单 -->
+                                                            <div x-show="stage.operator_id">
+                                                                <label style="font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 4px;">参数</label>
+                                                                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                                                                    <template x-for="(val, key) in stage.params" :key="key">
+                                                                        <div style="flex: 0 0 auto; min-width: 120px;">
+                                                                            <label style="font-size: 10px; color: var(--text-tertiary); display: block;" x-text="key"></label>
+                                                                            <input class="input input-sm" :type="typeof val === 'number' ? 'number' : 'text'" :value="val" @input="stage.params[key] = $event.target.value" style="width: 100%;">
+                                                                        </div>
+                                                                    </template>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+
+                                                    <!-- 重复块表单 -->
+                                                    <template x-if="stage.type === 'repeat_block'">
+                                                        <div>
+                                                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 6px;">
+                                                                <div>
+                                                                    <label style="font-size: 11px; color: var(--text-secondary);">标签 *</label>
+                                                                    <input class="input input-sm" type="text" placeholder="如 Transformer Layer" x-model="stage.label" style="width: 100%;">
+                                                                </div>
+                                                                <div>
+                                                                    <label style="font-size: 11px; color: var(--text-secondary);">重复次数 *</label>
+                                                                    <input class="input input-sm" type="number" min="1" x-model="stage.repeat_count" style="width: 100%;">
+                                                                </div>
+                                                                <div>
+                                                                    <label style="font-size: 11px; color: var(--text-secondary);">套数</label>
+                                                                    <div style="display: flex; gap: 4px;">
+                                                                        <span class="badge" x-text="stage.contents.length + ' 套'"></span>
+                                                                        <button class="btn btn-sm btn-ghost" @click="addRepeatBlockContent(stage)" title="添加一套内容" style="padding: 2px;">
+                                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- 每套内容编辑器 -->
+                                                            <template x-for="(contentSet, ci) in stage.contents" :key="ci">
+                                                                <div style="margin-top: 8px; border: 1px solid var(--border-faint); border-radius: 4px; padding: 8px; background: var(--bg-primary);">
+                                                                    <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">
+                                                                        <span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary);" x-text="'第 ' + (ci + 1) + ' 套'"></span>
+                                                                        <span style="flex: 1;"></span>
+                                                                        <button class="btn btn-sm btn-ghost" @click="addStageToContent(stage, ci)" title="添加算子" style="padding: 2px;">
+                                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                                                            添加算子
+                                                                        </button>
+                                                                        <button class="btn btn-sm btn-ghost" @click="removeRepeatBlockContent(stage, ci)" :disabled="stage.contents.length <= 1" title="删除这套内容" style="padding: 2px; color: var(--signal-red);">
+                                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                                                        </button>
+                                                                    </div>
+                                                                    <template x-for="(innerStage, si) in contentSet" :key="si">
+                                                                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; padding: 4px 6px; background: var(--bg-secondary); border-radius: 4px;">
+                                                                            <span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary); font-size: 10px;" x-text="'#' + (si + 1)"></span>
+                                                                            <select class="select select-sm" x-model="innerStage.operator_id" @change="onStageOperatorChange(innerStage)" style="flex: 1; min-width: 0;">
+                                                                                <option value="">选择算子…</option>
+                                                                                <template x-for="op in operators" :key="op.id">
+                                                                                    <option :value="op.id" x-text="op.display_name"></option>
+                                                                                </template>
+                                                                            </select>
+                                                                            <input class="input input-sm" type="text" placeholder="标签" x-model="innerStage.label" style="width: 120px;">
+                                                                            <button class="btn btn-sm btn-ghost" @click="removeStageFromContent(stage, ci, si)" style="padding: 2px; color: var(--signal-red);">
+                                                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                                                            </button>
+                                                                        </div>
+                                                                    </template>
+                                                                    <div x-show="contentSet.length === 0" style="text-align: center; color: var(--text-tertiary); font-size: 11px; padding: 8px;">
+                                                                        点击「添加算子」添加算子到此套内容
+                                                                    </div>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                                </div>
+                                            </template>
+
+                                            <!-- 末尾插入栏 -->
+                                            <div class="arch-insert-bar-tail" x-show="editingArchitecture.length > 0">
+                                                <div class="arch-insert-line"></div>
+                                                <button class="btn" @click="addStage()">+ 算子</button>
+                                                <button class="btn" @click="addRepeatBlock()">+ 重复块</button>
+                                            </div>
+
+                                            <div x-show="editingArchitecture.length === 0" style="text-align: center; color: var(--text-tertiary); padding: 24px;">
+                                                <div style="font-size: 24px; margin-bottom: 8px;">🧱</div>
+                                                <div>点击「添加算子」或「添加重复块」开始搭建模型结构</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
             <!-- ============= 代码浏览 ============= -->
             <div x-show="currentView === 'code-browser'" class="view code-browser-view" x-cloak
                  x-init="initCodeBrowser()">
@@ -1270,8 +1964,8 @@
                                 <template x-for="r in cbSearchResults" :key="r.path + ':' + r.line_no">
                                     <div class="cb-search-result-item" @click="cbSearchResultClick(r)">
                                         <span class="cb-search-result-file">
-                                            <span class="cb-file-icon" x-text="cbFileIcon(r.extension)"></span>
-                                            <span x-text="r.path"></span>
+                                            <span class="cb-file-icon" x-text="cbFileIcon(r?.extension)"></span>
+                                            <span x-text="r?.path"></span>
                                         </span>
                                         <span class="cb-search-result-line">
                                             <span class="cb-search-result-lineno" x-text="':' + r.line_no"></span>
@@ -1310,8 +2004,8 @@
                                         <template x-for="r in cbFileNameResults" :key="r.path">
                                             <div class="cb-tree-item cb-tree-file cb-file-name-result"
                                                  @click="cbFileNameResultClick(r)">
-                                                <span class="cb-file-icon" x-text="cbFileIcon(r.extension)"></span>
-                                                <span class="cb-tree-name" x-text="r.path"></span>
+                                                <span class="cb-file-icon" x-text="cbFileIcon(r?.extension)"></span>
+                                                <span class="cb-tree-name" x-text="r?.path"></span>
                                             </div>
                                         </template>
                                         <div x-show="cbFileNameResults.length >= 200" class="cb-tree-loading">
@@ -1408,11 +2102,11 @@
 
                         <div x-show="!cbFileLoading && cbFile" class="cb-file-content-wrapper">
                             <div class="cb-file-header">
-                                <span class="cb-file-icon-lg" x-text="cbFileIcon(cbFile.extension)"></span>
-                                <span class="cb-file-path" x-text="cbFile.path"></span>
+                                <span class="cb-file-icon-lg" x-text="cbFileIcon(cbFile?.extension)"></span>
+                                <span class="cb-file-path" x-text="cbFile?.path"></span>
                                 <span class="cb-file-meta">
-                                    <span x-text="cbFile.total_lines + ' 行'"></span>
-                                    <span x-show="cbFile.size !== undefined" x-text="' · ' + cbFormatSize(cbFile.size)"></span>
+                                    <span x-text="(cbFile?.total_lines ?? '') + ' 行'"></span>
+                                    <span x-show="cbFile?.size !== undefined" x-text="' · ' + cbFormatSize(cbFile?.size)"></span>
                                 </span>
                                 <!-- Blame 切换按钮 -->
                                 <button class="btn btn-sm btn-ghost" @click="cbToggleBlame()"
@@ -1427,6 +2121,14 @@
                                         x-show="cbHistory.length > 0">
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                                     <span x-text="cbHistoryOpen ? '收起历史' : '历史 (' + cbHistory.length + ')'"></span>
+                                </button>
+                                <!-- 大纲按钮（仅 Python 文件显示） -->
+                                <button class="btn btn-sm btn-ghost" @click="cbOutlineOpen = !cbOutlineOpen"
+                                        :title="cbOutlineOpen ? '收起大纲' : '函数大纲'"
+                                        :class="{'btn-active': cbOutlineOpen}"
+                                        x-show="cbFile?.extension === '.py'">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                                    <span x-text="'大纲 (' + cbOutline.length + ')'"></span>
                                 </button>
                             </div>
                             <div class="cb-file-code">
@@ -1499,6 +2201,28 @@
                                         <span class="badge badge-state-closed" x-show="commit.pr_state === 'closed'" x-text="'PR #' + commit.pr_number"></span>
                                         <span class="cb-commit-pr-title" x-text="commit.pr_title" x-show="commit.pr_title"></span>
                                     </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- 右侧函数大纲面板 -->
+                    <div class="cb-outline-panel" x-show="cbOutlineOpen && cbOutline.length > 0" x-cloak>
+                        <div class="cb-panel-header">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                            <span class="cb-panel-title">函数大纲</span>
+                            <span class="cb-panel-count" x-text="cbOutline.length + ' 项'"></span>
+                            <button class="modal-close" @click="cbOutlineOpen = false" style="position: static;">&times;</button>
+                        </div>
+                        <div class="cb-outline-body">
+                            <template x-for="item in cbOutline" :key="item.line">
+                                <div class="cb-outline-item"
+                                     @click="cbScrollToLine(item.line)"
+                                     :style="'padding-left: ' + (16 + item.indent * 1.5) + 'px;'"
+                                     :title="'跳转到第 ' + item.line + ' 行'">
+                                    <span class="cb-outline-icon" x-text="item.type === 'class' ? '▣' : '▸'"></span>
+                                    <span class="cb-outline-name" x-text="item.name"></span>
+                                    <span class="cb-outline-line" x-text="':' + item.line"></span>
                                 </div>
                             </template>
                         </div>
@@ -1956,7 +2680,7 @@
                 <div x-show="dedupResult && dedupResult.matches && dedupResult.matches.length > 0" class="ai-result mb-4">
                     <div class="ai-result-header">
                         <div class="ai-result-title">
-                            去重检查结果（<span x-text="dedupResult.matches.length"></span> 个可能重复）
+                            去重检查结果（<span x-text="(dedupResult?.matches?.length ?? 0)"></span> 个可能重复）
                         </div>
                     </div>
                     <div class="ai-result-body">
@@ -2051,7 +2775,7 @@
                 </div>
 
                 <div x-show="reportDetails?.content && reportDetails?.status === 'completed'">
-                    <div class="pr-body" x-html="renderMarkdown(reportDetails.content)"></div>
+                    <div class="pr-body" x-html="renderMarkdown(reportDetails?.content)"></div>
                 </div>
             </div>
         </div>
@@ -2192,5 +2916,6 @@
     <script src="/static/js/intelligence.js?v=15"></script>
     <script src="/static/js/articles.js?v=1"></script>
     <script src="/static/js/code_browser.js?v=1"></script>
+    <script src="/static/js/model_anatomy.js?v=1"></script>
 </body>
 </html>

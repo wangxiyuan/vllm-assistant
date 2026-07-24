@@ -86,6 +86,7 @@ function app() {
                 'intelligence': '洞察面板',
                 'articles': '学习文章',
                 'code-browser': '代码浏览',
+                'anatomy': '模型拆解',
             }[this.currentView] || '';
         },
         get currentViewSub() {
@@ -99,6 +100,7 @@ function app() {
                 'personal-todo': '搜索任务…',
                 'intelligence': '搜索报告…',
                 'code-browser': '搜索文件…',
+                'anatomy': '搜索算子或模型…',
             };
             return map[this.currentView] || '搜索…';
         },
@@ -500,6 +502,16 @@ function app() {
             if (view === 'articles') {
                 this.loadArticles();
             }
+            // 切到模型拆解时自动加载
+            if (view === 'anatomy') {
+                if (typeof this.switchAnatomyTab === 'function') {
+                    this.switchAnatomyTab(this.anatomyTab || 'operators');
+                }
+                // 预加载模型数据以确保 badge 计数正确
+                if (typeof this.loadModels === 'function') {
+                    this.loadModels();
+                }
+            }
         },
 
         // ===== Global keyboard shortcuts =====
@@ -516,6 +528,7 @@ function app() {
             else if (e.key === '5') { e.preventDefault(); this.switchView('intelligence'); }
             else if (e.key === '6') { e.preventDefault(); this.switchView('articles'); }
             else if (e.key === '7') { e.preventDefault(); this.switchView('code-browser'); }
+            else if (e.key === '8') { e.preventDefault(); this.switchView('anatomy'); }
             else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); this.refreshAll(); }
         },
 
@@ -641,7 +654,7 @@ function app() {
 // 让整个合并失败 -> 所有变量未定义。
 // 用 defineProperty 复制 descriptor 能保留 getter，后续 Alpine 访问时才求值。
 window.buildApp = function() {
-    const sources = [app(), communityMixin(), prCenterMixin(), personalTodoMixin(), intelligenceMixin(), articlesMixin(), codeBrowserMixin()];
+    const sources = [app(), communityMixin(), prCenterMixin(), personalTodoMixin(), intelligenceMixin(), articlesMixin(), codeBrowserMixin(), modelAnatomyMixin()];
     const result = {};
     for (const src of sources) {
         const descs = Object.getOwnPropertyDescriptors(src);

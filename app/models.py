@@ -484,3 +484,96 @@ class FileChangeHistory(Base):
         Index("idx_fch_repo_file", "repo", "file_path", mysql_length=255),
         Index("idx_fch_pr_number", "pr_number"),
     )
+
+
+# ======================================================================
+# 模型拆解模块（docs/model_anatomy.md）
+# ======================================================================
+
+
+class OperatorCategory(Base):
+    """算子分类"""
+    __tablename__ = "operator_categories"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(50), unique=True, nullable=False)  # 如 'embedding'
+    display_name = Column(String(100), nullable=False)  # 如 'Embedding'
+    description = Column(Text)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "display_name": self.display_name,
+            "description": self.description or "",
+            "sort_order": self.sort_order or 0,
+        }
+
+
+class Operator(Base):
+    """算子（积木块）"""
+    __tablename__ = "operators"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    display_name = Column(String(100), nullable=False)
+    description = Column(Text)
+    category = Column(String(50), nullable=False, default="other")
+    params_schema = Column(Text)  # JSON Schema
+    input_shape_desc = Column(String(200))
+    output_shape_desc = Column(String(200))
+    vllm_code_refs = Column(Text)  # JSON array
+    tags = Column(Text)  # JSON array
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "display_name": self.display_name,
+            "description": self.description or "",
+            "category": self.category,
+            "params_schema": json.loads(self.params_schema) if self.params_schema else {},
+            "input_shape_desc": self.input_shape_desc or "",
+            "output_shape_desc": self.output_shape_desc or "",
+            "vllm_code_refs": json.loads(self.vllm_code_refs) if self.vllm_code_refs else [],
+            "tags": json.loads(self.tags) if self.tags else [],
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }
+
+
+class ModelAnatomy(Base):
+    """模型（搭好的积木成品）"""
+    __tablename__ = "model_anatomy"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    display_name = Column(String(100), nullable=False)
+    description = Column(Text)
+    category = Column(String(50), nullable=False, default="other")  # moe / dense / hybrid / other
+    architecture = Column(Text)  # JSON 结构树
+    params_summary = Column(Text)  # JSON 参数汇总
+    operators_count = Column(Integer, default=0)
+    tags = Column(Text)  # JSON array
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "display_name": self.display_name,
+            "description": self.description or "",
+            "category": self.category,
+            "architecture": json.loads(self.architecture) if self.architecture else [],
+            "params_summary": json.loads(self.params_summary) if self.params_summary else {},
+            "operators_count": self.operators_count or 0,
+            "tags": json.loads(self.tags) if self.tags else [],
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }

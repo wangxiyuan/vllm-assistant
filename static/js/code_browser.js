@@ -51,6 +51,10 @@ function codeBrowserMixin() {
         // ===== 语法高亮 =====
         _hljsInited: false,
 
+        // ===== 函数大纲（Python 跳转）=====
+        cbOutline: [],
+        cbOutlineOpen: false,
+
         // ===== 初始化 =====
         async initCodeBrowser() {
             // 加载可用仓库列表
@@ -139,6 +143,8 @@ function codeBrowserMixin() {
                 const params = new URLSearchParams({ repo: this.cbRepo, path: filePath });
                 const data = await this.api(`/api/code-browser/file?${params}`);
                 this.cbFile = data;
+                // 自动生成函数大纲
+                this.cbOutline = this.cbBuildOutline();
                 // 自动加载变更历史（等待完成再关闭 loading）
                 await this.cbLoadHistory(filePath);
             } catch (e) {
@@ -382,6 +388,39 @@ function codeBrowserMixin() {
                 html += `<span class="cb-line-num" data-lineno="${i}">${i}</span>\n`;
             }
             return html;
+        },
+
+        // ===== 函数大纲（Python 跳转）=====
+        cbBuildOutline() {
+            if (!this.cbFile?.content) return [];
+            const ext = this.cbFile?.extension || '';
+            // 只对 Python 文件生成大纲
+            if (ext !== '.py') return [];
+            const lines = this.cbFile.content.split('\n');
+            const total = this.cbFile.total_lines || lines.length;
+            const results = [];
+            // 匹配 class/def/async def，记录缩进层级
+            for (let i = 0; i < Math.min(lines.length, total); i++) {
+                const line = lines[i];
+                const m = line.match(/^(\s*)((?:async\s+)?def|class)\s+([a-zA-Z_]\w*)/);
+                if (m) {
+                    results.push({
+                        name: m[3],
+                        type: m[2].includes('class') ? 'class' : 'def',
+                        line: i + 1,  // 1-based
+                        indent: m[1].length,
+                    });
+                }
+            }
+            return results;
+        },
+
+        cbScrollToLine(lineNo) {
+            const lineEl = document.querySelector(`[data-lineno="${lineNo}"]`);
+            if (lineEl) {
+                lineEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            this.cbOutlineOpen = false;
         },
 
         // ===== 语法高亮 =====
