@@ -74,13 +74,20 @@
     <div class="app-shell" x-show="authenticated" x-cloak>
 
         <!-- ===== Sidebar ===== -->
-        <aside class="sidebar">
+        <aside class="sidebar" :class="{'sidebar-collapsed': sidebarCollapsed}">
             <div class="brand">
                 <div class="brand-mark">
                     <span class="brand-logo">vLLM</span>
+                    <span class="brand-name">Assistant</span>
+                    <button class="sidebar-collapse-btn sidebar-collapse-top" @click="toggleSidebar()"
+                            :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                             :style="sidebarCollapsed ? 'transform: rotate(180deg)' : ''"
+                             style="transition: transform 0.2s;">
+                            <polyline points="15 18 9 12 15 6"/>
+                        </svg>
+                    </button>
                 </div>
-                <div class="brand-name">Assistant</div>
-                <div class="brand-sub">贡献者控制台</div>
             </div>
 
             <nav class="nav-section">
@@ -1286,70 +1293,94 @@
 
                         <!-- 目录树主体 -->
                         <div class="cb-tree-body" x-show="!cbSearchOpen">
-                            <!-- 文件名快速过滤 -->
-                            <div class="cb-filter-bar" x-show="cbTree.dirs.length > 10 || cbTree.files.length > 10">
+                            <!-- 全局文件名搜索 -->
+                            <div class="cb-filter-bar">
                                 <input class="cb-filter-input" type="text"
-                                       placeholder="过滤文件…"
-                                       x-model="cbFilterQuery"/>
+                                       placeholder="全局搜索文件名…"
+                                       x-model="cbFileNameQuery"/>
                             </div>
-                            <!-- 根目录入口 — 显示当前路径层级 -->
-                            <template x-if="cbPath">
+
+                            <!-- 文件名搜索结果（有搜索关键词时显示） -->
+                            <template x-if="cbFileNameQuery.trim()">
                                 <div>
-                                    <div class="cb-tree-item cb-tree-dir cb-tree-parent"
-                                         @click="cbNavigateTo(cbBreadcrumb.length > 1 ? cbBreadcrumb.slice(0, -1).map(x => x.path).join('/') : '')">
-                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="transform: rotate(180deg);"><path d="M8 5l8 7-8 7z"/></svg>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                                        <span class="cb-tree-name">.. / 上级</span>
+                                    <div x-show="cbFileNameLoading" class="cb-tree-loading">
+                                        <span>搜索文件名中…</span>
                                     </div>
-                                    <!-- 当前路径面包屑（在目录树顶部展示） -->
-                                    <div class="cb-tree-pathbar">
-                                        <span class="cb-tree-path-item" @click="cbNavigateTo('')" x-text="cbRepo"></span>
-                                        <template x-for="(crumb, idx) in cbBreadcrumb" :key="crumb.path">
-                                            <span class="cb-tree-path-item">
-                                                <span style="color: var(--text-tertiary);">/</span>
-                                                <span :class="{'cb-tree-path-current': idx === cbBreadcrumb.length - 1}"
-                                                      @click="cbNavigateBreadcrumb(crumb.path)"
-                                                      style="cursor: pointer;">
-                                                    <span x-text="crumb.name"></span>
-                                                </span>
-                                            </span>
+                                    <div x-show="!cbFileNameLoading && cbFileNameResults.length > 0">
+                                        <template x-for="r in cbFileNameResults" :key="r.path">
+                                            <div class="cb-tree-item cb-tree-file cb-file-name-result"
+                                                 @click="cbFileNameResultClick(r)">
+                                                <span class="cb-file-icon" x-text="cbFileIcon(r.extension)"></span>
+                                                <span class="cb-tree-name" x-text="r.path"></span>
+                                            </div>
                                         </template>
+                                        <div x-show="cbFileNameResults.length >= 200" class="cb-tree-loading">
+                                            <span>结果已截断（仅显示前 200 条）</span>
+                                        </div>
+                                    </div>
+                                    <div x-show="!cbFileNameLoading && cbFileNameResults.length === 0" class="cb-tree-loading">
+                                        <span>全仓库无匹配文件名</span>
                                     </div>
                                 </div>
                             </template>
-                            <template x-if="!cbPath">
-                                <div class="cb-tree-item cb-tree-root" @click="cbNavigateTo('')">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                                    <span class="cb-tree-name" x-text="cbRepo"></span>
+
+                            <!-- 目录树（无搜索关键词时显示） -->
+                            <template x-if="!cbFileNameQuery.trim()">
+                                <div>
+                                    <!-- 根目录入口 — 当前路径面包屑（在目录树顶部展示） -->
+                                    <template x-if="cbPath">
+                                        <div>
+                                            <div class="cb-tree-pathbar">
+                                                <span class="cb-tree-path-item" @click="cbNavigateTo('')" x-text="cbRepo"></span>
+                                                <template x-for="(crumb, idx) in cbBreadcrumb" :key="crumb.path">
+                                                    <span class="cb-tree-path-item">
+                                                        <span style="color: var(--text-tertiary);">/</span>
+                                                        <span :class="{'cb-tree-path-current': idx === cbBreadcrumb.length - 1}"
+                                                              @click="cbNavigateBreadcrumb(crumb.path)"
+                                                              style="cursor: pointer;">
+                                                            <span x-text="crumb.name"></span>
+                                                        </span>
+                                                    </span>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template x-if="!cbPath">
+                                        <div class="cb-tree-item cb-tree-root" @click="cbNavigateTo('')">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                            <span class="cb-tree-name" x-text="cbRepo"></span>
+                                        </div>
+                                    </template>
+
+                                    <template x-for="d in cbGetFilteredDirs()" :key="d.path">
+                                        <div class="cb-tree-item cb-tree-dir"
+                                             :class="{'cb-tree-active': cbPath === d.path}"
+                                             @click="cbNavigateTo(d.path)">
+                                            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5l8 7-8 7z"/></svg>
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                            <span class="cb-tree-name" x-text="d.name"></span>
+                                        </div>
+                                    </template>
+
+                                    <template x-for="f in cbGetFilteredFiles()" :key="f.path">
+                                        <div class="cb-tree-item cb-tree-file"
+                                             :class="{'cb-tree-active': cbFile?.path === f.path}"
+                                             @click="cbOpenFile(f.path)">
+                                            <span class="cb-file-icon" x-text="cbFileIcon(f.path.split('.').pop() ? '.' + f.path.split('.').pop() : '')"></span>
+                                            <span class="cb-tree-name" x-text="f.name"></span>
+                                        </div>
+                                    </template>
+
+                                    <div x-show="cbTreeLoading" class="cb-tree-loading">
+                                        <span>加载中…</span>
+                                    </div>
+                                    <div x-show="!cbTreeLoading && cbGetFilteredDirs().length === 0 && cbGetFilteredFiles().length === 0 && cbPath !== ''" class="cb-tree-loading">
+                                        <span>空目录</span>
+                                    </div>
                                 </div>
                             </template>
-
-                            <template x-for="d in cbGetFilteredDirs()" :key="d.path">
-                                <div class="cb-tree-item cb-tree-dir"
-                                     :class="{'cb-tree-active': cbPath === d.path}"
-                                     @click="cbNavigateTo(d.path)">
-                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5l8 7-8 7z"/></svg>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                                    <span class="cb-tree-name" x-text="d.name"></span>
-                                </div>
-                            </template>
-
-                            <template x-for="f in cbGetFilteredFiles()" :key="f.path">
-                                <div class="cb-tree-item cb-tree-file"
-                                     :class="{'cb-tree-active': cbFile?.path === f.path}"
-                                     @click="cbOpenFile(f.path)">
-                                    <span class="cb-file-icon" x-text="cbFileIcon(f.path.split('.').pop() ? '.' + f.path.split('.').pop() : '')"></span>
-                                    <span class="cb-tree-name" x-text="f.name"></span>
-                                </div>
-                            </template>
-
-                            <div x-show="cbTreeLoading" class="cb-tree-loading">
-                                <span>加载中…</span>
-                            </div>
-                            <div x-show="!cbTreeLoading && cbGetFilteredDirs().length === 0 && cbGetFilteredFiles().length === 0 && cbPath !== ''" class="cb-tree-loading">
-                                <span>空目录</span>
-                            </div>
                         </div>
+                        <div class="cb-tree-resize-handle"></div>
                     </div>
 
                     <!-- 中间文件查看器 -->
@@ -1406,7 +1437,8 @@
                                         <template x-for="(line, idx) in cbFileLines()" :key="'b' + idx">
                                             <div class="cb-blame-cell"
                                                  @click="cbBlameClick(idx)"
-                                                 :title="cbBlameTitle(idx)">
+                                                 @mouseenter="cbBlameShowTooltip($event, idx)"
+                                                 @mouseleave="cbBlameHideTooltip()">
                                                 <span x-text="cbBlameCell(idx)"></span>
                                             </div>
                                         </template>

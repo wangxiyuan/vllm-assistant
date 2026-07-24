@@ -42,6 +42,12 @@ function codeBrowserMixin() {
         // ===== 可用的仓库列表 =====
         cbRepos: ['vllm'],
 
+        // ===== 全局文件名搜索 =====
+        cbFileNameQuery: '',
+        cbFileNameResults: [],
+        cbFileNameLoading: false,
+        _cbFileNameTimer: null,
+
         // ===== 语法高亮 =====
         _hljsInited: false,
 
@@ -56,6 +62,24 @@ function codeBrowserMixin() {
             } catch (_) {}
             // 默认加载根目录
             await this.cbNavigateTo('');
+
+            // 监听文件名搜索输入（防抖 300ms）
+            this.$watch('cbFileNameQuery', (val) => {
+                if (this._cbFileNameTimer) clearTimeout(this._cbFileNameTimer);
+                const trimmed = (val || '').trim();
+                if (!trimmed) {
+                    this.cbFileNameResults = [];
+                    this.cbFileNameLoading = false;
+                    return;
+                }
+                this.cbFileNameLoading = true;
+                this._cbFileNameTimer = setTimeout(() => {
+                    this.cbDoFileNameSearch(trimmed);
+                }, 300);
+            });
+
+            // 初始化目录树面板拖拽调节宽度
+            this.$nextTick(() => this.cbInitResize());
         },
 
         // ===== 仓库切换 =====
@@ -66,6 +90,8 @@ function codeBrowserMixin() {
             this.cbHistory = [];
             this.cbSearchResults = [];
             this.cbSearchQuery = '';
+            this.cbFileNameQuery = '';
+            this.cbFileNameResults = [];
             await this.cbNavigateTo('');
         },
 
@@ -235,6 +261,25 @@ function codeBrowserMixin() {
             window.open(url, '_blank');
         },
 
+        cbBlameShowTooltip(event, lineIdx) {
+            const title = this.cbBlameTitle(lineIdx);
+            if (!title) return;
+            // 移除旧 tooltip
+            const old = document.querySelector('.cb-blame-tooltip');
+            if (old) old.remove();
+            const el = document.createElement('div');
+            el.className = 'cb-blame-tooltip';
+            el.textContent = title;
+            el.style.left = (event.clientX + 10) + 'px';
+            el.style.top = (event.clientY - 10) + 'px';
+            document.body.appendChild(el);
+        },
+
+        cbBlameHideTooltip() {
+            const el = document.querySelector('.cb-blame-tooltip');
+            if (el) el.remove();
+        },
+
         // ===== 搜索 =====
         async cbToggleSearch() {
             this.cbSearchOpen = !this.cbSearchOpen;
@@ -283,7 +328,33 @@ function codeBrowserMixin() {
             await this.cbOpenFile(result.path);
         },
 
-        // 前端文件名快速过滤
+        // ===== 全局文件名搜索 =====
+        async cbDoFileNameSearch(query) {
+            this.cbFileNameLoading = true;
+            try {
+                const params = new URLSearchParams({ repo: this.cbRepo, query });
+                const data = await this.api(`/api/code-browser/file-names?${params}`);
+                this.cbFileNameResults = data.results || [];
+            } catch (e) {
+                this.cbFileNameResults = [];
+                this.showToast('文件名搜索失败', e.message, 'error');
+            } finally {
+                this.cbFileNameLoading = false;
+            }
+        },
+
+        cbFileNameResultClick(result) {
+            this.cbFileNameQuery = '';
+            this.cbFileNameResults = [];
+            // 导航到文件所在目录
+            const parts = result.path.split('/');
+            const dirPath = parts.slice(0, -1).join('/');
+            this.cbNavigateTo(dirPath);
+            // 打开文件
+            this.cbOpenFile(result.path);
+        },
+
+        // 前端文件名快速过滤（当前目录内）
         cbFilterQuery: '',
         cbGetFilteredDirs() {
             if (!this.cbFilterQuery) return this.cbTree.dirs || [];
@@ -317,16 +388,22 @@ function codeBrowserMixin() {
         cbHighlightedContent() {
             if (!this.cbFile?.content) return '';
             const lang = this.cbFileLang(this.cbFile?.extension);
+            // 使用 cbFileLines() 确保行数与行号列、blame 列一致
+            const lines = this.cbFileLines();
             if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
                 try {
-                    const result = hljs.highlight(this.cbFile.content, { language: lang, ignoreIllegals: true });
-                    return result.value;
+                    // 逐行高亮，每行独立包装，确保行高一致
+                    return lines.map(line => {
+                        if (!line) return '<span class="cb-code-line"> </span>';
+                        const result = hljs.highlight(line, { language: lang, ignoreIllegals: true });
+                        return `<span class="cb-code-line">${result.value || ' '}</span>`;
+                    }).join('');
                 } catch (_) {}
             }
             // 无高亮时：逐行输出
-            return this.cbFile.content.split('\n').map(line =>
-                `<span class="cb-code-line">${this._escapeHtml(line)}</span>`
-            ).join('\n');
+            return lines.map(line =>
+                `<span class="cb-code-line">${this._escapeHtml(line) || ' '}</span>`
+            ).join('');
         },
 
         _escapeHtml(text) {
@@ -416,6 +493,42 @@ function codeBrowserMixin() {
             // 与后端 total_lines 保持一致：如果 total_lines 比 lines 少1，说明末尾空行不算
             const total = this.cbFile.total_lines || lines.length;
             return lines.slice(0, total);
+        },
+
+        // ===== 目录树面板拖拽调节宽度 =====
+        cbInitResize() {
+            const handle = this.$el.querySelector('.cb-tree-resize-handle');
+            if (!handle) return;
+            const panel = handle.closest('.cb-tree-panel');
+            if (!panel) return;
+
+            const onStart = (e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startWidth = panel.offsetWidth;
+
+                const onMove = (ev) => {
+                    const w = startWidth + (ev.clientX - startX);
+                    if (w < 180) return;
+                    if (w > 500) return;
+                    panel.style.width = w + 'px';
+                    panel.style.flex = 'none';
+                };
+
+                const onEnd = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onEnd);
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                };
+
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onEnd);
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+            };
+
+            handle.addEventListener('mousedown', onStart);
         },
     };
 }

@@ -354,6 +354,64 @@ async def get_file_blame(
     }
 
 
+@router.get("/file-names")
+async def search_file_names(
+    repo: str = Query("vllm"),
+    query: str = Query(..., min_length=1, description="文件名关键词"),
+    max_results: int = Query(200, ge=1, le=500),
+):
+    """在仓库中按文件名搜索（全局过滤）
+
+    用 find 命令搜索文件名包含关键词的文件，返回路径列表。
+    与目录树浏览的过滤规则一致：跳过 .git / __pycache__ / 隐藏目录 / 非文本文件。
+    """
+    repo_path = _get_repo_path(repo)
+
+    try:
+        # find 搜索不区分大小写，跳过隐藏目录和 .git / __pycache__
+        result = subprocess.run(
+            ["find", ".", "-type", "f", "-iname", f"*{query}*",
+             "-not", "-path", "./.git/*",
+             "-not", "-path", "*/__pycache__/*",
+             "-not", "-path", "*/.*"],
+            cwd=str(repo_path),
+            capture_output=True, text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {"repo": repo, "query": query, "results": [], "truncated": False}
+
+    if result.returncode not in (0, 1):
+        logger.warning(f"find failed for {query}: {result.stderr}")
+        return {"repo": repo, "query": query, "results": [], "truncated": False}
+
+    results = []
+    for line in result.stdout.strip().split("\n"):
+        if not line.strip():
+            continue
+        # 格式: ./path/to/file.py
+        file_path = line[2:]  # 去掉 "./"
+        ext = Path(file_path).suffix.lower()
+        if ext not in TEXT_EXTENSIONS:
+            continue
+        name = Path(file_path).name
+        results.append({
+            "path": file_path,
+            "name": name,
+            "extension": ext,
+        })
+
+    truncated = len(results) > max_results
+    results = results[:max_results]
+
+    return {
+        "repo": repo,
+        "query": query,
+        "results": results,
+        "truncated": truncated,
+    }
+
+
 @router.get("/search")
 async def search_code(
     repo: str = Query("vllm"),

@@ -12,6 +12,12 @@ function app() {
         currentView: 'community',
         loading: false,
         mobileMenuOpen: false,
+        sidebarCollapsed: false,
+
+        toggleSidebar() {
+            this.sidebarCollapsed = !this.sidebarCollapsed;
+            document.documentElement.style.setProperty('--sidebar-w', this.sidebarCollapsed ? '60px' : '248px');
+        },
 
         // ===== Data =====
         areas: [],
@@ -79,6 +85,7 @@ function app() {
                 'personal-todo': '我的任务',
                 'intelligence': '洞察面板',
                 'articles': '学习文章',
+                'code-browser': '代码浏览',
             }[this.currentView] || '';
         },
         get currentViewSub() {
@@ -472,6 +479,10 @@ function app() {
             this.currentView = view;
             this.searchQuery = '';
             this.communityPage = 1;
+            // 切到代码浏览时自动折叠侧边栏
+            if (view === 'code-browser' && !this.sidebarCollapsed) {
+                this.toggleSidebar();
+            }
             // 切到我的贡献时自动加载统计数据
             if (view === 'pr-center' && !this.myStats && !this.statsLoading) {
                 this.loadMyStats();
