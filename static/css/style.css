@@ -789,13 +789,6 @@ body {
     padding: 3px 8px;
     font-size: 13px;
 }
-/* watchlist 手动添加表单 */
-.watchlist-add-form {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-}
 
 /* ===== Toggle ===== */
 .toggle {

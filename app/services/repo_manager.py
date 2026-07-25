@@ -93,28 +93,25 @@ class RepoManager:
             db.close()
 
     def _sync_to_cache(self, repo_name: str, local_path: Path, db) -> Dict:
-        """扫描 watch_dirs 下的 .py 文件，更新 LocalCodeCache"""
+        """扫描仓库下所有 .py 文件，更新 LocalCodeCache"""
         from app.models import LocalCodeCache
 
-        watch_dirs = Config.get_watch_dirs(repo_name)
         stats = {"created": 0, "updated": 0, "unchanged": 0, "errors": []}
 
-        for watch_dir in watch_dirs:
-            base_path = local_path / watch_dir
-            if not base_path.exists():
+        for py_file in sorted(local_path.rglob("*.py")):
+            # 跳过 .git 目录下的文件
+            if ".git" in py_file.parts:
                 continue
-
-            for py_file in sorted(base_path.rglob("*.py")):
-                relative_path = str(py_file.relative_to(local_path)).replace("\\", "/")
-                result = self._sync_file(repo_name, relative_path, py_file, db)
-                if result["status"] == "created":
-                    stats["created"] += 1
-                elif result["status"] == "updated":
-                    stats["updated"] += 1
-                elif result["status"] == "unchanged":
-                    stats["unchanged"] += 1
-                else:
-                    stats["errors"].append(result)
+            relative_path = str(py_file.relative_to(local_path)).replace("\\", "/")
+            result = self._sync_file(repo_name, relative_path, py_file, db)
+            if result["status"] == "created":
+                stats["created"] += 1
+            elif result["status"] == "updated":
+                stats["updated"] += 1
+            elif result["status"] == "unchanged":
+                stats["unchanged"] += 1
+            else:
+                stats["errors"].append(result)
 
         return stats
 

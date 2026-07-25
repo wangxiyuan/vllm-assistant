@@ -1,20 +1,18 @@
 """
 配置管理模块
 - 环境变量（.env）为基础
-- config.yaml 可覆盖部分字段（DESIGN.md 349-371 行）
-- ``POLLING_AREAS`` 支持 env（逗号分隔）或 yaml（列表）两种格式
+- ``POLLING_AREAS`` 支持 env 逗号分隔格式
 """
 import os
 from pathlib import Path
-from typing import Optional, Any, List, Dict
-import yaml
+from typing import Optional, List, Dict
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 class Config:
-    """全局配置（类属性 + 文件/环境变量覆盖）"""
+    """全局配置（类属性 + 环境变量覆盖）"""
 
     # GitHub
     GITHUB_OWNER: str = os.getenv("GITHUB_OWNER", "vllm-project")
@@ -48,14 +46,12 @@ class Config:
 
     # Polling
     POLLING_INTERVAL: int = int(os.getenv("POLLING_INTERVAL", "10"))
-    # DESIGN.md 360 行：polling.areas（仅同步这些领域，空=全部）
-    # env 写法：POLLING_AREAS="engine,hardware"
     POLLING_AREAS: List[str] = None  # type: ignore
 
     # User
     USERNAME: str = os.getenv("GITHUB_USERNAME", "")
 
-    # Personal TODO - 去重检查默认仓库（DESIGN-PERSONAL-TODO.md 7）
+    # Personal TODO - 去重检查默认仓库
     DEFAULT_DEDUP_REPOS: List[str] = os.getenv(
         "DEFAULT_DEDUP_REPOS", "vllm-project/vllm"
     ).split(",")
@@ -63,23 +59,20 @@ class Config:
     # Personal TODO - 洞察报告异步超时（秒）
     INTELLIGENCE_REPORT_TIMEOUT: int = int(os.getenv("INTELLIGENCE_REPORT_TIMEOUT", "180"))
 
-    # ===== 学习文章管理系统 =====
+    # ===== 代码仓库配置 =====
     # 代码仓库列表：{"vllm": "https://github.com/vllm-project/vllm.git", ...}
     REPOS: Dict[str, str] = {}
-
-    # 各仓库的关注目录
-    WATCH_DIRS: Dict[str, List[str]] = {}
 
     # 代码同步间隔（分钟）
     CODE_SYNC_INTERVAL: int = int(os.getenv("CODE_SYNC_INTERVAL", "30"))
 
-    # 文章验证间隔（小时）
-    ARTICLE_VALIDATE_INTERVAL: int = int(os.getenv("ARTICLE_VALIDATE_INTERVAL", "48"))
-
-    @classmethod
-    def get_watch_dirs(cls, repo_name: str) -> List[str]:
-        """获取指定仓库的关注目录"""
-        return cls.WATCH_DIRS.get(repo_name.upper(), [])
+    # ===== 数据清理配置 =====
+    # 社区数据保留天数（closed/merged 超过此天数将被清理）
+    DATA_RETENTION_DAYS: int = int(os.getenv("DATA_RETENTION_DAYS", "90"))
+    # AI 缓存保留条数上限（超过此数量时删除最旧的）
+    AI_CACHE_MAX_RECORDS: int = int(os.getenv("AI_CACHE_MAX_RECORDS", "1000"))
+    # 数据清理间隔（小时）
+    CLEANUP_INTERVAL: int = int(os.getenv("CLEANUP_INTERVAL", "24"))
 
     @classmethod
     def parse_repos_config(cls) -> None:
@@ -96,13 +89,6 @@ class Config:
                 name, url = part.split("=", 1)
                 repos[name.strip()] = url.strip()
         cls.REPOS = repos
-
-        # 解析各仓库的 WATCH_DIRS
-        for name in repos:
-            env_key = f"WATCH_DIRS_{name.upper()}"
-            dirs_raw = os.getenv(env_key, "")
-            if dirs_raw:
-                cls.WATCH_DIRS[name.upper()] = [d.strip() for d in dirs_raw.split(",") if d.strip()]
 
     @classmethod
     def validate(cls) -> bool:
@@ -123,48 +109,12 @@ class Config:
         return f"https://api.github.com/repos/{cls.GITHUB_OWNER}/{cls.GITHUB_REPO}"
 
 
-def _flat_to_class_attrs(data: dict) -> None:
-    """把 yaml/env 字典平铺到 Config 类属性"""
-    # 顶层直接覆盖（注意：env 已经设过默认值，yaml 不再覆盖 env）
-    for key, value in data.items():
-        if not hasattr(Config, key):
-            continue
-        if isinstance(value, (str, int, float, bool)):
-            setattr(Config, key, value)
-
-    # 嵌套 polling.areas → POLLING_AREAS
-    polling = data.get("polling") or {}
-    if isinstance(polling, dict) and "areas" in polling:
-        areas = polling["areas"] or []
-        if isinstance(areas, list):
-            Config.POLLING_AREAS = [str(a) for a in areas if a]
-
-
-def _load_env_polling_areas() -> None:
-    """POLLING_AREAS="engine,hardware" 形式"""
-    raw = os.getenv("POLLING_AREAS", "").strip()
-    if raw:
-        Config.POLLING_AREAS = [a.strip() for a in raw.split(",") if a.strip()]
-
-
-# 初始化默认值
-if Config.POLLING_AREAS is None:
+# 初始化 POLLING_AREAS
+_polling_raw = os.getenv("POLLING_AREAS", "").strip()
+if _polling_raw:
+    Config.POLLING_AREAS = [a.strip() for a in _polling_raw.split(",") if a.strip()]
+else:
     Config.POLLING_AREAS = []
 
-
-def load_config_file(path: Optional[str] = None) -> dict:
-    if path is None:
-        path = Path(__file__).parent.parent / "config.yaml"
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
-
-
-# 加载顺序：class 默认值 → yaml 覆盖 → env 覆盖
-file_config = load_config_file()
-_flat_to_class_attrs(file_config)
-_load_env_polling_areas()
-
-# 学习文章：解析仓库配置
+# 解析仓库配置
 Config.parse_repos_config()

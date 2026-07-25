@@ -38,12 +38,14 @@ async def get_community_items(
     type: str = Query("all", pattern="^(issue|pr|all)$"),
     area: Optional[str] = None,
     limit: int = Query(30, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     sort_by: str = Query("created", pattern="^(created|updated|comments)$"),
     force_refresh: bool = False,
     db: Session = Depends(get_db),
 ):
     """从缓存读取 community items（issues/prs）。
 
+    支持 offset 分页：limit=20&offset=20 获取第二页。
     `force_refresh=true` 触发后台同步，立即返回当前缓存（不阻塞）。
     返回 dict：``{"items": [...], "refresh_triggered": bool}``（force_refresh=false 时无 refresh_triggered）
     """
@@ -66,7 +68,7 @@ async def get_community_items(
         "updated": Item.updated_at,
         "comments": Item.comments,
     }[sort_by]
-    items = q.order_by(sort_key.desc()).limit(limit).all()
+    items = q.order_by(sort_key.desc()).offset(offset).limit(limit).all()
 
     payload = {"items": [_item_to_response_dict(it) for it in items]}
     if force_refresh:
@@ -90,24 +92,32 @@ async def get_areas(db: Session = Depends(get_db)):
 
 @router.get("/stats")
 async def get_community_stats(db: Session = Depends(get_db)):
-    """从缓存聚合社区统计"""
+    """从缓存聚合社区统计（使用 SQL 聚合查询，避免全表扫描）"""
     try:
-        rows = db.query(Item.area, Item.type, Item.state).all()
+        from sqlalchemy import func
+
+        # 按 type 分组统计总数
+        type_counts = db.query(
+            Item.type, func.count(Item.id)
+        ).group_by(Item.type).all()
+        type_count_map = dict(type_counts)
+
+        # 按 area + type 分组统计
+        area_rows = db.query(
+            Item.area, Item.type, func.count(Item.id)
+        ).filter(Item.area.isnot(None)).group_by(Item.area, Item.type).all()
+
         area_stats: dict = {}
-        total_issues = 0
-        total_prs = 0
-        for area_id, type_, _state in rows:
+        for area_id, type_, _count in area_rows:
+            area_stats.setdefault(area_id, {"issues": 0, "prs": 0})
             if type_ == "issue":
-                total_issues += 1
-                if area_id:
-                    area_stats.setdefault(area_id, {"issues": 0, "prs": 0})["issues"] += 1
+                area_stats[area_id]["issues"] += _count
             elif type_ == "pr":
-                total_prs += 1
-                if area_id:
-                    area_stats.setdefault(area_id, {"issues": 0, "prs": 0})["prs"] += 1
+                area_stats[area_id]["prs"] += _count
+
         return {
-            "total_issues": total_issues,
-            "total_prs": total_prs,
+            "total_issues": type_count_map.get("issue", 0),
+            "total_prs": type_count_map.get("pr", 0),
             "area_breakdown": area_stats,
         }
     except Exception:

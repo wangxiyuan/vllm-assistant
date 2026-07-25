@@ -176,12 +176,14 @@ async def root():
 @app.get("/health")
 async def health_check():
     """健康检查"""
+    scheduler_info = get_sync_status()
     return {
         "status": "ok",
         "version": "0.1.0",
         "debug": Config.DEBUG,
         "configured": bool(Config.GITHUB_PAT),
         "username_configured": bool(Config.USERNAME),
+        "scheduler_running": scheduler_info.get("running", False),
     }
 
 

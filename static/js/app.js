@@ -52,6 +52,7 @@ function app() {
         manualAddType: 'issue',
         manualAddNumber: '',
         manualAddLoading: false,
+        showAddWatchlistModal: false,
 
         // 打开特别关注中的 PR -> 触发 PR drawer
         // watchlist 项字段是 number, openPR 期望 pr_number
@@ -449,6 +450,7 @@ function app() {
                 this.showToast('添加失败', e.message, 'error');
             } finally {
                 this.manualAddLoading = false;
+                this.showAddWatchlistModal = false;
             }
         },
 

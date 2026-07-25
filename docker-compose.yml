@@ -1,0 +1,85 @@
+# ============================================================================
+# vLLM Assistant — Docker Compose 一键部署配置
+# ============================================================================
+# 使用方式：
+#   1. 复制 .env.example 为 .env 并填写配置
+#   2. docker compose up -d
+#   3. 访问 http://localhost:8000
+# ============================================================================
+#
+# 生产部署建议：
+#   - 本服务直接暴露端口，TLS 终止由外部反向代理（nginx/caddy/CF）处理
+#   - 设置 TZ 环境变量控制容器时区
+# ============================================================================
+
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vllm-assistant
+    restart: unless-stopped
+
+    # 端口映射（宿主机:容器）
+    ports:
+      - "${HOST_PORT:-8000}:${PORT:-8000}"
+
+    # 环境变量（从 .env 文件加载）
+    env_file:
+      - .env
+
+    # 额外环境变量（Docker 运行时专用，不污染 .env）
+    environment:
+      # 时区设置（影响日志时间戳，默认 Asia/Shanghai）
+      - TZ=${TZ:-Asia/Shanghai}
+      # uvicorn 优雅关闭超时（秒），给 scheduler 足够时间停止
+      - GRACEFUL_SHUTDOWN_TIMEOUT=${GRACEFUL_SHUTDOWN_TIMEOUT:-30}
+
+    # 持久化数据卷
+    #   - data/ 目录：SQLite 数据库 + 克隆的代码仓库
+    #   - 数据卷挂载确保容器重启后数据不丢失
+    volumes:
+      # SQLite 数据库持久化（命名卷）
+      - vllm-assistant-data:/app/data
+      # 代码仓库 .git 对象缓存（避免每次重建重新 clone）
+      # 用命名卷单独缓存 repos/.git，减少重建后的 git fetch 时间
+      - vllm-assistant-repos-cache:/app/data/repos
+
+    # 健康检查（与 Dockerfile 中的 HEALTHCHECK 配合）
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    # 日志限制（避免日志无限增长）
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # 资源限制（根据实际需求调整）
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "2"
+    #       memory: "2G"
+    #     reservations:
+    #       cpus: "0.5"
+    #       memory: "512M"
+
+# 命名卷
+volumes:
+  vllm-assistant-data:
+    # 如果希望数据存储在宿主机特定路径，改为：
+    # driver: local
+    # driver_opts:
+    #   type: none
+    #   device: /path/to/your/data
+    #   o: bind
+  vllm-assistant-repos-cache:
+    # 代码仓库 .git 缓存卷（避免重复 clone）

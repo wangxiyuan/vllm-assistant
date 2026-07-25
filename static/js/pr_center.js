@@ -232,8 +232,8 @@ function prCenterMixin() {
                 const isCurrent = (itemType === 'pr' && this.selectedPR?.pr_number === number)
                                || (itemType === 'issue' && this.selectedIssue?.number === number);
                 if (!isCurrent) return;
-                if (cachedSummary && cachedSummary.summary) {
-                    this.aiSummary = this.renderSummary(cachedSummary.summary);
+                if (cachedSummary && !cachedSummary.empty) {
+                    this.aiSummary = this.renderSummary(cachedSummary);
                 }
                 // review 缓存（仅 PR）
                 if (itemType === 'pr') {

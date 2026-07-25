@@ -70,6 +70,7 @@ async def list_repos():
         repos.append({
             "name": repo_name,
             "cloned": local_path.exists(),
+            "url": Config.REPOS[repo_name],
         })
     return {"repos": repos}
 

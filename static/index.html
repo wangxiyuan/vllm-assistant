@@ -131,9 +131,9 @@
                     vLLM Assistant v1.0
                 </div>
                 <div class="tt-host" style="position: relative; margin-top: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--text-disabled); cursor: help;">
-                    <span>快捷键: 1-7 切换 · R 同步</span>
+                    <span>快捷键: 1-8 切换 · R 同步</span>
                     <span class="tt" style="white-space: nowrap; bottom: calc(100% + 6px); left: 0; transform: none;">
-                        <span class="tt-line"><span class="tt-k">1-7</span> <span class="tt-v">切换视图</span></span>
+                        <span class="tt-line"><span class="tt-k">1-8</span> <span class="tt-v">切换视图</span></span>
                         <span class="tt-line"><span class="tt-k">R</span> <span class="tt-v">手动同步</span></span>
                         <span class="tt-line"><span class="tt-k">/</span> <span class="tt-v">聚焦搜索</span></span>
                         <span class="tt-line"><span class="tt-k">Esc</span> <span class="tt-v">关闭弹窗/抽屉</span></span>
@@ -669,24 +669,16 @@
                             <span class="count" x-text="watchlist.length + ' 项'"></span>
                         </div>
                         <div class="panel-actions">
-                            <!-- 手动添加 issue/PR -->
-                            <div class="watchlist-add-form">
-                                <select class="select select-sm" x-model="manualAddType" style="width: auto;">
-                                    <option value="issue">Issue</option>
-                                    <option value="pr">PR</option>
-                                </select>
-                                <input class="input input-sm" type="number" placeholder="编号" x-model="manualAddNumber" @keydown.enter="addWatchlistByNumber()" style="width: 90px;">
-                                <button class="btn btn-primary btn-sm" @click="addWatchlistByNumber()" :disabled="manualAddLoading || !manualAddNumber">
-                                    <span x-show="!manualAddLoading">添加</span>
-                                    <span x-show="manualAddLoading">添加中…</span>
-                                </button>
-                            </div>
+                            <button class="btn btn-primary btn-sm" @click="showAddWatchlistModal = true">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                手动添加
+                            </button>
                         </div>
                     </div>
                     <div class="panel-body" style="padding: 0">
                         <div class="list">
                             <template x-for="w in filteredWatchlist" :key="w.item_type + ':' + w.number">
-                                <div class="list-item" @click="w.item_type === 'pr' ? openWatchlistPR(w) : window.open(w.url, '_blank')">
+                                <div class="list-item" @click="w.item_type === 'pr' ? openWatchlistPR(w) : openIssue(w)">
                                     <span class="item-number" :class="w.item_type" x-text="'#' + w.number"></span>
                                     <div class="item-main">
                                         <span class="item-title" style="cursor: pointer;" x-text="w.title || ('#' + w.number)"></span>
@@ -720,6 +712,40 @@
                     </div>
                 </div>
             </div>
+
+                <!-- 手动添加 Issue/PR 弹窗 -->
+                <div x-show="showAddWatchlistModal" x-cloak class="modal-backdrop" @click.self="showAddWatchlistModal = false">
+                    <div class="modal" @click.stop style="max-width: 440px;">
+                        <div class="modal-header">
+                            <h3>添加到特别关注</h3>
+                            <button class="modal-close" @click="showAddWatchlistModal = false">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="todo-add-form">
+                                <div style="margin-bottom: 16px;">
+                                    <div class="tabs">
+                                        <button class="tab" :class="{active: manualAddType === 'issue'}" @click="manualAddType = 'issue'">Issue</button>
+                                        <button class="tab" :class="{active: manualAddType === 'pr'}" @click="manualAddType = 'pr'">PR</button>
+                                    </div>
+                                </div>
+                                <div class="todo-form-row">
+                                    <span style="font-size: 18px; font-weight: 600; color: var(--text-tertiary); font-family: var(--font-mono); padding: 0 4px;">#</span>
+                                    <input class="input" type="number" placeholder="输入 Issue/PR 编号" x-model="manualAddNumber" @keydown.enter="addWatchlistByNumber()" style="flex: 1;">
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 8px;">
+                                    输入 GitHub 上的 Issue 或 PR 编号，系统会自动拉取标题等信息
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn" @click="showAddWatchlistModal = false">取消</button>
+                            <button class="btn btn-primary" @click="addWatchlistByNumber()" :disabled="manualAddLoading || !manualAddNumber">
+                                <span x-show="!manualAddLoading">确认添加</span>
+                                <span x-show="manualAddLoading">添加中…</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
             <!-- ============= 我的任务面板 ============= -->
             <div x-show="currentView === 'personal-todo'" class="view" x-cloak>

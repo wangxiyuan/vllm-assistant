@@ -49,5 +49,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Docker 部署构建缓存
+.deploy_build_hash
+
 .codegraph
 .claude

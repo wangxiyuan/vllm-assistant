@@ -29,10 +29,13 @@ scheduler = BackgroundScheduler()
 _github_client: Optional[GitHubClient] = None
 _area_mapper: Optional[AreaMapper] = None
 
+# 防止 trigger_refresh 并发触发多个同类型 job
+_running_jobs: set = set()
+
 # 用户 PR 详情并发拉取的线程数（GitHub 并发友好值，配合 GitHubClient 退避重试）
 USER_PR_FETCH_WORKERS = 5
 # 社区同步翻页数（issues/pulls 各翻 N 页，每页 DEFAULT_PER_PAGE=30）
-COMMUNITY_FETCH_PAGES = 2
+COMMUNITY_FETCH_PAGES = 5
 
 
 def _get_github_client() -> GitHubClient:
@@ -200,6 +203,11 @@ def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
 
 def sync_areas():
     """同步领域定义（从 CODEOWNERS 解析结果写入 areas 表）"""
+    job_id = "sync_areas"
+    if job_id in _running_jobs:
+        logger.debug(f"{job_id} already running, skipping")
+        return
+    _running_jobs.add(job_id)
     try:
         mapper = _get_area_mapper()
         all_areas = mapper.get_all_areas()
@@ -226,6 +234,8 @@ def sync_areas():
             db.close()
     except Exception:
         logger.exception("Error syncing areas")
+    finally:
+        _running_jobs.discard(job_id)
 
 
 def sync_community_data():
@@ -236,6 +246,11 @@ def sync_community_data():
     - 增量拉取最近更新的 issue（since 窗口），更新已有 issue 的状态
     - 翻页拉取最新 N 个 open PR（按 updated desc）
     """
+    job_id = "sync_community"
+    if job_id in _running_jobs:
+        logger.debug(f"{job_id} already running, skipping")
+        return
+    _running_jobs.add(job_id)
     try:
         logger.info("Starting community data sync...")
 
@@ -318,6 +333,8 @@ def sync_community_data():
 
     except Exception:
         logger.exception("Error syncing community data")
+    finally:
+        _running_jobs.discard(job_id)
 
 
 def _calc_ci_status(github_client: GitHubClient, sha: str) -> str:
@@ -333,6 +350,11 @@ def sync_user_prs():
     - PR：写入 my_prs（带 CI/review/conflict 状态）
     - Issue：写入 items（type=issue），供我的数据/我的贡献的 Issue 视图使用
     """
+    job_id = "sync_user_prs"
+    if job_id in _running_jobs:
+        logger.debug(f"{job_id} already running, skipping")
+        return
+    _running_jobs.add(job_id)
     try:
         if not Config.USERNAME:
             logger.warning("GITHUB_USERNAME not configured, skipping user PR sync")
@@ -343,8 +365,20 @@ def sync_user_prs():
         mapper = _get_area_mapper()
         db = SessionLocal()
         try:
-            # 同步 PR：先并发拉取每个 open PR 的详情，再串行 upsert（DB 非线程安全）
-            user_prs = github_client.get_user_pulls(Config.USERNAME, state="all") or []
+            # 增量策略：首次全量拉，后续只拉 open + 最近更新的 PR
+            existing_count = db.query(MyPR).count()
+            is_first_sync = existing_count == 0
+
+            if is_first_sync:
+                # 首次同步：全量拉取所有 PR
+                user_prs = github_client.get_user_pulls(Config.USERNAME, state="all") or []
+            else:
+                # 增量同步：只拉 open PR（closed/merged 状态很少变化，下次清理时处理）
+                user_prs = github_client.get_user_pulls(Config.USERNAME, state="open") or []
+                # 也拉最近关闭的 PR（更新状态，但数量很少）
+                closed_prs = github_client.get_user_pulls(Config.USERNAME, state="closed") or []
+                # Search API 按 updated desc 排序，只取前 20 个最近关闭的
+                user_prs.extend(closed_prs[:20])
 
             # 阶段一：并发拉取（merged/closed PR 不调额外 API，直接构造 detail）
             def _fetch_one(pr):
@@ -375,8 +409,18 @@ def sync_user_prs():
                     logger.exception(f"Failed to upsert user PR #{pr_number}, skipping")
 
             # 同步用户创建的 Issue 到 user_issues 表
-            # 用 get_user_issues_with_body 拉取含 body 的完整数据（弹窗需要正文）
-            user_issues = github_client.get_user_issues_with_body(Config.USERNAME, state="all") or []
+            # 增量策略：首次全量拉，后续只拉 open issue
+            existing_issue_count = db.query(UserIssue).count()
+            is_first_issue_sync = existing_issue_count == 0
+            issue_state = "all" if is_first_issue_sync else "open"
+
+            # 只有 open issue 才需要 body（弹窗展示），closed issue 只需要标题/状态
+            user_issues = github_client.get_user_issues_with_body(Config.USERNAME, state=issue_state) or []
+            # 非首次同步时，额外拉最近关闭的 issue 更新状态（不需要 body）
+            if not is_first_issue_sync:
+                closed_issues = github_client.get_user_issues(Config.USERNAME, state="closed") or []
+                user_issues.extend(closed_issues[:20])
+
             issue_count = 0
             for issue in user_issues:
                 if not isinstance(issue, dict):
@@ -394,6 +438,8 @@ def sync_user_prs():
 
     except Exception:
         logger.exception("Error syncing user PRs")
+    finally:
+        _running_jobs.discard(job_id)
 
 
 def _process_single_user_issue(db, issue: dict, mapper: AreaMapper) -> None:
@@ -576,9 +622,24 @@ def _upsert_user_pr(db, detail: dict, github_client: GitHubClient,
 
 
 def start_scheduler():
-    """启动定时调度器"""
+    """启动定时调度器
+
+    ⚠️ 必须单进程运行：多进程下每个进程都会启动独立的 BackgroundScheduler，
+    导致多个进程同时执行同步任务，造成 SQLite 数据竞争。
+    """
     if scheduler.running:
         return
+
+    # 防御性检查：如果检测到多 worker 环境，打印告警
+    # UVICORN_WORKERS 是 Dockerfile 中显式传入的，但用户也可能通过其他方式设置
+    import os as _os
+    _workers = _os.environ.get("UVICORN_WORKERS") or _os.environ.get("WEB_CONCURRENCY")
+    if _workers and _workers != "1":
+        logger.warning(
+            f"Detected UVICORN_WORKERS={_workers}, but APScheduler requires single-process mode. "
+            "Multiple workers will cause duplicate sync jobs and data races. "
+            "Set workers=1 or use a single-replica deployment."
+        )
 
     scheduler.add_job(
         sync_areas,
@@ -613,20 +674,22 @@ def start_scheduler():
         )
 
         scheduler.add_job(
-            validate_articles_job,
-            trigger=IntervalTrigger(hours=Config.ARTICLE_VALIDATE_INTERVAL),
-            id="validate_articles",
-            name="Validate Article Code Refs",
-            replace_existing=True,
-        )
-
-        scheduler.add_job(
             sync_file_change_history_job,
-            trigger=IntervalTrigger(hours=1),  # 每小时同步一次
+            trigger=IntervalTrigger(hours=6),  # 每 6 小时同步一次（增量同步，不浪费配额）
             id="sync_file_history",
             name="Sync File Change History",
             replace_existing=True,
         )
+
+    # 数据清理定时任务（每天执行一次）
+    cleanup_interval = int(getattr(Config, 'CLEANUP_INTERVAL', 24))
+    scheduler.add_job(
+        cleanup_old_data,
+        trigger=IntervalTrigger(hours=cleanup_interval),
+        id="cleanup_old_data",
+        name="Cleanup Old Data",
+        replace_existing=True,
+    )
 
     scheduler.start()
     logger.info(f"Scheduler started with interval {Config.POLLING_INTERVAL} minutes")
@@ -702,106 +765,193 @@ def stop_scheduler():
 
 def sync_all_repos_job():
     """定时任务：同步所有仓库代码到 LocalCodeCache"""
-    from app.services.repo_manager import RepoManager
-
-    if not Config.REPOS:
-        logger.warning("No REPOS configured, skipping code sync")
+    job_id = "sync_all_repos"
+    if job_id in _running_jobs:
+        logger.debug(f"{job_id} already running, skipping")
         return
-
-    manager = RepoManager()
-    for repo_name in Config.REPOS:
-        try:
-            result = manager.pull_and_sync(repo_name)
-            logger.info(f"Repo {repo_name} synced: {result}")
-        except Exception:
-            logger.exception(f"Error syncing repo {repo_name}")
-
-    # 对所有受影响文件做行号越界检查
+    _running_jobs.add(job_id)
     try:
-        manager.validate_all_refs()
-    except Exception:
-        logger.exception("Error validating refs after sync")
+        from app.services.repo_manager import RepoManager
+
+        if not Config.REPOS:
+            logger.warning("No REPOS configured, skipping code sync")
+            return
+
+        manager = RepoManager()
+        for repo_name in Config.REPOS:
+            try:
+                result = manager.pull_and_sync(repo_name)
+                logger.info(f"Repo {repo_name} synced: {result}")
+            except Exception:
+                logger.exception(f"Error syncing repo {repo_name}")
+
+        # 对所有受影响文件做行号越界检查
+        try:
+            manager.validate_all_refs()
+        except Exception:
+            logger.exception("Error validating refs after sync")
+    finally:
+        _running_jobs.discard(job_id)
 
 
 def sync_file_change_history_job():
     """定时任务：同步文件变更历史到 FileChangeHistory 表
 
-    遍历 my_prs 中已同步的 PR，获取每个 PR 的变更文件列表并记录。
-    实现 O(1) 的文件 → PR 查询，替代全表扫描 + GitHub API 调用的低效方案。
+    增量策略：只同步最近 6 小时内未同步过的 PR（last_sync < now - 6h），
+    避免每次全量重刷所有 PR 的变更文件列表。
     """
-    from app.models import FileChangeHistory
-    from app.services.github_client import GitHubClient
-
-    client = GitHubClient()
-    db = SessionLocal()
+    job_id = "sync_file_history"
+    if job_id in _running_jobs:
+        logger.debug(f"{job_id} already running, skipping")
+        return
+    _running_jobs.add(job_id)
     try:
-        prs = db.query(MyPR).filter(MyPR.state == "open").all()
-        # 也同步最近合并的 PR（前 50 个）
-        merged_prs = db.query(MyPR).filter(MyPR.state == "merged").order_by(
-            MyPR.last_sync.desc()).limit(50).all()
-        all_prs = prs + merged_prs
+        from app.models import FileChangeHistory
+        from app.services.github_client import GitHubClient
 
-        synced_count = 0
-        for pr in all_prs:
-            try:
-                files = client.get_pull_files(pr.pr_number)
-                if not files:
+        client = GitHubClient()
+        db = SessionLocal()
+        try:
+            # 只同步最近 6 小时内未同步过的 PR（增量）
+            sync_threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=6)
+
+            open_prs = db.query(MyPR).filter(
+                MyPR.state == "open",
+                MyPR.last_sync < sync_threshold,
+            ).all()
+            # 最近合并的 PR（前 30 个，同样只同步过期的）
+            merged_prs = db.query(MyPR).filter(
+                MyPR.state == "merged",
+                MyPR.last_sync < sync_threshold,
+            ).order_by(MyPR.last_sync.asc()).limit(30).all()
+
+            all_prs = open_prs + merged_prs
+            if not all_prs:
+                logger.debug("No PRs need file change history sync (all recently synced)")
+                return
+
+            synced_count = 0
+            for pr in all_prs:
+                try:
+                    files = client.get_pull_files(pr.pr_number)
+                    if not files:
+                        continue
+
+                    # 清除该 PR 的旧记录，重新写入
+                    db.query(FileChangeHistory).filter(
+                        FileChangeHistory.pr_number == pr.pr_number).delete()
+                    db.flush()
+
+                    now = datetime.now(timezone.utc).replace(tzinfo=None)
+                    for f in files:
+                        fname = f.get("filename") if isinstance(f, dict) else None
+                        if not fname:
+                            continue
+                        db.add(FileChangeHistory(
+                            repo="vllm",
+                            file_path=fname,
+                            pr_number=pr.pr_number,
+                            pr_title=pr.title,
+                            pr_state=pr.state,
+                            additions=f.get("additions", 0) if isinstance(f, dict) else 0,
+                            deletions=f.get("deletions", 0) if isinstance(f, dict) else 0,
+                            change_status=f.get("status", "modified") if isinstance(f, dict) else "modified",
+                            last_synced_at=now,
+                        ))
+                    synced_count += 1
+                except Exception:
+                    logger.exception(f"Failed to sync file changes for PR #{pr.pr_number}")
                     continue
 
-                # 清除该 PR 的旧记录，重新写入
-                db.query(FileChangeHistory).filter(
-                    FileChangeHistory.pr_number == pr.pr_number).delete()
-                db.flush()
+                # 每 10 个 PR 提交一次，避免大事务
+                if synced_count % 10 == 0:
+                    db.commit()
 
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
-                for f in files:
-                    fname = f.get("filename") if isinstance(f, dict) else None
-                    if not fname:
-                        continue
-                    db.add(FileChangeHistory(
-                        repo="vllm",
-                        file_path=fname,
-                        pr_number=pr.pr_number,
-                        pr_title=pr.title,
-                        pr_state=pr.state,
-                        additions=f.get("additions", 0) if isinstance(f, dict) else 0,
-                        deletions=f.get("deletions", 0) if isinstance(f, dict) else 0,
-                        change_status=f.get("status", "modified") if isinstance(f, dict) else "modified",
-                        last_synced_at=now,
-                    ))
-                synced_count += 1
-            except Exception:
-                logger.exception(f"Failed to sync file changes for PR #{pr.pr_number}")
-                continue
-
-            # 每 10 个 PR 提交一次，避免大事务
-            if synced_count % 10 == 0:
-                db.commit()
-
-        db.commit()
-        logger.info(f"File change history synced for {synced_count} PRs")
-    except Exception:
-        logger.exception("Error syncing file change history")
+            db.commit()
+            logger.info(f"File change history synced for {synced_count} PRs (skipped {len(all_prs) - synced_count} with no files)")
+        except Exception:
+            logger.exception("Error syncing file change history")
+        finally:
+            db.close()
     finally:
-        db.close()
+        _running_jobs.discard(job_id)
 
 
-def validate_articles_job():
-    """定时任务：深度验证所有文章中的代码引用"""
-    from app.services.article_validator import ArticleValidator
-    from app.services.local_code_sync import LocalCodeSyncService
-    from app.database import SessionLocal
+def cleanup_old_data():
+    """定时清理过期数据，防止数据库无限增长
 
-    if not Config.REPOS:
-        return
+    清理策略（由 Config 控制）：
+    - items 表：删除 closed/merged 超过 DATA_RETENTION_DAYS 天的记录
+    - file_change_history 表：删除超过 DATA_RETENTION_DAYS 天未更新的记录
+    - ai_cache 表：保留最近 AI_CACHE_MAX_RECORDS 条，删除更早的
+    - intelligence_reports 表：删除 failed 状态且超过 30 天的记录
+    - 每周执行一次 VACUUM 回收磁盘空间
+    """
+    from app.models import FileChangeHistory, AICache, IntelligenceReport
+    from sqlalchemy import text
 
     db = SessionLocal()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     try:
-        cache_service = LocalCodeSyncService(db)
-        validator = ArticleValidator(cache_service, db)
-        result = validator.batch_validate(deep_check=True)
-        logger.info(f"Article validation completed: {result}")
+        retention_days = int(getattr(Config, 'DATA_RETENTION_DAYS', 90))
+        ai_cache_max = int(getattr(Config, 'AI_CACHE_MAX_RECORDS', 1000))
+        cutoff = now - timedelta(days=retention_days)
+
+        # 1. 清理 items 表：删除 closed/merged 超过 retention_days 的记录
+        deleted_items = db.query(Item).filter(
+            Item.state.in_(["closed", "merged"]),
+            Item.updated_at < cutoff,
+        ).delete(synchronize_session=False)
+        if deleted_items:
+            logger.info(f"Cleaned {deleted_items} old items (state=closed/merged, older than {retention_days}d)")
+
+        # 2. 清理 file_change_history 表：删除超过 retention_days 天未更新的记录
+        deleted_fch = db.query(FileChangeHistory).filter(
+            FileChangeHistory.last_synced_at < cutoff,
+        ).delete(synchronize_session=False)
+        if deleted_fch:
+            logger.info(f"Cleaned {deleted_fch} old file_change_history records")
+
+        # 3. 清理 ai_cache 表：保留最近 AI_CACHE_MAX_RECORDS 条
+        total_cache = db.query(AICache).count()
+        if total_cache > ai_cache_max:
+            subq = db.query(AICache.created_at).order_by(
+                AICache.created_at.desc()
+            ).offset(ai_cache_max).limit(1).subquery()
+            deleted_cache = db.query(AICache).filter(
+                AICache.created_at < subq.c.created_at
+            ).delete(synchronize_session=False)
+            logger.info(f"Cleaned {deleted_cache} old ai_cache records (kept {ai_cache_max})")
+        else:
+            deleted_cache = 0
+            logger.debug(f"ai_cache has {total_cache} records (max {ai_cache_max}), no cleanup needed")
+
+        # 4. 清理 intelligence_reports 表：删除 failed 状态超过 30 天的
+        failed_cutoff = now - timedelta(days=30)
+        deleted_reports = db.query(IntelligenceReport).filter(
+            IntelligenceReport.status == "failed",
+            IntelligenceReport.created_at < failed_cutoff,
+        ).delete(synchronize_session=False)
+        if deleted_reports:
+            logger.info(f"Cleaned {deleted_reports} failed intelligence_reports")
+
+        db.commit()
+
+        # 5. 每周执行一次 VACUUM（每天清理一次，7 天一次 VACUUM）
+        _vacuum_counter = getattr(cleanup_old_data, "_vacuum_counter", 0)
+        cleanup_old_data._vacuum_counter = _vacuum_counter + 1
+        if cleanup_old_data._vacuum_counter >= 7:
+            cleanup_old_data._vacuum_counter = 0
+            logger.info("Running VACUUM to reclaim disk space...")
+            db.execute(text("VACUUM"))
+            logger.info("VACUUM completed")
+
+        logger.info(f"Cleanup completed: {deleted_items} items, {deleted_fch} file_changes, "
+                     f"{deleted_cache} ai_cache, {deleted_reports} reports")
     except Exception:
-        logger.exception("Error validating articles")
+        logger.exception("Error during data cleanup")
+        db.rollback()
     finally:
         db.close()
+
+

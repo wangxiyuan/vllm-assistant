@@ -66,6 +66,9 @@ class Item(Base):
 
     __table_args__ = (
         UniqueConstraint("type", "number", name="uq_items_type_number"),
+        Index("idx_items_type_state", "type", "state"),
+        Index("idx_items_area", "area"),
+        Index("idx_items_updated_at", "updated_at"),
     )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -96,6 +99,11 @@ class MyPR(Base):
     """用户的PR数据"""
 
     __tablename__ = "my_prs"
+
+    __table_args__ = (
+        Index("idx_my_prs_state", "state"),
+        Index("idx_my_prs_created_at", "created_at"),
+    )
 
     pr_number = Column(Integer, primary_key=True)
     title = Column(Text)
@@ -189,6 +197,10 @@ class UserIssue(Base):
 
     __tablename__ = "user_issues"
 
+    __table_args__ = (
+        Index("idx_user_issues_state", "state"),
+    )
+
     number = Column(Integer, primary_key=True)
     title = Column(Text)
     body = Column(Text)
@@ -236,6 +248,7 @@ class AICache(Base):
 
     __table_args__ = (
         UniqueConstraint("item_type", "number", "action", name="uq_ai_cache_key"),
+        Index("idx_ai_cache_created_at", "created_at"),
     )
 
 
@@ -310,6 +323,10 @@ class IntelligenceReport(Base):
     """洞察报告（DESIGN-PERSONAL-TODO.md 2.3）"""
 
     __tablename__ = "intelligence_reports"
+
+    __table_args__ = (
+        Index("idx_intel_reports_created_at", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     title = Column(Text, nullable=False)

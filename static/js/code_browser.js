@@ -41,6 +41,7 @@ function codeBrowserMixin() {
 
         // ===== 可用的仓库列表 =====
         cbRepos: ['vllm'],
+        cbRepoUrls: {},      // {name: url} 映射，用于生成 GitHub 链接
 
         // ===== 全局文件名搜索 =====
         cbFileNameQuery: '',
@@ -61,7 +62,12 @@ function codeBrowserMixin() {
             try {
                 const data = await this.api('/api/code-browser/repos');
                 if (data?.repos) {
-                    this.cbRepos = data.repos.filter(r => r.cloned).map(r => r.name);
+                    const repoMap = {};
+                    this.cbRepos = data.repos.filter(r => r.cloned).map(r => {
+                        repoMap[r.name] = r.url || '';
+                        return r.name;
+                    });
+                    this.cbRepoUrls = repoMap;
                 }
             } catch (_) {}
             // 默认加载根目录
@@ -263,7 +269,10 @@ function codeBrowserMixin() {
         cbBlameClick(lineIdx) {
             const info = this.cbBlame[lineIdx];
             if (!info || !info.hash || info.hash === '0000000000000000000000000000000000000000') return;
-            const url = `https://github.com/vllm-project/vllm/commit/${info.hash}`;
+            // 从仓库 URL 推导 GitHub 页面地址
+            const repoUrl = this.cbRepoUrls[this.cbRepo] || '';
+            const baseUrl = repoUrl.replace(/\.git$/, '').replace(/\/$/, '');
+            const url = baseUrl ? `${baseUrl}/commit/${info.hash}` : `https://github.com/vllm-project/vllm/commit/${info.hash}`;
             window.open(url, '_blank');
         },
 
