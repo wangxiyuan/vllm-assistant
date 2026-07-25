@@ -60,8 +60,8 @@ USER app
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-8000}/health')" || exit 1
 
-# 默认端口
-EXPOSE 8000
+# 默认端口（实际端口由 .env 中 PORT 变量控制）
+# EXPOSE 行已移除，端口映射由 docker-compose.yml 中的 ports 配置决定
 
 # 默认启动命令
 # ===== ⚠️ 重要：必须单进程运行 =====

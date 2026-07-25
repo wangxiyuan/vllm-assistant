@@ -148,6 +148,11 @@ else
     print_success ".env 文件已存在"
 fi
 
+# 加载 .env 变量（供后续脚本使用，如 PORT 等）
+set -a
+source .env
+set +a
+
 # 检查必填配置项
 print_step "验证必要配置"
 
