@@ -7,14 +7,13 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
-# 系统依赖：git 用于仓库克隆，gcc 用于编译某些 Python 包
+# 系统依赖：git 用于仓库克隆
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
-    gcc \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ============================================================================
 # 阶段二：运行镜像
@@ -32,12 +31,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/cache/apt/*
 
-# 从构建阶段复制已安装的依赖
-COPY --from=builder /root/.local /root/.local
+# 从构建阶段复制已安装的 Python 依赖（系统 site-packages 路径）
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
-# 确保 PATH 能找到 pip 安装的包
-ENV PATH=/root/.local/bin:$PATH \
-    PYTHONUNBUFFERED=1 \
+# 环境变量
+ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 # 复制应用代码
@@ -51,10 +50,9 @@ RUN mkdir -p /app/data && \
     python -m compileall -q app/
 
 # 创建非 root 用户，提升容器安全性
-# vllm-assistant 不需要 root 权限（不绑定特权端口、不写系统目录）
 RUN addgroup --system --gid 1001 app && \
     adduser --system --uid 1001 --ingroup app --no-create-home app && \
-    chown -R app:app /app /root/.local
+    chown -R app:app /app
 
 USER app
 
