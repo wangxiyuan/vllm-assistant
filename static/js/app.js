@@ -99,11 +99,11 @@ function app() {
         get currentViewTitle() {
             return {
                 'community': '社区动态',
-                'pr-center': '贡献数据',
+                'pr-center': '贡献面板',
                 'watchlist': '特别关注',
                 'personal-todo': '任务面板',
                 'intelligence': '洞察面板',
-                'articles': '学习文章',
+                'articles': '技术Blog',
                 'anatomy': '模型拆解',
             }[this.currentView] || '';
         },
@@ -275,12 +275,11 @@ function app() {
                 await Promise.all([
                     this.loadAreas(),
                     this.loadCommunityData(),
-                    this.loadMyPRs(),
-                    this.loadMyStats(),
                     this.loadSyncStatus(),
                     this.loadWatchlist(),
                     this.loadUsers(),
                 ]);
+                // 贡献面板（PR/Issue/Stats）在用户选择责任人后按需加载
                 this.lastSync = new Date().toISOString();
             } catch (e) {
                 this.showToast('初始化失败', e.message || String(e), 'error');
@@ -441,7 +440,7 @@ function app() {
             }
         },
 
-        // 手动添加 issue/PR 到特别关注（通过编号从 GitHub 拉取信息）
+        // 手动添加 issue/PR 到特别关注（通过编号从 GitHub 拉取信息，自动推断类型）
         async addWatchlistByNumber() {
             const num = parseInt(this.manualAddNumber, 10);
             if (!num || num <= 0) {
@@ -449,9 +448,10 @@ function app() {
                 return;
             }
             if (this.manualAddLoading) return;
-            const type = this.manualAddType;
-            const key = this._watchKey(num, type);
-            if (this.watchlistSet.has(key)) {
+            // 先检查是否已在关注列表（不确定类型，两种都查）
+            const prKey = this._watchKey(num, 'pr');
+            const issueKey = this._watchKey(num, 'issue');
+            if (this.watchlistSet.has(prKey) || this.watchlistSet.has(issueKey)) {
                 this.showToast('已在关注列表', `#${num} 已在特别关注中`, 'info');
                 this.manualAddNumber = '';
                 return;
@@ -462,8 +462,9 @@ function app() {
                 const assignee_id = this.manualAddAssigneeId;
                 const item = await this.api('/api/watchlist/add-by-number', {
                     method: 'POST',
-                    body: JSON.stringify({ number: num, item_type: type, note, assignee_id }),
+                    body: JSON.stringify({ number: num, note, assignee_id }),
                 }, 30000);  // GitHub API 拉取可能慢，给 30s
+                const key = this._watchKey(item.number, item.item_type);
                 this.watchlistSet.add(key);
                 this.watchlist.unshift(item);
                 this.showToast('已加入关注', `#${num} 已加入特别关注`, 'success');
@@ -471,7 +472,7 @@ function app() {
                 this.manualAddNote = '';
                 this.manualAddAssigneeId = null;
                 // 切换到对应 tab 显示刚添加的项
-                this.watchlistTab = type;
+                this.watchlistTab = item.item_type;
             } catch (e) {
                 this.showToast('添加失败', e.message, 'error');
             } finally {
@@ -652,9 +653,9 @@ function app() {
             this.currentView = view;
             this.searchQuery = '';
             this.communityPage = 1;
-            // 切到我的贡献时自动加载统计数据
-            if (view === 'pr-center' && !this.myStats && !this.statsLoading) {
-                this.loadMyStats();
+            // 切到贡献面板时自动加载贡献数据
+            if (view === 'pr-center') {
+                this.loadAllContribData();
             }
             // 切到我的任务时自动加载
             if (view === 'personal-todo') {
@@ -665,7 +666,7 @@ function app() {
                 this.loadIntelReports();
                 this.loadIntelTasks();
             }
-            // 切到学习文章时自动加载
+            // 切到技术Blog时自动加载
             if (view === 'articles') {
                 this.loadArticles();
             }
@@ -740,7 +741,6 @@ function app() {
             try {
                 await Promise.all([
                     this.loadCommunityData(),
-                    this.loadMyPRs(),
                 ]);
                 this.lastSync = new Date().toISOString();
                 this.communityLoadingMore = false;

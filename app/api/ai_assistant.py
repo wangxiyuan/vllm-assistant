@@ -251,12 +251,13 @@ async def clear_ai_cache(request: CacheDeleteRequest):
 class TranslateRequest(BaseModel):
     """翻译请求"""
     item_type: str  # 'issue' or 'pr'
+    number: int  # issue/PR 编号，用于缓存
     text: str
 
 
 @router.post("/translate")
 def translate(request: TranslateRequest):
-    """将 Issue/PR 描述翻译为中文
+    """将 Issue/PR 描述翻译为中文（结果缓存到本地 ai_cache 表，action='translate'）
 
     用 def（非 async）避免同步 AI 调用阻塞事件循环。
     """
@@ -264,9 +265,16 @@ def translate(request: TranslateRequest):
         raise HTTPException(status_code=400, detail="text is required")
     try:
         _require_api_key()
+        # 先读缓存
+        cached = _load_ai_cache(request.item_type, request.number, "translate")
+        if cached and cached.get("translated"):
+            return cached
         ai = AIAssistant()
         translated = ai.translate(request.text, request.item_type)
-        return {"translated": translated}
+        result = {"translated": translated}
+        # 缓存到 ai_cache 表
+        _save_ai_cache(request.item_type, request.number, "translate", result)
+        return result
     except HTTPException:
         raise
     except Exception:

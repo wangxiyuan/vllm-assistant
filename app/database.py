@@ -40,17 +40,21 @@ def _ensure_indexes():
         existing |= {idx["name"] for idx in inspect(conn).get_indexes("user_issues")}
         existing |= {idx["name"] for idx in inspect(conn).get_indexes("ai_cache")}
         existing |= {idx["name"] for idx in inspect(conn).get_indexes("intelligence_reports")}
+        existing |= {idx["name"] for idx in inspect(conn).get_indexes("file_change_history")}
 
-        # 定义需要创建的新索引
         new_indexes = [
             "CREATE INDEX IF NOT EXISTS idx_items_type_state ON items(type, state)",
             "CREATE INDEX IF NOT EXISTS idx_items_area ON items(area)",
             "CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at)",
             "CREATE INDEX IF NOT EXISTS idx_my_prs_state ON my_prs(state)",
             "CREATE INDEX IF NOT EXISTS idx_my_prs_created_at ON my_prs(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_my_prs_github_id ON my_prs(github_id)",
             "CREATE INDEX IF NOT EXISTS idx_user_issues_state ON user_issues(state)",
+            "CREATE INDEX IF NOT EXISTS idx_user_issues_github_id ON user_issues(github_id)",
             "CREATE INDEX IF NOT EXISTS idx_ai_cache_created_at ON ai_cache(created_at)",
             "CREATE INDEX IF NOT EXISTS idx_intel_reports_created_at ON intelligence_reports(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_fch_repo_file ON file_change_history(repo, file_path)",
+            "CREATE INDEX IF NOT EXISTS idx_fch_pr_number ON file_change_history(pr_number)",
         ]
 
         for ddl in new_indexes:

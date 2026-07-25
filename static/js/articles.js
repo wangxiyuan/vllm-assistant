@@ -1,4 +1,4 @@
-// articles.js — 学习文章管理 Alpine.js mixin
+// articles.js — 技术Blog Alpine.js mixin
 // 对应 DESIGN-ARTICLES.md 7.2 UI 页面
 
 function articlesMixin() {

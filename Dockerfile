@@ -41,6 +41,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # 复制应用代码
 COPY app/ ./app/
+COPY scripts/ ./scripts/
 COPY static/ ./static/
 COPY requirements.txt .
 

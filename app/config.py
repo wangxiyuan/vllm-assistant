@@ -48,9 +48,6 @@ class Config:
     POLLING_INTERVAL: int = int(os.getenv("POLLING_INTERVAL", "10"))
     POLLING_AREAS: List[str] = None  # type: ignore
 
-    # User
-    USERNAME: str = os.getenv("GITHUB_USERNAME", "")
-
     # Personal TODO - 去重检查默认仓库
     DEFAULT_DEDUP_REPOS: List[str] = os.getenv(
         "DEFAULT_DEDUP_REPOS", "vllm-project/vllm"

@@ -187,28 +187,6 @@ if grep -q "^VLLM_ASSISTANT_PAT=github_pat_your_token_here" .env 2>/dev/null || 
     fi
 fi
 
-# 检查 GITHUB_USERNAME
-if grep -q "^GITHUB_USERNAME=your_github_username" .env 2>/dev/null || \
-   ! grep -q "^GITHUB_USERNAME=" .env 2>/dev/null; then
-    print_warning "GITHUB_USERNAME 未配置（用于 PR 指挥中心功能）"
-    echo "  请输入你的 GitHub 用户名（输入后回车，留空跳过）:"
-    read -r github_username
-    if [ -n "$github_username" ]; then
-        if grep -q "^GITHUB_USERNAME=" .env; then
-            if [[ "$OSTYPE" == "darwin"* ]]; then
-                sed -i '' "s|^GITHUB_USERNAME=.*|GITHUB_USERNAME=$github_username|" .env
-            else
-                sed -i "s|^GITHUB_USERNAME=.*|GITHUB_USERNAME=$github_username|" .env
-            fi
-        else
-            echo "GITHUB_USERNAME=$github_username" >> .env
-        fi
-        print_success "GITHUB_USERNAME 已配置"
-    else
-        print_warning "GITHUB_USERNAME 未填写，PR 指挥中心功能将受限"
-    fi
-fi
-
 # 可选：询问是否配置 REPOS（仅在首次部署时提示）
 if ! grep -q "^REPOS=" .env 2>/dev/null || grep -q "^REPOS=$" .env 2>/dev/null; then
     echo ""
@@ -340,6 +318,24 @@ fi
 # ============================================================================
 print_info "启动新容器..."
 $DOCKER_COMPOSE_CMD up -d
+
+# ============================================================================
+# 数据库 Schema 迁移（在容器内执行）
+# ============================================================================
+print_step "数据库迁移检查"
+# 等待容器启动（确保数据库文件已创建）
+sleep 3
+if docker exec vllm-assistant python3 /app/scripts/migrate_db.py --check 2>/dev/null; then
+    print_success "数据库 schema 与代码一致，无需迁移"
+else
+    print_warning "检测到 schema 差异，执行数据库迁移..."
+    if docker exec vllm-assistant python3 /app/scripts/migrate_db.py; then
+        print_success "数据库迁移完成"
+    else
+        print_error "数据库迁移失败，请检查日志"
+        print_info "   docker logs vllm-assistant"
+    fi
+fi
 
 # ============================================================================
 # 等待服务就绪

@@ -91,7 +91,6 @@ if [ ! -f ".env" ]; then
     print_error "请编辑.env文件，填入你的配置："
     echo "  - VLLM_ASSISTANT_PAT (GitHub PAT)"
     echo "  - OPENAI_API_KEY (OpenAI API Key)"
-    echo "  - GITHUB_USERNAME (你的GitHub用户名)"
     echo ""
     echo "配置文件位置: .env"
     exit 1
@@ -123,12 +122,18 @@ if [ -z "$VLLM_ASSISTANT_PAT" ]; then
     exit 1
 fi
 
-if [ -z "$GITHUB_USERNAME" ]; then
-    print_warning "GITHUB_USERNAME未配置，某些功能可能无法使用"
-fi
-
 print_success "配置验证通过"
 echo ""
+
+# 数据库迁移检查（如果 schema 有变更，自动备份并迁移）
+print_info "检查数据库 schema..."
+python3 scripts/migrate_db.py || {
+    print_warning "数据库迁移失败，尝试修复..."
+    python3 scripts/migrate_db.py --force || {
+        print_error "数据库迁移失败，请检查错误信息"
+        exit 1
+    }
+}
 
 # 启动服务
 print_info "启动vLLM Assistant..."

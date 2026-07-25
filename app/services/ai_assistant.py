@@ -320,20 +320,40 @@ Return valid JSON only."""
 
         prompt = f"""你是一个 vLLM 项目的技术文档翻译专家。请将以下英文技术内容翻译成流畅的中文。
 
-要求：
-- 保持技术术语准确（如 Attention、KV Cache、Tensor Parallelism 等保留英文）
-- 代码片段、变量名、路径名等保持原样
-- 翻译要自然流畅，符合中文技术文档的表述习惯
-- 只输出翻译结果，不要加任何解释或前言
-- 如果原文是中文，原样返回
+## 核心原则
+
+1. **保留所有 Markdown 格式** — 标题（###）、列表（- / *）、代码块（```）、引用（>）、表格、粗体（**）、链接、图片等**完全保留原样**，不要添加或删除任何格式标记
+2. **保留 GitHub 特有结构** — `<details><summary>` 折叠块、`### Section Title` 标题、环境信息表格等，原样保留标签和结构，只翻译其中的文本内容
+3. **保留代码、变量名、路径、命令** — 代码片段、变量名、文件路径、GitHub 用户名、命令行参数、环境变量等**原样保留，不翻译**
+4. **保留技术术语原文** — 以下术语**保持英文原文，不翻译**：
+   - 模型架构：Attention、KV Cache、MoE、MLP、FFN、LayerNorm、RMSNorm、RoPE、GQA、MHA
+   - 硬件：GPU、CUDA、kernel、Tensor Parallelism、Pipeline Parallelism、TP、PP
+   - 量化：quantization、FP8、FP4、INT8、INT4、AWQ、GPTQ、SmoothQuant
+   - 推理：throughput、latency、batch、prefill、decode、scheduler、block manager
+   - 分布式：allreduce、allgather、NCCL、Ray、RPC、p2p
+   - 工具：vLLM、PyTorch、Triton、FlashAttention、Transformer
+   - 如果术语有公认中文译名且上下文需要，可保留英文并在括号内加中文注释，如 "KV Cache（键值缓存）"
+5. **保留链接和图片** — Markdown 链接 `[text](url)` 和图片 `![alt](url)` 原样保留，不要修改
+6. **保持原文段落结构** — 不要合并或拆分段落，保留空行分隔
+7. **只输出翻译结果** — 不要加任何解释、前言、后记或额外说明
+8. **中英文混合处理** — 如果原文已包含中文，只翻译英文部分，已有中文保持原样
+9. **错误信息和日志** — 错误信息、堆栈跟踪、日志输出等代码相关内容**不翻译**，保持原样
+10. **数字和单位** — 数字、百分比、单位（GB、MB、ms、s 等）保持原样
+
+## 翻译风格
+
+- 使用正式但不生硬的技术文档语言
+- 句子要通顺，符合中文表达习惯
+- 长句适当拆分，保持可读性
+- 保持原文的语气（疑问、陈述、强调等）
 
 原文（{'Issue' if item_type == 'issue' else 'PR'} 描述）：
-{text[:6000]}
+{text[:8000]}
 
 翻译："""
 
         try:
-            content = self._chat(prompt, max_tokens=4096, temperature=0.3)
+            content = self._chat(prompt, max_tokens=8192, temperature=0.1)
             return content.strip() if content else text
         except Exception:
             logger.exception("translate failed")

@@ -159,9 +159,10 @@ vllm-assistant/
 
 ## 故障排查
 
-### "请配置 GITHUB_USERNAME" 错误
-- 编辑 `.env`，设置 `GITHUB_USERNAME=your_github_handle`
-- 重启服务让 scheduler 重新加载
+### 贡献数据为空
+- 在"用户管理"中添加用户，填写 GitHub ID
+- scheduler 会在下次同步时自动拉取该用户的 PR/Issue 数据
+- 也可手动触发同步：`curl -X POST http://localhost:8000/api/refresh`
 
 ### 社区动态一直为空
 - 检查 `GET /api/status` 看 scheduler 是否在跑

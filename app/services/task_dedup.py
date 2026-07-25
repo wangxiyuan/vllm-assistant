@@ -122,10 +122,18 @@ class TaskDedupChecker:
                 }
                 results.append(entry)
 
-        # 标注是否为用户自己创建的
-        from app.config import Config
-        username = Config.USERNAME.lower() if Config.USERNAME else ""
-        if username:
+        # 标注是否为用户自己创建的（从 users 表获取第一个有 github_id 的用户）
+        from app.models import User
+        from app.database import SessionLocal
+        try:
+            _db = SessionLocal()
+            first_user = _db.query(User).filter(User.github_id.isnot(None), User.github_id != "").first()
+            _db.close()
+        except Exception:
+            first_user = None
+
+        if first_user:
+            username = first_user.github_id.lower()
             for entry in results:
                 orig = next((c for c in all_candidates if c.get("number") == entry.get("number")), None)
                 author = ""

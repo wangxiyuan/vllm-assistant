@@ -1,11 +1,13 @@
 """
 My Stats API - 我的贡献数据仪表盘
-从 SQLite 缓存读取（scheduler 同步），纯数据，无 AI。
+
+按 github_id 过滤，为空时返回所有用户汇总数据。
 """
 import logging
 from collections import Counter
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -16,27 +18,24 @@ router = APIRouter()
 
 
 @router.get("")
-async def get_my_stats(db: Session = Depends(get_db)):
-    """获取用户贡献统计仪表盘数据（从缓存读）"""
-    from app.config import Config
-    if not Config.USERNAME:
-        raise HTTPException(status_code=400, detail="GITHUB_USERNAME not configured")
+async def get_my_stats(
+    github_id: Optional[str] = Query(None, description="GitHub ID 过滤，为空时返回所有用户汇总"),
+    db: Session = Depends(get_db),
+):
+    """获取用户贡献统计仪表盘数据（按 github_id 过滤，为空时返回所有用户汇总）"""
+    if github_id:
+        my_prs = db.query(MyPR).filter(MyPR.github_id == github_id).all()
+        my_issues = db.query(UserIssue).filter(UserIssue.github_id == github_id).all()
+    else:
+        # 不传 github_id 时返回所有用户汇总
+        my_prs = db.query(MyPR).all()
+        my_issues = db.query(UserIssue).all()
 
-    username = Config.USERNAME
-
-    # 从 my_prs 缓存读
-    my_prs = db.query(MyPR).all()
-    # 从 user_issues 缓存读
-    my_issues = db.query(UserIssue).all()
-
-    # PR 分类（my_prs.state 已是 open/merged/closed）
     merged_prs = [p for p in my_prs if p.state == "merged"]
     open_prs = [p for p in my_prs if p.state == "open"]
-
-    # Issue 分类
     open_issues = [i for i in my_issues if i.state == "open"]
 
-    # 月度贡献趋势：用 PR 创建时间 created_at
+    # 月度贡献趋势
     monthly_created = Counter()
     monthly_merged = Counter()
     for p in my_prs:
@@ -72,7 +71,7 @@ async def get_my_stats(db: Session = Depends(get_db)):
     monthly_merged = dict(sorted(monthly_merged.items()))
 
     return {
-        "username": username,
+        "github_id": github_id,
         "summary": {
             "merged_prs": len(merged_prs),
             "open_prs": len(open_prs),

@@ -72,10 +72,7 @@ class PersonalTaskCreate(BaseModel):
     assignee_id: Optional[int] = None
     tags: List[str] = []
     due_date: Optional[date] = None
-    related_issue_number: Optional[int] = None
-    related_pr_number: Optional[int] = None
-    related_url: str = ""
-    related_repo: Optional[str] = None  # 关联的仓库名: 'vllm' / 'vllm-ascend'
+    related_refs: List[dict] = []
     parent_id: Optional[int] = None  # 父任务 ID，用于创建子任务
     subtask_order: Optional[int] = None  # 子任务排序序号（可选）
     trigger_dedup_check: bool = False
@@ -113,10 +110,7 @@ class PersonalTaskUpdate(BaseModel):
     assignee_id: Optional[int] = None
     tags: Optional[List[str]] = None
     due_date: Optional[date] = None
-    related_issue_number: Optional[int] = None
-    related_pr_number: Optional[int] = None
-    related_url: Optional[str] = None
-    related_repo: Optional[str] = None
+    related_refs: Optional[List[dict]] = None
     parent_id: Optional[int] = None  # 父任务 ID
     subtask_order: Optional[int] = None  # 子任务排序序号
 

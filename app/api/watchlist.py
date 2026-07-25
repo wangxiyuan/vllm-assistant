@@ -41,18 +41,14 @@ class WatchlistAddRequest(BaseModel):
 
 
 class AddByNumberRequest(BaseModel):
-    """通过 issue/PR 编号手动添加到特别关注"""
+    """通过 issue/PR 编号手动添加到特别关注
+
+    item_type 可选（不传则自动从 GitHub 推断是 issue 还是 PR）。
+    """
     number: int
-    item_type: str  # 'issue' or 'pr'
+    item_type: str = ""  # 'issue' or 'pr'，留空自动推断
     note: str = ""  # 用户备注
     assignee_id: Optional[int] = None  # 责任人
-
-    @field_validator("item_type")
-    @classmethod
-    def validate_item_type(cls, v):
-        if v not in ("issue", "pr"):
-            raise ValueError("item_type must be 'issue' or 'pr'")
-        return v
 
     @model_validator(mode="after")
     def validate_number(self):
@@ -85,9 +81,36 @@ def _classify_issue_type(title: str) -> Optional[str]:
 
 @router.get("")
 async def list_watchlist(db: Session = Depends(get_db)):
-    """获取特别关注列表（按添加时间倒序）"""
+    """获取特别关注列表（按添加时间倒序），含关联任务信息"""
+    from app.models import PersonalTask
+
     items = db.query(Watchlist).order_by(Watchlist.added_at.desc()).all()
-    return [w.to_dict() for w in items]
+    result = []
+    for w in items:
+        d = w.to_dict()
+        # 查询关联的任务
+        number = w.number
+        item_type = w.item_type  # 'issue' or 'pr'
+        # 在 personal_tasks 的 related_refs JSON 中查找匹配
+        tasks = db.query(PersonalTask).filter(
+            PersonalTask.related_refs.isnot(None),
+        ).all()
+        linked_tasks = []
+        for t in tasks:
+            refs = t.related_refs or []
+            for ref in refs:
+                if isinstance(ref, dict) and ref.get("number") == number and ref.get("type") == item_type:
+                    linked_tasks.append({
+                        "id": t.id,
+                        "title": t.title,
+                        "status": t.status,
+                        "parent_id": t.parent_id,
+                    })
+                    break
+        if linked_tasks:
+            d["linked_tasks"] = linked_tasks
+        result.append(d)
+    return result
 
 
 @router.post("")
@@ -136,20 +159,11 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
     """通过编号从 GitHub 拉取信息后加入特别关注
 
     自动填充 title/url/state/area/issue_type 等元信息。
+    item_type 可选：不传则自动从 GitHub 推断是 issue 还是 PR。
     用 def（非 async）避免同步 GitHub API 调用阻塞事件循环。
     """
-    if req.item_type not in ("issue", "pr"):
-        raise HTTPException(status_code=400, detail="item_type must be 'issue' or 'pr'")
     if req.number <= 0:
         raise HTTPException(status_code=400, detail="number must be positive")
-
-    # 幂等：已存在则直接返回
-    existing = db.query(Watchlist).filter(
-        Watchlist.number == req.number,
-        Watchlist.item_type == req.item_type,
-    ).first()
-    if existing:
-        return existing.to_dict()
 
     client = GitHubClient()
     title = ""
@@ -157,16 +171,17 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
     state = ""
     area = None
     issue_type = None
+    item_type = req.item_type
 
     try:
-        if req.item_type == "pr":
+        if item_type == "pr":
+            # 用户明确指定 PR
             pr = client.get_pull(req.number)
             if not pr:
                 raise HTTPException(status_code=404, detail=f"PR #{req.number} not found")
             title = pr.get("title", "")
             state = "merged" if pr.get("merged_at") else pr.get("state", "open")
             url = pr.get("html_url", Config.get_pulls_url(req.number))
-            # 领域映射：用变更文件列表
             try:
                 mapper = AreaMapper()
                 files = client.get_pull_files(req.number) or []
@@ -178,7 +193,8 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
                             break
             except Exception:
                 pass
-        else:
+        elif item_type == "issue":
+            # 用户明确指定 Issue
             issue = client.get_issue(req.number)
             if not issue:
                 raise HTTPException(status_code=404, detail=f"Issue #{req.number} not found")
@@ -186,22 +202,71 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
             state = issue.get("state", "open")
             url = issue.get("html_url", Config.get_issues_url(req.number))
             issue_type = _classify_issue_type(title) or "other"
-            # issue 领域：用 labels 分类
             try:
                 mapper = AreaMapper()
                 labels = [l.get("name", "") for l in issue.get("labels", []) if isinstance(l, dict)]
                 area = mapper.classify_issue_by_labels(labels)
             except Exception:
                 pass
+        else:
+            # 自动推断：先查 PR，再查 Issue
+            pr = client.get_pull(req.number)
+            if pr:
+                item_type = "pr"
+                title = pr.get("title", "")
+                state = "merged" if pr.get("merged_at") else pr.get("state", "open")
+                url = pr.get("html_url", Config.get_pulls_url(req.number))
+                try:
+                    mapper = AreaMapper()
+                    files = client.get_pull_files(req.number) or []
+                    for f in files:
+                        if isinstance(f, dict):
+                            a = mapper.map_to_area(f.get("filename", ""))
+                            if a:
+                                area = a
+                                break
+                except Exception:
+                    pass
+            else:
+                issue = client.get_issue(req.number)
+                if not issue:
+                    raise HTTPException(status_code=404, detail=f"#{req.number} not found as PR or Issue")
+                # GitHub /issues 端点也会返回 PR（PR 是 Issue 的子类型），
+                # 如果返回值含 pull_request 字段，说明这是 PR
+                if issue.get("pull_request"):
+                    item_type = "pr"
+                    title = issue.get("title", "")
+                    state = "merged" if issue.get("pull_request", {}).get("merged_at") else issue.get("state", "open")
+                    url = issue.get("html_url", Config.get_pulls_url(req.number))
+                else:
+                    item_type = "issue"
+                    title = issue.get("title", "")
+                    state = issue.get("state", "open")
+                    url = issue.get("html_url", Config.get_issues_url(req.number))
+                    issue_type = _classify_issue_type(title) or "other"
+                try:
+                    mapper = AreaMapper()
+                    labels = [l.get("name", "") for l in issue.get("labels", []) if isinstance(l, dict)]
+                    area = mapper.classify_issue_by_labels(labels)
+                except Exception:
+                    pass
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Error fetching item from GitHub")
         raise HTTPException(status_code=502, detail=f"Failed to fetch from GitHub: {e}")
 
+    # 幂等：已存在则直接返回
+    existing = db.query(Watchlist).filter(
+        Watchlist.number == req.number,
+        Watchlist.item_type == item_type,
+    ).first()
+    if existing:
+        return existing.to_dict()
+
     w = Watchlist(
         number=req.number,
-        item_type=req.item_type,
+        item_type=item_type,
         title=title,
         url=url,
         area=area,

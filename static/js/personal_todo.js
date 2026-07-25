@@ -13,7 +13,7 @@ function personalTodoMixin() {
 
         // ===== 快速添加任务表单 =====
         showAddTaskModal: false,
-        newTask: { title: '', description: '', source: 'self', priority: 'P2', area: '', assignee_id: null, due_date: '', related_repo: '', related_issue_number: null, related_pr_number: null, trigger_dedup_check: false },
+        newTask: { title: '', description: '', source: 'self', priority: 'P2', area: '', assignee_id: null, due_date: '', related_refs: [], refInput: '', trigger_dedup_check: false },
         newTaskLoading: false,
 
         // ===== 任务详情抽屉 =====
@@ -36,14 +36,13 @@ function personalTodoMixin() {
             { value: 'self', label: '主动规划' },
             { value: 'team', label: '产品反馈' },
             { value: 'community', label: '社区反馈' },
-            { value: 'meeting', label: '会议纪要' },
         ],
 
         // ===== 子任务 =====
         subtasks: [],
         subtasksLoading: false,
         showSubtaskForm: false,
-        newSubtask: { title: '', priority: 'P2', assignee_id: null },
+        newSubtask: { title: '', priority: 'P2', assignee_id: null, related_refs: [], refInput: '' },
         editingSubtaskId: null,
         editSubtaskForm: {},
 
@@ -77,12 +76,10 @@ function personalTodoMixin() {
             this.newTaskLoading = true;
             try {
                 // 分离前端控制字段，不发送到 API
-                const { trigger_dedup_check, ...payload } = this.newTask;
+                const { trigger_dedup_check, refInput, ...payload } = this.newTask;
                 if (!payload.due_date) delete payload.due_date;
                 if (!payload.area) delete payload.area;
-                if (!payload.related_repo) delete payload.related_repo;
-                if (!payload.related_issue_number) delete payload.related_issue_number;
-                if (!payload.related_pr_number) delete payload.related_pr_number;
+                if (!payload.related_refs || payload.related_refs.length === 0) delete payload.related_refs;
                 const result = await this.api('/api/personal-todo/tasks', {
                     method: 'POST',
                     body: JSON.stringify(payload),
@@ -93,7 +90,7 @@ function personalTodoMixin() {
                 if (this.todoStats.by_priority) this.todoStats.by_priority[result.priority] = (this.todoStats.by_priority[result.priority] || 0) + 1;
                 this.showToast('任务已创建', `#${result.id} ${result.title}`, 'success');
                 // 重置表单并关闭弹窗
-                this.newTask = { title: '', description: '', source: 'self', priority: 'P2', area: '', assignee_id: null, due_date: '', related_repo: '', related_issue_number: null, related_pr_number: null, trigger_dedup_check: false };
+                this.newTask = { title: '', description: '', source: 'self', priority: 'P2', area: '', assignee_id: null, due_date: '', related_refs: [], refInput: '', trigger_dedup_check: false };
                 this.showAddTaskModal = false;
                 // 如果有去重结果，显示提示
                 if (result.dedup_check_result && result.dedup_check_result.matches && result.dedup_check_result.matches.length > 0) {
@@ -127,7 +124,7 @@ function personalTodoMixin() {
             this.dedupResult = null;
             this.subtasks = [];
             this.showSubtaskForm = false;
-            this.newSubtask = { title: '', priority: 'P2', assignee_id: null };
+            this.newSubtask = { title: '', priority: 'P2', assignee_id: null, related_refs: [], refInput: '' };
         },
 
         async loadTaskDetails(taskId) {
@@ -166,7 +163,7 @@ function personalTodoMixin() {
             }
             try {
                 const updates = {};
-                const fields = ['title', 'description', 'source', 'priority', 'status', 'area', 'assignee_id', 'due_date', 'related_issue_number', 'related_pr_number', 'related_url', 'related_repo'];
+                const fields = ['title', 'description', 'source', 'priority', 'status', 'area', 'assignee_id', 'due_date', 'related_refs'];
                 for (const f of fields) {
                     if (this.editTaskForm[f] !== this.selectedTaskDetails[f]) {
                         let val = this.editTaskForm[f];
@@ -334,7 +331,7 @@ function personalTodoMixin() {
 
         // ===== 标签辅助 =====
         sourceLabel(source) {
-            const map = { self: '主动规划', team: '产品反馈', community: '社区反馈', meeting: '会议纪要' };
+            const map = { self: '主动规划', team: '产品反馈', community: '社区反馈' };
             return map[source] || source;
         },
         statusLabel(status) {
@@ -373,22 +370,45 @@ function personalTodoMixin() {
             const url = `https://github.com/${repoPath}/issues/${number}`;
             return { repo, number, url };
         },
-        // 根据 related_repo + related_issue_number / related_pr_number 生成跳转链接
+        // 根据 related_refs 数组生成跳转链接（取第一个）
         relatedUrl(task) {
             if (!task) return null;
-            if (task.related_url) return task.related_url;
-            if (task.related_repo && (task.related_issue_number || task.related_pr_number)) {
-                const repoPath = this.repoMap[task.related_repo] || task.related_repo;
-                const num = task.related_issue_number || task.related_pr_number;
-                const type = task.related_pr_number ? 'pull' : 'issues';
-                return `https://github.com/${repoPath}/${type}/${num}`;
-            }
-            return null;
+            const refs = task.related_refs || [];
+            return refs.length > 0 ? refs[0].url : null;
         },
         // 跳转到关联链接
         openRelatedLink(task) {
             const url = this.relatedUrl(task);
             if (url) window.open(url, '_blank');
+        },
+
+        // ===== 关联引用辅助方法 =====
+        // 从后端解析用户输入，自动判断是 issue 还是 PR
+        async resolveRef(input) {
+            if (!input || !input.trim()) return null;
+            try {
+                return await this.api('/api/personal-todo/resolve-ref', {
+                    method: 'POST',
+                    body: JSON.stringify({ input: input.trim() }),
+                });
+            } catch (e) {
+                this.showToast('解析失败', e.message, 'error');
+                return null;
+            }
+        },
+        // 添加关联引用到目标的 related_refs 数组
+        async addRelatedRef(target, input) {
+            const ref = await this.resolveRef(input);
+            if (!ref) return false;
+            if (!target.related_refs) target.related_refs = [];
+            target.related_refs.push(ref);
+            return true;
+        },
+        // 删除关联引用
+        removeRelatedRef(target, index) {
+            if (target.related_refs) {
+                target.related_refs.splice(index, 1);
+            }
         },
 
         // ===== 子任务 =====
@@ -418,12 +438,13 @@ function personalTodoMixin() {
                         title: this.newSubtask.title.trim(),
                         priority: this.newSubtask.priority,
                         assignee_id: this.newSubtask.assignee_id,
+                        related_refs: this.newSubtask.related_refs || [],
                         parent_id: parentId,
                         source: 'self',
                     }),
                 });
                 this.subtasks.push(result);
-                this.newSubtask = { title: '', priority: 'P2', assignee_id: null };
+                this.newSubtask = { title: '', priority: 'P2', assignee_id: null, related_refs: [], refInput: '' };
                 this.showSubtaskForm = false;
                 // 更新父任务列表中的子任务计数
                 this._updateSubtaskCountOnCard(parentId);
@@ -488,7 +509,7 @@ function personalTodoMixin() {
             }
             try {
                 const updates = {};
-                const fields = ['title', 'priority', 'source', 'assignee_id', 'status', 'related_repo', 'related_issue_number', 'related_pr_number', 'related_url', 'area'];
+                const fields = ['title', 'priority', 'source', 'assignee_id', 'status', 'related_refs', 'area'];
                 for (const f of fields) {
                     if (this.editSubtaskForm[f] !== subtask[f]) {
                         let val = this.editSubtaskForm[f];

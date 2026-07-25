@@ -5,6 +5,8 @@ PR Command Center API - PR指挥中心
 import logging
 from datetime import datetime, timezone, timedelta
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -25,14 +27,13 @@ async def get_my_prs(
     state: str = Query("open", pattern="^(open|merged|closed|all)$"),
     filter_conflicts: bool = False,
     filter_ci_fail: bool = False,
+    github_id: Optional[str] = Query(None, description="GitHub ID 过滤"),
     db: Session = Depends(get_db),
 ):
-    """从 my_prs 缓存读取用户的 PR 列表"""
-    from app.config import Config
-    if not Config.USERNAME:
-        raise HTTPException(status_code=400, detail="GITHUB_USERNAME not configured")
-
+    """从 my_prs 缓存读取用户的 PR 列表（可选按 github_id 过滤）"""
     q = db.query(MyPR)
+    if github_id:
+        q = q.filter(MyPR.github_id == github_id)
     if state == "open":
         q = q.filter(MyPR.state == "open")
     elif state == "merged":
@@ -81,6 +82,31 @@ def get_pr_details(pr_number: int, db: Session = Depends(get_db)):
                   "conflict_detected", "conflict_commits"):
             if getattr(cached, k, None) is not None and not pr_payload.get(k):
                 pr_payload[k] = getattr(cached, k)
+
+    # 如果缓存中没有 body（存量数据/未同步），实时拉取补充
+    if not pr_payload or not pr_payload.get("body"):
+        try:
+            pr = client.get_pull(pr_number)
+            if pr:
+                if not pr_payload:
+                    pr_payload = {
+                        "number": pr_number,
+                        "title": pr.get("title", ""),
+                        "body": pr.get("body") or "",
+                        "state": "merged" if pr.get("merged_at") else pr.get("state", "open"),
+                        "url": pr.get("html_url"),
+                        "author": (pr.get("user") or {}).get("login"),
+                        "labels": [l.get("name") for l in pr.get("labels", []) if isinstance(l, dict)],
+                        "created_at": pr.get("created_at"),
+                        "updated_at": pr.get("updated_at"),
+                        "additions": pr.get("additions", 0),
+                        "deletions": pr.get("deletions", 0),
+                        "changed_files": pr.get("changed_files", 0),
+                    }
+                elif not pr_payload.get("body"):
+                    pr_payload["body"] = pr.get("body") or ""
+        except Exception:
+            pass
 
     return {
         "pr": pr_payload,
@@ -197,15 +223,15 @@ def get_pr_diff(pr_number: int, db: Session = Depends(get_db)):
 @router.get("/my-issues")
 async def get_my_issues(
     state: str = Query("open", pattern="^(open|closed|all)$"),
+    github_id: Optional[str] = Query(None, description="GitHub ID 过滤"),
     db: Session = Depends(get_db),
 ):
-    """获取用户创建的 Issue 列表（从 SQLite 缓存读取，由 scheduler 同步）"""
+    """获取用户创建的 Issue 列表（可选按 github_id 过滤）"""
     from app.models import UserIssue
-    from app.config import Config
-    if not Config.USERNAME:
-        raise HTTPException(status_code=400, detail="GITHUB_USERNAME not configured")
 
     q = db.query(UserIssue)
+    if github_id:
+        q = q.filter(UserIssue.github_id == github_id)
     if state == "open":
         q = q.filter(UserIssue.state == "open")
     elif state == "closed":

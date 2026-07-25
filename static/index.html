@@ -102,7 +102,7 @@
                 </button>
                 <button class="nav-item" :class="{active: currentView === 'pr-center'}" @click="switchView('pr-center')">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-                    <span class="nav-kbd">3</span><span>贡献数据</span>
+                    <span class="nav-kbd">3</span><span>贡献面板</span>
                 </button>
                 <button class="nav-item" :class="{active: currentView === 'personal-todo'}" @click="switchView('personal-todo')">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
@@ -114,7 +114,7 @@
                 </button>
                 <button class="nav-item" :class="{active: currentView === 'articles'}" @click="switchView('articles')">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                    <span class="nav-kbd">6</span><span>学习文章</span>
+                    <span class="nav-kbd">6</span><span>技术Blog</span>
                 </button>
                 <button class="nav-item" :class="{active: currentView === 'anatomy'}" @click="switchView('anatomy')">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
@@ -166,7 +166,7 @@
                     </button>
                     <button class="nav-item" :class="{active: currentView === 'pr-center'}" @click="switchView('pr-center'); mobileMenuOpen = false">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-                        <span class="nav-kbd">3</span><span>贡献数据</span>
+                        <span class="nav-kbd">3</span><span>贡献面板</span>
                     </button>
                     <button class="nav-item" :class="{active: currentView === 'personal-todo'}" @click="switchView('personal-todo'); mobileMenuOpen = false">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
@@ -178,7 +178,7 @@
                     </button>
                     <button class="nav-item" :class="{active: currentView === 'articles'}" @click="switchView('articles'); mobileMenuOpen = false">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                        <span class="nav-kbd">6</span><span>学习文章</span>
+                        <span class="nav-kbd">6</span><span>技术Blog</span>
                     </button>
                     <button class="nav-item" :class="{active: currentView === 'anatomy'}" @click="switchView('anatomy'); mobileMenuOpen = false">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
@@ -408,7 +408,7 @@
                 </div>
             </div>
 
-            <!-- ============= 贡献数据（按责任人过滤） ============= -->
+            <!-- ============= 贡献面板（按责任人过滤） ============= -->
             <div x-show="currentView === 'pr-center'" class="view" x-cloak>
 
                 <!-- 贡献概览仪表盘 -->
@@ -424,7 +424,7 @@
                                 <div class="panel-title">贡献概览</div>
                                 <div class="panel-actions">
                                     <select class="select" x-model="selectedContributorGithubId" @change="switchContributor(selectedContributorGithubId)" style="min-width: 140px;">
-                                        <option value="">所有责任人</option>
+                                        <option value="">所有人</option>
                                         <template x-for="u in users" :key="u.id">
                                             <option :value="u.github_id" x-show="u.github_id" x-text="u.name"></option>
                                         </template>
@@ -709,6 +709,17 @@
                                             </template>
                                             <span x-text="'关注于 ' + timeAgo(w.added_at)"></span>
                                         </div>
+                                        <template x-if="w.linked_tasks && w.linked_tasks.length > 0">
+                                            <div style="margin-top: 6px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                                                <span style="font-size: 10px; color: var(--text-tertiary);">关联任务：</span>
+                                                <template x-for="lt in w.linked_tasks" :key="lt.id">
+                                                    <span class="ref-badge clickable" style="font-size: 10px;" @click.stop="switchView('personal-todo'); $nextTick(() => { const targetId = lt.parent_id || lt.id; openTask({ id: targetId }) })">
+                                                        <span x-text="'#' + lt.id"></span>
+                                                        <span x-text="lt.title.length > 20 ? lt.title.slice(0, 20) + '…' : lt.title"></span>
+                                                    </span>
+                                                </template>
+                                            </div>
+                                        </template>
                                     </div>
                                     <div class="item-side">
                                         <button class="btn btn-sm btn-ghost" @click.stop="openWatchlistEditModal(w)" title="编辑关注信息" style="margin-right: 2px;">
@@ -779,9 +790,16 @@
                                     <input class="input" type="date" x-model="newTask.due_date" title="截止日期" onclick="this.showPicker?.()">
                                 </div>
                                 <div class="todo-form-row">
-                                    <input class="input" type="text" placeholder="关联仓库 (vllm/vllm-ascend)" x-model="newTask.related_repo" style="flex: 0 0 160px;">
-                                    <input class="input" type="number" placeholder="关联 Issue 编号" x-model="newTask.related_issue_number" style="flex: 1;">
-                                    <input class="input" type="number" placeholder="关联 PR 编号" x-model="newTask.related_pr_number" style="flex: 1;">
+                                    <div class="ref-input-wrapper" style="flex: 1; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                                        <template x-for="(ref, idx) in (newTask.related_refs || [])" :key="idx">
+                                            <span class="ref-badge" @click="removeRelatedRef(newTask, idx)">
+                                                <span class="ref-type" :class="'ref-type-' + ref.type" x-text="ref.type === 'pr' ? 'PR' : 'I'"></span>
+                                                <span x-text="ref.repo + '#' + ref.number"></span>
+                                                <span class="ref-remove">&times;</span>
+                                            </span>
+                                        </template>
+                                        <input class="input" type="text" placeholder="输入 repo#number 或纯数字编号后回车" x-model="newTask.refInput" @keydown.enter.prevent="addRelatedRef(newTask, newTask.refInput).then(r => { if (r) newTask.refInput = '' })" style="flex: 1; min-width: 200px; border: none; outline: none; background: transparent;">
+                                    </div>
                                 </div>
                                 <div class="todo-form-actions">
                                     <label class="toggle">
@@ -861,9 +879,13 @@
                                                     <span class="meta-item" x-show="task.area" x-text="task.area"></span>
                                                     <span class="meta-item" x-show="task.due_date" :class="{'overdue': task.due_date && task.due_date < todayISO() && task.status !== 'done'}" x-text="'截止 ' + task.due_date"></span>
                                                     <span class="badge badge-subtask" x-show="task.subtask_count > 0" x-text="task.subtask_done_count + '/' + task.subtask_count"></span>
-                                                    <span class="meta-item" x-show="task.related_repo" style="cursor: pointer; color: var(--signal-blue); font-size: 10px;" @click.stop="openRelatedLink(task)">
-                                                        <span x-text="task.related_repo + '#' + (task.related_issue_number || task.related_pr_number || '')"></span>
-                                                    </span>
+                                                    <template x-for="(ref, idx) in (task.related_refs || [])" :key="idx">
+                                                        <span class="ref-badge clickable" @click.stop="window.open(ref.url, '_blank')" :title="ref.title || (ref.repo + '#' + ref.number)">
+                                                            <span class="ref-type" :class="'ref-type-' + ref.type" x-text="ref.type === 'pr' ? 'PR' : 'I'"></span>
+                                                            <span x-text="ref.repo + '#' + ref.number"></span>
+                                                            <span x-show="ref.in_watchlist" style="color: var(--amber); margin-left: 1px; font-size: 9px;" title="已在特别关注">★</span>
+                                                        </span>
+                                                    </template>
                                                 </div>
                                                 <div class="task-card-badges" x-show="task.has_dedup_check || task.has_ai_insight">
                                                     <span class="badge badge-warning" x-show="task.has_dedup_check && task.dedup_check_result && task.dedup_check_result.matches && task.dedup_check_result.matches.length > 0">
@@ -903,9 +925,13 @@
                                             <span class="meta-item" x-show="task.area" x-text="task.area"></span>
                                             <span class="due-date" :class="{'overdue': task.due_date && task.due_date < todayISO() && task.status !== 'done'}" x-show="task.due_date" x-text="'截止 ' + task.due_date"></span>
                                             <span class="badge badge-subtask" x-show="task.subtask_count > 0" x-text="task.subtask_done_count + '/' + task.subtask_count"></span>
-                                            <span class="meta-item" x-show="task.related_repo" style="cursor: pointer; color: var(--signal-blue); font-size: 11px;" @click.stop="openRelatedLink(task)">
-                                                <span x-text="task.related_repo + '#' + (task.related_issue_number || task.related_pr_number || '')"></span>
-                                            </span>
+                                            <template x-for="(ref, idx) in (task.related_refs || [])" :key="idx">
+                                                <span class="ref-badge clickable" @click.stop="window.open(ref.url, '_blank')" :title="ref.title || (ref.repo + '#' + ref.number)">
+                                                    <span class="ref-type" :class="'ref-type-' + ref.type" x-text="ref.type === 'pr' ? 'PR' : 'I'"></span>
+                                                    <span x-text="ref.repo + '#' + ref.number"></span>
+                                                    <span x-show="ref.in_watchlist" style="color: var(--amber); margin-left: 1px; font-size: 9px;" title="已在特别关注">★</span>
+                                                </span>
+                                            </template>
                                             <span x-text="timeAgo(task.created_at)"></span>
                                         </div>
                                     </div>
@@ -1054,7 +1080,7 @@
                 </div>
             </div>
 
-            <!-- ============= 学习文章 ============= -->
+            <!-- ============= 技术Blog ============= -->
             <div x-show="currentView === 'articles'" class="view" x-cloak @keydown="handleArticleKeydown($event)">
 
                 <!-- ===== 文章列表（articleViewOpen 为 false 时显示） ===== -->
@@ -1161,7 +1187,7 @@
                         </div>
                         <div x-show="!articlesLoading && articles.length === 0" class="empty-state">
                             <div class="empty-icon">📝</div>
-                            <div class="empty-title" x-text="articleFilterArea || articleFilterStatus !== 'all' ? '无匹配的文章' : '暂无学习文章'"></div>
+                            <div class="empty-title" x-text="articleFilterArea || articleFilterStatus !== 'all' ? '无匹配的文章' : '暂无技术Blog'"></div>
                             <div class="empty-desc">点击上方「新建文章」开始撰写学习笔记，文中可使用 <code>`vllm/engine/core.py:10-20`</code> 格式引用代码</div>
                         </div>
                     </div>
@@ -2153,12 +2179,6 @@
             </div>
             <div class="modal-body">
                 <div class="todo-add-form">
-                    <div style="margin-bottom: 16px;">
-                        <div class="tabs">
-                            <button class="tab" :class="{active: manualAddType === 'issue'}" @click="manualAddType = 'issue'">Issue</button>
-                            <button class="tab" :class="{active: manualAddType === 'pr'}" @click="manualAddType = 'pr'">PR</button>
-                        </div>
-                    </div>
                     <div class="todo-form-row">
                         <span style="font-size: 18px; font-weight: 600; color: var(--text-tertiary); font-family: var(--font-mono); padding: 0 4px;">#</span>
                         <input class="input" type="number" placeholder="输入 Issue/PR 编号" x-model="manualAddNumber" @keydown.enter="addWatchlistByNumber()" style="flex: 1;">
@@ -2175,7 +2195,7 @@
                         </select>
                     </div>
                     <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 8px;">
-                        输入 GitHub 上的 Issue 或 PR 编号，系统会自动拉取标题等信息
+                        输入 GitHub 上的 Issue 或 PR 编号，系统会自动判断类型并拉取信息
                     </div>
                 </div>
             </div>
@@ -2316,18 +2336,27 @@
                 <!-- PR body (Markdown) -->
                 <div x-show="prDetails && !loadingDetails">
                     <!-- PR body (Markdown) -->
-                    <template x-if="prDetails?.body">
+                    <template x-if="prDetails?.pr?.body">
                         <div class="ai-result mb-4">
                             <div class="ai-result-header">
                                 <div class="ai-result-title">PR 描述</div>
-                                <button class="btn btn-sm btn-ghost" @click="translateBody('pr')" :disabled="translateLoading" title="AI 翻译">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-                                    <span x-text="translateLoading ? '翻译中…' : 'AI 翻译'"></span>
-                                </button>
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <!-- 语言切换 tab -->
+                                    <template x-if="prTranslatedBody">
+                                        <div class="tabs" style="margin: 0;">
+                                            <button class="tab tab-sm" :class="{active: !prShowChinese}" @click="prShowChinese = false">原文</button>
+                                            <button class="tab tab-sm" :class="{active: prShowChinese}" @click="prShowChinese = true">中文</button>
+                                        </div>
+                                    </template>
+                                    <button class="btn btn-sm btn-ghost" @click="translateBody('pr')" :disabled="translateLoading" title="AI 翻译">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                                        <span x-text="translateLoading ? '翻译中…' : 'AI 翻译'"></span>
+                                    </button>
+                                </div>
                             </div>
                             <div class="ai-result-body">
-                                <div x-show="!prTranslatedBody" class="pr-body" x-html="renderMarkdown(prDetails.body)"></div>
-                                <div x-show="prTranslatedBody" class="pr-body" x-html="renderMarkdown(prTranslatedBody)"></div>
+                                <div x-show="!prShowChinese" class="pr-body" x-html="renderMarkdown(prDetails.pr?.body || '')"></div>
+                                <div x-show="prShowChinese" class="pr-body" x-html="renderMarkdown(prTranslatedBody || '')"></div>
                             </div>
                         </div>
                     </template>
@@ -2335,22 +2364,20 @@
                     <!-- Changed files -->
                     <h4 class="text-mono" style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-tertiary); margin: 16px 0 8px;">
                         变更文件 <span style="color: var(--text-secondary);" x-text="'(' + (prDetails?.files?.length || 0) + ')'"></span>
-                        <button class="btn btn-sm btn-ghost" @click="loadPRDiff()" :disabled="prDiffLoading" style="margin-left: 8px; font-size: 10px;">
-                            <span x-text="prDiffLoading ? '加载中…' : '加载全部 diff'"></span>
-                        </button>
                     </h4>
                     <ul class="file-list">
                         <template x-for="f in prDetails?.files || []" :key="f.filename">
-                            <li>
+                            <li :class="{'diff-expanded': expandedDiffFile === f.filename}">
                                 <span class="file-stats diffstat">
                                     <span class="add" x-text="'+' + (f.additions || 0)"></span>
                                     <span class="del" x-text="'-' + (f.deletions || 0)"></span>
                                 </span>
-                                <span class="file-name" @click="toggleFileDiff(f.filename)" style="cursor: pointer;" x-text="f.filename"></span>
+                                <span class="file-name" @click="toggleFileDiff(f.filename)" x-text="f.filename" :title="f.filename"></span>
                                 <span class="file-status" :class="'file-status-' + (f.status || 'modified')" x-text="f.status || 'modified'" style="margin-left: 6px; font-size: 10px;"></span>
-                                <!-- 文件 diff (可折叠) -->
+                                <span class="diff-toggle" @click="toggleFileDiff(f.filename)" x-text="expandedDiffFile === f.filename ? '收起' : '展开'" style="cursor: pointer; font-size: 10px; color: var(--text-tertiary); flex-shrink: 0;"></span>
+                                <!-- 文件 diff (可折叠，展开时自动加载) -->
                                 <div x-show="expandedDiffFile === f.filename" class="file-diff" x-cloak>
-                                    <pre class="diff-content" x-text="fileDiffs[f.filename] || '加载中…'"></pre>
+                                    <div class="diff-view" x-html="fileDiffs[f.filename] ? renderDiff(fileDiffs[f.filename]) : '<div class=\'diff-loading\'>正在加载 diff…</div>'"></div>
                                 </div>
                             </li>
                         </template>
@@ -2465,14 +2492,22 @@
                         <div class="ai-result mb-4">
                             <div class="ai-result-header">
                                 <div class="ai-result-title">描述</div>
-                                <button class="btn btn-sm btn-ghost" @click="translateBody('issue')" :disabled="translateLoading" title="AI 翻译">
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-                                    <span x-text="translateLoading ? '翻译中…' : 'AI 翻译'"></span>
-                                </button>
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <template x-if="issueTranslatedBody">
+                                        <div class="tabs" style="margin: 0;">
+                                            <button class="tab tab-sm" :class="{active: !issueShowChinese}" @click="issueShowChinese = false">原文</button>
+                                            <button class="tab tab-sm" :class="{active: issueShowChinese}" @click="issueShowChinese = true">中文</button>
+                                        </div>
+                                    </template>
+                                    <button class="btn btn-sm btn-ghost" @click="translateBody('issue')" :disabled="translateLoading" title="AI 翻译">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                                        <span x-text="translateLoading ? '翻译中…' : 'AI 翻译'"></span>
+                                    </button>
+                                </div>
                             </div>
                             <div class="ai-result-body">
-                                <div x-show="!issueTranslatedBody" class="pr-body" x-html="renderMarkdown(issueDetails.body)"></div>
-                                <div x-show="issueTranslatedBody" class="pr-body" x-html="renderMarkdown(issueTranslatedBody)"></div>
+                                <div x-show="!issueShowChinese" class="pr-body" x-html="renderMarkdown(issueDetails.body)"></div>
+                                <div x-show="issueShowChinese" class="pr-body" x-html="renderMarkdown(issueTranslatedBody || '')"></div>
                             </div>
                         </div>
                     </template>
@@ -2508,10 +2543,14 @@
                         </span>
                         <span class="meta-item" x-show="selectedTask?.area" x-text="selectedTask?.area"></span>
                         <span class="meta-item" x-show="selectedTask?.due_date" x-text="'截止 ' + selectedTask?.due_date"></span>
-                        <span class="meta-item" x-show="relatedUrl(selectedTaskDetails || selectedTask)" style="cursor: pointer; color: var(--signal-blue);" @click="openRelatedLink(selectedTaskDetails || selectedTask)">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 2px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                            <span x-text="((selectedTaskDetails || selectedTask)?.related_repo || '') + '#' + ((selectedTaskDetails || selectedTask)?.related_issue_number || (selectedTaskDetails || selectedTask)?.related_pr_number || '')"></span>
-                        </span>
+                        <template x-for="(ref, idx) in ((selectedTaskDetails || selectedTask)?.related_refs || [])" :key="idx">
+                            <span class="meta-item" style="cursor: pointer; color: var(--signal-blue);" @click="window.open(ref.url, '_blank')">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 2px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                <span class="ref-type" :class="'ref-type-' + ref.type" x-text="ref.type === 'pr' ? 'PR' : 'I'"></span>
+                                <span x-text="ref.repo + '#' + ref.number"></span>
+                                <span x-show="ref.in_watchlist" style="color: var(--amber); margin-left: 2px; font-size: 10px;" title="已在特别关注">★</span>
+                            </span>
+                        </template>
                         <span class="tt-host" style="display: inline-block;" x-show="selectedTask?.created_at">
                             <span x-text="'创建于 ' + timeAgo(selectedTask?.created_at)"></span>
                             <span class="tt" x-text="exactTime(selectedTask?.created_at)"></span>
@@ -2592,9 +2631,16 @@
                                     <input class="input" type="text" placeholder="领域" x-model="editTaskForm.area">
                                 </div>
                                 <div class="todo-form-row">
-                                    <input class="input" type="text" placeholder="关联仓库 (vllm / vllm-ascend)" x-model="editTaskForm.related_repo" style="flex: 0 0 160px;">
-                                    <input class="input" type="number" placeholder="关联 Issue 编号" x-model="editTaskForm.related_issue_number" style="flex: 1;">
-                                    <input class="input" type="number" placeholder="关联 PR 编号" x-model="editTaskForm.related_pr_number" style="flex: 1;">
+                                    <div class="ref-input-wrapper" style="flex: 1; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                                        <template x-for="(ref, idx) in (editTaskForm.related_refs || [])" :key="idx">
+                                            <span class="ref-badge" @click="removeRelatedRef(editTaskForm, idx)">
+                                                <span class="ref-type" :class="'ref-type-' + ref.type" x-text="ref.type === 'pr' ? 'PR' : 'I'"></span>
+                                                <span x-text="ref.repo + '#' + ref.number"></span>
+                                                <span class="ref-remove">&times;</span>
+                                            </span>
+                                        </template>
+                                        <input class="input" type="text" placeholder="输入 repo#number 或纯数字编号后回车" x-model="editTaskForm.refInput" @keydown.enter.prevent="addRelatedRef(editTaskForm, editTaskForm.refInput).then(r => { if (r) editTaskForm.refInput = '' })" style="flex: 1; min-width: 200px; border: none; outline: none; background: transparent;">
+                                    </div>
                                 </div>
                                 <input class="input" type="date" x-model="editTaskForm.due_date" title="截止日期" onclick="this.showPicker?.()">
                             </div>
@@ -2650,9 +2696,13 @@
                                                 <div class="subtask-meta">
                                                     <span class="priority-badge" :class="priorityClass(sub.priority)" x-text="sub.priority" x-show="sub.priority"></span>
                                                     <span class="badge badge-assignee" x-show="sub.assignee_id" x-text="userName(sub.assignee_id)"></span>
-                                                    <span class="meta-item" x-show="sub.related_repo" style="cursor: pointer; color: var(--signal-blue); font-size: 10px;" @click.stop="openRelatedLink(sub)">
-                                                        <span x-text="sub.related_repo + '#' + (sub.related_issue_number || sub.related_pr_number || '')"></span>
-                                                    </span>
+                                                    <template x-for="(ref, idx) in (sub.related_refs || [])" :key="idx">
+                                                        <span class="ref-badge clickable" @click.stop="window.open(ref.url, '_blank')" :title="ref.title || (ref.repo + '#' + ref.number)">
+                                                            <span class="ref-type" :class="'ref-type-' + ref.type" x-text="ref.type === 'pr' ? 'PR' : 'I'"></span>
+                                                            <span x-text="ref.repo + '#' + ref.number"></span>
+                                                            <span x-show="ref.in_watchlist" style="color: var(--amber); margin-left: 1px; font-size: 9px;" title="已在特别关注">★</span>
+                                                        </span>
+                                                    </template>
                                                 </div>
                                             </div>
                                             <div class="subtask-actions">
@@ -2689,9 +2739,16 @@
                                                     </select>
                                                 </div>
                                                 <div class="todo-form-row">
-                                                    <input class="input" type="text" placeholder="仓库 (vllm/vllm-ascend)" x-model="editSubtaskForm.related_repo" style="flex: 0 0 150px;">
-                                                    <input class="input" type="number" placeholder="Issue 编号" x-model="editSubtaskForm.related_issue_number" style="flex: 1;">
-                                                    <input class="input" type="number" placeholder="PR 编号" x-model="editSubtaskForm.related_pr_number" style="flex: 1;">
+                                                    <div class="ref-input-wrapper" style="flex: 1; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                                                        <template x-for="(ref, idx) in (editSubtaskForm.related_refs || [])" :key="idx">
+                                                            <span class="ref-badge" @click="removeRelatedRef(editSubtaskForm, idx)">
+                                                                <span class="ref-type" :class="'ref-type-' + ref.type" x-text="ref.type === 'pr' ? 'PR' : 'I'"></span>
+                                                                <span x-text="ref.repo + '#' + ref.number"></span>
+                                                                <span class="ref-remove">&times;</span>
+                                                            </span>
+                                                        </template>
+                                                        <input class="input" type="text" placeholder="输入 repo#number 或纯数字编号后回车" x-model="editSubtaskForm.refInput" @keydown.enter.prevent="addRelatedRef(editSubtaskForm, editSubtaskForm.refInput).then(r => { if (r) editSubtaskForm.refInput = '' })" style="flex: 1; min-width: 150px; border: none; outline: none; background: transparent;">
+                                                    </div>
                                                 </div>
                                             </div>
                                             <div class="subtask-actions" style="opacity: 1; align-self: flex-end; padding-bottom: var(--space-2);">
@@ -2723,6 +2780,18 @@
                                         <option value="P3">P3</option>
                                     </select>
                                     <button class="btn btn-primary btn-sm" @click="createSubtask()" :disabled="!newSubtask.title.trim()">添加</button>
+                                </div>
+                                <div class="todo-form-row" style="margin-top: 8px;">
+                                    <div class="ref-input-wrapper" style="flex: 1; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                                        <template x-for="(ref, idx) in (newSubtask.related_refs || [])" :key="idx">
+                                            <span class="ref-badge" @click="removeRelatedRef(newSubtask, idx)">
+                                                <span class="ref-type" :class="'ref-type-' + ref.type" x-text="ref.type === 'pr' ? 'PR' : 'I'"></span>
+                                                <span x-text="ref.repo + '#' + ref.number"></span>
+                                                <span class="ref-remove">&times;</span>
+                                            </span>
+                                        </template>
+                                        <input class="input" type="text" placeholder="输入 repo#number 或纯数字编号后回车" x-model="newSubtask.refInput" @keydown.enter.prevent="addRelatedRef(newSubtask, newSubtask.refInput).then(r => { if (r) newSubtask.refInput = '' })" style="flex: 1; min-width: 150px; border: none; outline: none; background: transparent;">
+                                    </div>
                                 </div>
                             </div>
                         </div>

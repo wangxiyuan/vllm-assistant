@@ -29,6 +29,8 @@ function prCenterMixin() {
         translateLoading: false,
         prTranslatedBody: null,   // PR 翻译后的中文
         issueTranslatedBody: null, // Issue 翻译后的中文
+        prShowChinese: false,     // PR 描述是否显示中文
+        issueShowChinese: false,  // Issue 描述是否显示中文
 
         // ===== Diff 状态 =====
         expandedDiffFile: null,   // 当前展开的 diff 文件名
@@ -36,7 +38,7 @@ function prCenterMixin() {
         prDiffData: null,         // 原始 diff 全文
         prDiffLoading: false,
 
-        // ===== 贡献数据 tab =====
+        // ===== 贡献面板 tab =====
         contributionTab: 'prs',  // 'prs' or 'issues'
         myIssues: [],
         myIssuesState: 'open',
@@ -65,11 +67,10 @@ function prCenterMixin() {
             this.myIssuesLoading = true;
             try {
                 const githubId = this.selectedContributor?.github_id;
-                if (githubId) {
-                    this.myIssues = await this.api(`/api/contributions/issues?author=${encodeURIComponent(githubId)}&state=all`);
-                } else {
-                    this.myIssues = await this.api('/api/pr-center/my-issues?state=all');
-                }
+                const url = githubId
+                    ? `/api/pr-center/my-issues?state=all&github_id=${encodeURIComponent(githubId)}`
+                    : '/api/pr-center/my-issues?state=all';
+                this.myIssues = await this.api(url);
             } catch (e) {
                 this.showToast('加载 Issue 失败', e.message, 'error');
             } finally {
@@ -163,12 +164,10 @@ function prCenterMixin() {
         async loadMyPRs() {
             try {
                 const githubId = this.selectedContributor?.github_id;
-                if (githubId) {
-                    this.myPrs = await this.api(`/api/contributions/prs?author=${encodeURIComponent(githubId)}&state=all`);
-                } else {
-                    // 无选择时加载所有（用 GITHUB_USERNAME）
-                    this.myPrs = await this.api('/api/pr-center/my-prs?state=all');
-                }
+                const url = githubId
+                    ? `/api/pr-center/my-prs?state=all&github_id=${encodeURIComponent(githubId)}`
+                    : '/api/pr-center/my-prs?state=all';
+                this.myPrs = await this.api(url);
             } catch (e) {
                 this.showToast('加载 PR 失败', e.message, 'error');
             }
@@ -176,11 +175,12 @@ function prCenterMixin() {
 
         // 切换责任人过滤
         switchContributor(githubId) {
-            this.selectedContributorGithubId = githubId || '';
             if (githubId) {
                 this.selectedContributor = this.users.find(u => u.github_id === githubId) || null;
+                this.selectedContributorGithubId = githubId || '';
             } else {
                 this.selectedContributor = null;
+                this.selectedContributorGithubId = '';
             }
             this.loadAllContribData();
         },
@@ -216,6 +216,8 @@ function prCenterMixin() {
                 this.prDetails = await this.api(`/api/pr-center/my-prs/${pr.pr_number}/details`);
                 // 异步读取 AI 缓存（不阻塞详情加载）
                 this._loadCachedAI('pr', pr.pr_number);
+                // 异步读取翻译缓存
+                this._loadCachedTranslate('pr', pr.pr_number);
             } catch (e) {
                 this.prLoadError = e.message;
                 this.showToast('加载 PR 详情失败', e.message, 'error');
@@ -235,6 +237,7 @@ function prCenterMixin() {
             if (this.aiReviewTimer) { clearInterval(this.aiReviewTimer); this.aiReviewTimer = null; }
             this.aiReviewElapsed = 0;
             this.prTranslatedBody = null;
+            this.prShowChinese = false;
             this.expandedDiffFile = null;
             this.fileDiffs = {};
             this.prDiffData = null;
@@ -263,6 +266,8 @@ function prCenterMixin() {
                 }
                 // 异步读取 AI 缓存
                 this._loadCachedAI('issue', issue.number);
+                // 异步读取翻译缓存
+                this._loadCachedTranslate('issue', issue.number);
             } catch (e) {
                 this.issueLoadError = e.message;
                 this.showToast('加载 Issue 失败', e.message, 'error');
@@ -279,6 +284,7 @@ function prCenterMixin() {
             this.aiSummary = null;
             this.loadingIssue = false;
             this.issueTranslatedBody = null;
+            this.issueShowChinese = false;
         },
 
         // 读取本地缓存的 AI 结果（summary/review），打开 drawer 时自动填充
@@ -306,6 +312,28 @@ function prCenterMixin() {
                     if (!stillCurrent) return;
                     if (cachedReview && !cachedReview.empty) {
                         this.aiReview = cachedReview;
+                    }
+                }
+            } catch (e) {
+                // 缓存读取失败静默忽略
+            }
+        },
+
+        // 读取翻译缓存，打开 drawer 时自动填充
+        async _loadCachedTranslate(itemType, number) {
+            try {
+                const cached = await this.api('/api/ai-assistant/get-cache', {
+                    method: 'POST',
+                    body: JSON.stringify({ item_type: itemType, number, action: 'translate' }),
+                }, 5000);
+                const isCurrent = (itemType === 'pr' && this.selectedPR?.pr_number === number)
+                               || (itemType === 'issue' && this.selectedIssue?.number === number);
+                if (!isCurrent) return;
+                if (cached && cached.translated) {
+                    if (itemType === 'pr') {
+                        this.prTranslatedBody = cached.translated;
+                    } else {
+                        this.issueTranslatedBody = cached.translated;
                     }
                 }
             } catch (e) {
@@ -359,11 +387,45 @@ function prCenterMixin() {
             }
         },
 
+        // 渲染带行号和高亮的 diff HTML
+        renderDiff(diffText) {
+            if (!diffText) return '';
+            const lines = diffText.split('\n');
+            const out = [];
+            let lineNum = 0;
+            for (const line of lines) {
+                if (line.startsWith('@@')) {
+                    // hunk header: 提取新文件起始行号
+                    const m = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+                    if (m) lineNum = parseInt(m[1], 10);
+                    out.push(`<div class="diff-hunk-header">${this.esc(line)}</div>`);
+                    continue;
+                }
+                if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
+                    out.push(`<div class="diff-meta">${this.esc(line)}</div>`);
+                    continue;
+                }
+                if (line.startsWith('+')) {
+                    out.push(`<div class="diff-line diff-add"><span class="diff-line-num">${lineNum}</span><span>${this.esc(line)}</span></div>`);
+                    lineNum++;
+                } else if (line.startsWith('-')) {
+                    out.push(`<div class="diff-line diff-del"><span class="diff-line-num">${lineNum}</span><span>${this.esc(line)}</span></div>`);
+                } else if (line.startsWith('\\')) {
+                    out.push(`<div class="diff-line diff-no-newline"><span>${this.esc(line)}</span></div>`);
+                } else {
+                    out.push(`<div class="diff-line diff-ctx"><span class="diff-line-num">${lineNum}</span><span>${this.esc(line)}</span></div>`);
+                    lineNum++;
+                }
+            }
+            return out.join('\n');
+        },
+
         // ===== AI 翻译 =====
         async translateBody(itemType) {
             if (this.translateLoading) return;
             const isPR = itemType === 'pr';
-            const body = isPR ? (this.prDetails?.body || '') : (this.issueDetails?.body || '');
+            const number = isPR ? (this.selectedPR?.pr_number) : (this.selectedIssue?.number);
+            const body = isPR ? (this.prDetails?.pr?.body || '') : (this.issueDetails?.body || '');
             if (!body) {
                 this.showToast('无内容可翻译', '', 'info');
                 return;
@@ -374,13 +436,16 @@ function prCenterMixin() {
                     method: 'POST',
                     body: JSON.stringify({
                         item_type: itemType,
+                        number: number,
                         text: body,
                     }),
                 }, 120000);
                 if (isPR) {
                     this.prTranslatedBody = result.translated;
+                    this.prShowChinese = true;
                 } else {
                     this.issueTranslatedBody = result.translated;
+                    this.issueShowChinese = true;
                 }
                 this.showToast('翻译完成', '', 'success');
             } catch (e) {
@@ -410,7 +475,7 @@ function prCenterMixin() {
                 }, 5000);
             } catch (_) {}
             try {
-                const body = isPR ? (this.prDetails?.body || '') : (this.issueDetails?.body || '');
+                const body = isPR ? (this.prDetails?.pr?.body || '') : (this.issueDetails?.body || '');
                 const res = await this.api('/api/ai-assistant/summarize', {
                     method: 'POST',
                     body: JSON.stringify({
@@ -452,6 +517,9 @@ function prCenterMixin() {
             let inTable = false;
             let tableLines = [];
             let blockquoteLines = [];
+            let inDetails = false;  // 是否在 <details> 块内
+            let detailsSummary = '';
+            let detailsBody = [];
 
             const flushList = () => {
                 if (inList) { out.push(`</${inList}>`); inList = null; }
@@ -480,9 +548,60 @@ function prCenterMixin() {
                 tableLines = [];
                 inTable = false;
             };
+            const flushDetails = () => {
+                if (inDetails) {
+                    // details 内的内容递归渲染 Markdown
+                    const renderedBody = this.renderMarkdown(detailsBody.join('\n'));
+                    out.push(`<details><summary>${this.renderInlineMarkdown(this.esc(detailsSummary))}</summary>${renderedBody}</details>`);
+                    inDetails = false;
+                    detailsSummary = '';
+                    detailsBody = [];
+                }
+            };
 
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
+
+                // 独立 <img> 标签（GitHub issue/PR 常用截图）
+                const imgMatch = line.match(/^\s*<img\s+[^>]*src\s*=\s*"([^"]+)"[^>]*\/?>\s*$/i);
+                if (imgMatch) {
+                    flushList(); flushBlockquote(); flushTable();
+                    const alt = line.match(/alt\s*=\s*"([^"]+)"/i);
+                    const altText = alt ? alt[1] : '';
+                    out.push(`<img src="${this.esc(imgMatch[1])}" alt="${this.esc(altText)}" style="max-width:100%;border-radius:var(--radius);margin:var(--space-3) 0;" />`);
+                    continue;
+                }
+
+                // <details> 折叠块
+                const detailsMatch = line.match(/^\s*<details>/i);
+                const detailsCloseMatch = line.match(/^\s*<\/details>/i);
+                if (detailsMatch) {
+                    flushList(); flushBlockquote(); flushTable();
+                    inDetails = true;
+                    detailsSummary = '';
+                    detailsBody = [];
+                    // 检查同一行是否有 <summary>
+                    const summaryMatch = line.match(/<summary>([^<]*)<\/summary>/i);
+                    if (summaryMatch) {
+                        detailsSummary = summaryMatch[1];
+                    }
+                    continue;
+                }
+                if (inDetails) {
+                    if (detailsCloseMatch) {
+                        flushDetails();
+                        continue;
+                    }
+                    const summaryMatch = line.match(/^\s*<summary>([^<]*)<\/summary>\s*$/i);
+                    if (summaryMatch) {
+                        detailsSummary = summaryMatch[1];
+                        continue;
+                    }
+                    // details 内的内容先跳过 Markdown 渲染（简单存文本）
+                    detailsBody.push(line);
+                    continue;
+                }
+
                 // 代码块
                 if (line.trim().startsWith('```')) {
                     flushList(); flushBlockquote(); flushTable();
@@ -560,7 +679,29 @@ function prCenterMixin() {
         // 行内 markdown：粗体/斜体/代码/链接
         renderInlineMarkdown(text) {
             if (!text) return '';
-            let s = this.esc(text);
+
+            // 先处理 HTML 标签（img 等），避免被 esc 转义
+            let s = text;
+            // 保存 <img> 标签，跳过 esc
+            const preserved = [];
+            s = s.replace(/<img\s+[^>]*src\s*=\s*"([^"]+)"[^>]*\/?>/gi, function(match) {
+                const idx = preserved.length;
+                preserved.push(match);
+                return `\x00IMG${idx}\x00`;
+            });
+            // 保存 <a> 标签
+            s = s.replace(/<a\s+[^>]*>.*?<\/a>/gi, function(match) {
+                const idx = preserved.length;
+                preserved.push(match);
+                return `\x00HTML${idx}\x00`;
+            });
+
+            s = this.esc(s);
+
+            // 恢复被保护的 HTML 标签
+            s = s.replace(/\x00IMG(\d+)\x00/g, function(_, idx) { return preserved[parseInt(idx)]; });
+            s = s.replace(/\x00HTML(\d+)\x00/g, function(_, idx) { return preserved[parseInt(idx)]; });
+
             // 行内代码
             s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
             // 粗体
@@ -568,6 +709,13 @@ function prCenterMixin() {
             s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
             // 斜体
             s = s.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
+            // Markdown 图片 ![alt](url)
+            s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(match, alt, url) {
+                if (/^(https?:|data:)/i.test(url)) {
+                    return '<img src="' + url + '" alt="' + alt + '" style="max-width:100%;border-radius:var(--radius);" />';
+                }
+                return match;
+            });
             // 链接 [text](url) — 只允许 http/https/mailto 协议，防止 javascript: XSS
             s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(match, text, url) {
                 if (/^(https?:|mailto:)/i.test(url)) {
@@ -782,11 +930,10 @@ function prCenterMixin() {
             this.statsLoading = true;
             try {
                 const githubId = this.selectedContributor?.github_id;
-                if (githubId) {
-                    this.myStats = await this.api(`/api/contributions/stats?author=${encodeURIComponent(githubId)}`);
-                } else {
-                    this.myStats = await this.api('/api/my-stats');
-                }
+                const url = githubId
+                    ? `/api/my-stats?github_id=${encodeURIComponent(githubId)}`
+                    : '/api/my-stats';
+                this.myStats = await this.api(url);
             } catch (e) {
                 this.showToast('加载数据失败', e.message, 'error');
             } finally {

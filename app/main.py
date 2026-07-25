@@ -184,7 +184,6 @@ async def health_check():
         "version": "0.1.0",
         "debug": Config.DEBUG,
         "configured": bool(Config.GITHUB_PAT),
-        "username_configured": bool(Config.USERNAME),
         "scheduler_running": scheduler_info.get("running", False),
     }
 

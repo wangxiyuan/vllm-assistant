@@ -17,7 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import Config
 from app.database import SessionLocal
-from app.models import Item, MyPR, Area, UserIssue
+from app.models import Item, MyPR, Area, UserIssue, User
 from app.services.github_client import GitHubClient, DEFAULT_PER_PAGE
 from app.services.area_mapper import AreaMapper
 
@@ -176,6 +176,7 @@ def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
 
     if existing:
         existing.title = pr.get("title", existing.title)
+        existing.body = pr.get("body") or existing.body
         existing.state = pr_state
         existing.updated_at = _parse_dt(pr.get("updated_at"))
         existing.comments = pr.get("comments", existing.comments)
@@ -188,6 +189,7 @@ def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
             type="pr",
             number=pr_number,
             title=pr.get("title", ""),
+            body=pr.get("body") or "",
             state=pr_state,
             labels=json.dumps([l["name"] for l in pr.get("labels", []) if isinstance(l, dict)]),
             area=area_id,
@@ -345,10 +347,10 @@ def _calc_ci_status(github_client: GitHubClient, sha: str) -> str:
 
 
 def sync_user_prs():
-    """同步用户的 PR + Issue 数据
+    """同步所有已录入用户的 PR + Issue 数据
 
-    - PR：写入 my_prs（带 CI/review/conflict 状态）
-    - Issue：写入 items（type=issue），供我的数据/我的贡献的 Issue 视图使用
+    遍历 users 表中所有有 github_id 的用户，
+    为每个用户独立拉取其 PR 和 Issue 并写入 my_prs / user_issues 表。
     """
     job_id = "sync_user_prs"
     if job_id in _running_jobs:
@@ -356,93 +358,131 @@ def sync_user_prs():
         return
     _running_jobs.add(job_id)
     try:
-        if not Config.USERNAME:
-            logger.warning("GITHUB_USERNAME not configured, skipping user PR sync")
-            return
-
-        logger.info("Starting user PR sync...")
-        github_client = _get_github_client()
-        mapper = _get_area_mapper()
         db = SessionLocal()
         try:
-            # 增量策略：首次全量拉，后续只拉 open + 最近更新的 PR
-            existing_count = db.query(MyPR).count()
-            is_first_sync = existing_count == 0
-
-            if is_first_sync:
-                # 首次同步：全量拉取所有 PR
-                user_prs = github_client.get_user_pulls(Config.USERNAME, state="all") or []
-            else:
-                # 增量同步：只拉 open PR（closed/merged 状态很少变化，下次清理时处理）
-                user_prs = github_client.get_user_pulls(Config.USERNAME, state="open") or []
-                # 也拉最近关闭的 PR（更新状态，但数量很少）
-                closed_prs = github_client.get_user_pulls(Config.USERNAME, state="closed") or []
-                # Search API 按 updated desc 排序，只取前 20 个最近关闭的
-                user_prs.extend(closed_prs[:20])
-
-            # 阶段一：并发拉取（merged/closed PR 不调额外 API，直接构造 detail）
-            def _fetch_one(pr):
-                if not isinstance(pr, dict):
-                    return None
-                pr_number = pr.get("number")
-                if pr_number is None:
-                    return None
-                try:
-                    return (pr_number, _fetch_user_pr_detail(pr, pr_number, github_client, mapper))
-                except Exception:
-                    logger.exception(f"Failed to fetch user PR #{pr_number}, skipping")
-                    return None
-
-            with ThreadPoolExecutor(max_workers=USER_PR_FETCH_WORKERS) as pool:
-                results = list(pool.map(_fetch_one, user_prs))
-
-            # 阶段二：串行 upsert（过滤掉拉取失败的 detail）
-            for item in results:
-                if item is None:
-                    continue
-                pr_number, detail = item
-                if detail is None:
-                    continue
-                try:
-                    _upsert_user_pr(db, detail, github_client, mapper)
-                except Exception:
-                    logger.exception(f"Failed to upsert user PR #{pr_number}, skipping")
-
-            # 同步用户创建的 Issue 到 user_issues 表
-            # 增量策略：首次全量拉，后续只拉 open issue
-            existing_issue_count = db.query(UserIssue).count()
-            is_first_issue_sync = existing_issue_count == 0
-            issue_state = "all" if is_first_issue_sync else "open"
-
-            # 只有 open issue 才需要 body（弹窗展示），closed issue 只需要标题/状态
-            user_issues = github_client.get_user_issues_with_body(Config.USERNAME, state=issue_state) or []
-            # 非首次同步时，额外拉最近关闭的 issue 更新状态（不需要 body）
-            if not is_first_issue_sync:
-                closed_issues = github_client.get_user_issues(Config.USERNAME, state="closed") or []
-                user_issues.extend(closed_issues[:20])
-
-            issue_count = 0
-            for issue in user_issues:
-                if not isinstance(issue, dict):
-                    continue
-                try:
-                    _process_single_user_issue(db, issue, mapper)
-                    issue_count += 1
-                except Exception:
-                    logger.exception(f"Failed to process user issue #{issue.get('number')}, skipping")
-
-            db.commit()
-            logger.info(f"Synced {len(user_prs)} user PRs and {issue_count} user issues")
+            users = db.query(User).filter(User.github_id.isnot(None), User.github_id != "").all()
         finally:
             db.close()
 
+        if not users:
+            logger.info("No users with github_id found, skipping user PR sync")
+            return
+
+        for user in users:
+            _sync_single_user(user.github_id)
+
+        # 清理已删除用户的旧数据
+        _cleanup_orphaned_data()
     except Exception:
-        logger.exception("Error syncing user PRs")
+        logger.exception("user PR sync failed")
     finally:
         _running_jobs.discard(job_id)
 
 
-def _process_single_user_issue(db, issue: dict, mapper: AreaMapper) -> None:
+def _sync_single_user(github_id: str):
+    """同步单个用户的 PR 和 Issue 数据"""
+    logger.info(f"Starting sync for user {github_id}...")
+    github_client = _get_github_client()
+    mapper = _get_area_mapper()
+    db = SessionLocal()
+    try:
+        # 增量策略：首次全量拉，后续只拉 open + 最近更新的 PR
+        existing_count = db.query(MyPR).filter(MyPR.github_id == github_id).count()
+        is_first_sync = existing_count == 0
+
+        if is_first_sync:
+            user_prs = github_client.get_user_pulls(github_id, state="all") or []
+        else:
+            user_prs = github_client.get_user_pulls(github_id, state="open") or []
+            closed_prs = github_client.get_user_pulls(github_id, state="closed") or []
+            user_prs.extend(closed_prs[:20])
+
+        def _fetch_one(pr):
+            if not isinstance(pr, dict):
+                return None
+            pr_number = pr.get("number")
+            if pr_number is None:
+                return None
+            try:
+                return (pr_number, _fetch_user_pr_detail(pr, pr_number, github_client, mapper))
+            except Exception:
+                logger.exception(f"Failed to fetch user PR #{pr_number} for {github_id}, skipping")
+                return None
+
+        with ThreadPoolExecutor(max_workers=USER_PR_FETCH_WORKERS) as pool:
+            results = list(pool.map(_fetch_one, user_prs))
+
+        for item in results:
+            if item is None:
+                continue
+            pr_number, detail = item
+            if detail is None:
+                continue
+            try:
+                _upsert_user_pr(db, detail, github_client, mapper, github_id)
+            except Exception:
+                logger.exception(f"Failed to upsert user PR #{pr_number} for {github_id}, skipping")
+
+        # 同步用户创建的 Issue
+        existing_issue_count = db.query(UserIssue).filter(UserIssue.github_id == github_id).count()
+        is_first_issue_sync = existing_issue_count == 0
+        issue_state = "all" if is_first_issue_sync else "open"
+
+        user_issues = github_client.get_user_issues_with_body(github_id, state=issue_state) or []
+        if not is_first_issue_sync:
+            closed_issues = github_client.get_user_issues(github_id, state="closed") or []
+            user_issues.extend(closed_issues[:20])
+
+        issue_count = 0
+        for issue in user_issues:
+            if not isinstance(issue, dict):
+                continue
+            try:
+                _process_single_user_issue(db, issue, mapper, github_id)
+                issue_count += 1
+            except Exception:
+                logger.exception(f"Failed to process user issue #{issue.get('number')} for {github_id}, skipping")
+
+        db.commit()
+        logger.info(f"Synced {len(results)} PRs and {issue_count} issues for user {github_id}")
+    except Exception:
+        logger.exception(f"Sync failed for user {github_id}")
+    finally:
+        db.close()
+
+
+def _cleanup_orphaned_data():
+    """清理已从 users 表删除的用户的遗留数据"""
+    db = SessionLocal()
+    try:
+        valid_github_ids = {u.github_id for u in db.query(User).filter(
+            User.github_id.isnot(None), User.github_id != ""
+        ).all()}
+
+        orphaned_prs = db.query(MyPR).filter(
+            MyPR.github_id.isnot(None), MyPR.github_id != "",
+            ~MyPR.github_id.in_(valid_github_ids)
+        ).all()
+        for pr in orphaned_prs:
+            db.delete(pr)
+
+        orphaned_issues = db.query(UserIssue).filter(
+            UserIssue.github_id.isnot(None), UserIssue.github_id != "",
+            ~UserIssue.github_id.in_(valid_github_ids)
+        ).all()
+        for issue in orphaned_issues:
+            db.delete(issue)
+
+        db.commit()
+        if orphaned_prs or orphaned_issues:
+            logger.info(f"Cleaned up {len(orphaned_prs)} orphaned PRs and {len(orphaned_issues)} issues")
+    except Exception:
+        logger.exception("Failed to cleanup orphaned data")
+    finally:
+        db.close()
+
+
+def _process_single_user_issue(db, issue: dict, mapper: AreaMapper, github_id: str = "") -> None:
     """把用户创建的 Issue 写入 user_issues 表"""
     issue_number = issue.get("number")
     if issue_number is None:
@@ -453,7 +493,7 @@ def _process_single_user_issue(db, issue: dict, mapper: AreaMapper) -> None:
     body = issue.get("body") or ""
     title = issue.get("title", "")
 
-    existing = db.query(UserIssue).filter(UserIssue.number == issue_number).first()
+    existing = db.query(UserIssue).filter(UserIssue.number == issue_number, UserIssue.github_id == github_id).first()
 
     if existing:
         existing.title = title
@@ -463,10 +503,12 @@ def _process_single_user_issue(db, issue: dict, mapper: AreaMapper) -> None:
         existing.labels = json.dumps(labels)
         existing.body = body
         existing.area = area_id
+        existing.github_id = github_id
         existing.last_sync = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
         db.add(UserIssue(
             number=issue_number,
+            github_id=github_id,
             title=title,
             body=body,
             state=issue.get("state", "open"),
@@ -563,7 +605,7 @@ def _fetch_user_pr_detail(pr: dict, pr_number: int,
 
 
 def _upsert_user_pr(db, detail: dict, github_client: GitHubClient,
-                    mapper: "AreaMapper") -> None:
+                    mapper: "AreaMapper", github_id: str = "") -> None:
     """把 _fetch_user_pr_detail 的结果写入 my_prs（串行，DB 非线程安全）。
 
     领域映射在此阶段做：先查 Item 缓存，缺失才调 _map_pr_to_area（会打 files API，
@@ -579,7 +621,7 @@ def _upsert_user_pr(db, detail: dict, github_client: GitHubClient,
     conflict_detected = detail["conflict_detected"]
 
     # 领域映射（首次或缺失时）
-    existing = db.query(MyPR).filter(MyPR.pr_number == pr_number).first()
+    existing = db.query(MyPR).filter(MyPR.pr_number == pr_number, MyPR.github_id == github_id).first()
     area_id = detail.get("area_id")
     if existing:
         item = db.query(Item).filter(Item.type == "pr", Item.number == pr_number).first()
@@ -601,13 +643,14 @@ def _upsert_user_pr(db, detail: dict, github_client: GitHubClient,
         existing.ci_status = ci_status
         existing.conflict_detected = conflict_detected
         existing.conflict_commits = conflict_commits
-        # created_at 首次写入后不再覆盖（GitHub 的 created_at 不会变）
+        existing.github_id = github_id
         if not existing.created_at:
             existing.created_at = _parse_dt(pr.get("created_at"))
         existing.last_sync = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
         db.add(MyPR(
             pr_number=pr_number,
+            github_id=github_id,
             title=pr.get("title"),
             state=pr_state,
             branch=head.get("ref"),

@@ -16,7 +16,9 @@ from sqlalchemy import (
     Text,
     ForeignKey,
     Index,
+    PrimaryKeyConstraint,
     UniqueConstraint,
+    JSON,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -101,11 +103,15 @@ class MyPR(Base):
     __tablename__ = "my_prs"
 
     __table_args__ = (
+        # 复合主键：一个用户可以有一个 PR 一次
+        PrimaryKeyConstraint("pr_number", "github_id", name="pk_my_prs"),
         Index("idx_my_prs_state", "state"),
         Index("idx_my_prs_created_at", "created_at"),
+        Index("idx_my_prs_github_id", "github_id"),
     )
 
     pr_number = Column(Integer, primary_key=True)
+    github_id = Column(String(100), nullable=True, default="", primary_key=True)
     title = Column(Text)
     state = Column(String(20))  # 'open', 'merged', 'closed'
     branch = Column(String(200))
@@ -123,6 +129,7 @@ class MyPR(Base):
     def to_dict(self) -> Dict[str, Any]:
         return {
             "pr_number": self.pr_number,
+            "github_id": self.github_id,
             "title": self.title,
             "state": self.state,
             "branch": self.branch,
@@ -202,10 +209,13 @@ class UserIssue(Base):
     __tablename__ = "user_issues"
 
     __table_args__ = (
+        PrimaryKeyConstraint("number", "github_id", name="pk_user_issues"),
         Index("idx_user_issues_state", "state"),
+        Index("idx_user_issues_github_id", "github_id"),
     )
 
     number = Column(Integer, primary_key=True)
+    github_id = Column(String(100), nullable=True, default="", primary_key=True)
     title = Column(Text)
     body = Column(Text)
     state = Column(String(20))  # 'open' / 'closed'
@@ -272,11 +282,8 @@ class PersonalTask(Base):
     # 状态: todo / in_progress / done / cancelled
     status = Column(String(20), nullable=False, default="todo")
 
-    # 关联外部资源
-    related_issue_number = Column(Integer)
-    related_pr_number = Column(Integer)
-    related_url = Column(String(500))
-    related_repo = Column(String(50))  # 关联的仓库名: 'vllm' / 'vllm-ascend'
+    # 关联外部资源（JSON 数组，每个元素包含 repo/number/type/url）
+    related_refs = Column(JSON, default=list)
 
     # 分类
     area = Column(String(50))
@@ -312,10 +319,7 @@ class PersonalTask(Base):
             "status": self.status,
             "parent_id": self.parent_id,
             "subtask_order": self.subtask_order,
-            "related_issue_number": self.related_issue_number,
-            "related_pr_number": self.related_pr_number,
-            "related_url": self.related_url,
-            "related_repo": self.related_repo,
+            "related_refs": self.related_refs if self.related_refs else [],
             "area": self.area,
             "assignee_id": self.assignee_id,
             "tags": json.loads(self.tags) if self.tags else [],
@@ -508,14 +512,14 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)  # 姓名
-    github_id = Column(String(100))  # GitHub ID，可选
+    github_id = Column(String(100), nullable=False)  # GitHub ID，必填
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
-            "github_id": self.github_id or "",
+            "github_id": self.github_id,
             "created_at": _iso_utc(self.created_at),
         }
 
