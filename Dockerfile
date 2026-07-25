@@ -51,8 +51,13 @@ RUN mkdir -p /app/data && \
 
 # 创建非 root 用户，提升容器安全性
 RUN addgroup --system --gid 1001 app && \
-    adduser --system --uid 1001 --ingroup app --no-create-home app && \
-    chown -R app:app /app
+    adduser --system --uid 1001 --ingroup app --no-create-home app
+
+# 预创建 repos 子目录并确保 app 用户可写
+# 注意：命名卷（vllm-assistant-data / vllm-assistant-repos-cache）
+# 挂载时可能覆盖目录所有权，确保此处权限正确设置
+RUN mkdir -p /app/data/repos && \
+    chown -R app:app /app/data
 
 USER app
 
