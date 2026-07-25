@@ -70,6 +70,7 @@ async def generate_report(req: IntelligenceGenerateRequest, db: Session = Depend
         title=title,
         content="",
         task_id=req.task_id,
+        user_id=req.user_id,
         sources=json.dumps(req.sources, ensure_ascii=False),
         excluded_sources=json.dumps(req.excluded_sources, ensure_ascii=False) if req.excluded_sources else None,
         extra_prompt=req.extra_prompt or None,

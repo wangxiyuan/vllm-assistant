@@ -312,3 +312,29 @@ Return valid JSON only."""
             return parsed
         # fallback：返回原始文本
         return {"core_problem": (content.strip()[:200] if content else "[无摘要]"), "key_points": [], "impact": "", "risk": "暂无"}
+
+    def translate(self, text: str, item_type: str) -> str:
+        """将 Issue/PR 正文翻译为中文"""
+        if not text:
+            return ""
+
+        prompt = f"""你是一个 vLLM 项目的技术文档翻译专家。请将以下英文技术内容翻译成流畅的中文。
+
+要求：
+- 保持技术术语准确（如 Attention、KV Cache、Tensor Parallelism 等保留英文）
+- 代码片段、变量名、路径名等保持原样
+- 翻译要自然流畅，符合中文技术文档的表述习惯
+- 只输出翻译结果，不要加任何解释或前言
+- 如果原文是中文，原样返回
+
+原文（{'Issue' if item_type == 'issue' else 'PR'} 描述）：
+{text[:6000]}
+
+翻译："""
+
+        try:
+            content = self._chat(prompt, max_tokens=4096, temperature=0.3)
+            return content.strip() if content else text
+        except Exception:
+            logger.exception("translate failed")
+            return text

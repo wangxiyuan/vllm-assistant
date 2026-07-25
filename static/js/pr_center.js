@@ -25,12 +25,28 @@ function prCenterMixin() {
         issueLoadError: null,
         loadingIssue: false,
 
-        // ===== 我的贡献 tab =====
+        // ===== 翻译状态 =====
+        translateLoading: false,
+        prTranslatedBody: null,   // PR 翻译后的中文
+        issueTranslatedBody: null, // Issue 翻译后的中文
+
+        // ===== Diff 状态 =====
+        expandedDiffFile: null,   // 当前展开的 diff 文件名
+        fileDiffs: {},            // { filename: diff_text }
+        prDiffData: null,         // 原始 diff 全文
+        prDiffLoading: false,
+
+        // ===== 贡献数据 tab =====
         contributionTab: 'prs',  // 'prs' or 'issues'
         myIssues: [],
         myIssuesState: 'open',
         myIssuesType: 'all',  // 'all' / 'bug' / 'rfc' / 'feature' / ...
         myIssuesLoading: false,
+
+        // 责任人过滤
+        selectedContributor: null,  // {id, name, github_id} 或 null
+        selectedContributorGithubId: '',  // 下拉框绑定的字符串
+        contributorFilterLoading: false,
 
         // ===== Switch PR state tab (open/merged/closed/all) =====
         switchPRState(state) {
@@ -48,10 +64,14 @@ function prCenterMixin() {
         async loadMyIssues() {
             this.myIssuesLoading = true;
             try {
-                const params = new URLSearchParams({ state: 'all' });
-                this.myIssues = await this.api('/api/pr-center/my-issues?' + params);
+                const githubId = this.selectedContributor?.github_id;
+                if (githubId) {
+                    this.myIssues = await this.api(`/api/contributions/issues?author=${encodeURIComponent(githubId)}&state=all`);
+                } else {
+                    this.myIssues = await this.api('/api/pr-center/my-issues?state=all');
+                }
             } catch (e) {
-                this.showToast('加载我的 Issue 失败', e.message, 'error');
+                this.showToast('加载 Issue 失败', e.message, 'error');
             } finally {
                 this.myIssuesLoading = false;
             }
@@ -142,15 +162,45 @@ function prCenterMixin() {
 
         async loadMyPRs() {
             try {
-                // 始终加载全部 PR（state=all），前端按 state 过滤显示
-                // 这样切 tab 不需要重新请求，且能显示各状态计数
-                this.myPrs = await this.api('/api/pr-center/my-prs?state=all');
+                const githubId = this.selectedContributor?.github_id;
+                if (githubId) {
+                    this.myPrs = await this.api(`/api/contributions/prs?author=${encodeURIComponent(githubId)}&state=all`);
+                } else {
+                    // 无选择时加载所有（用 GITHUB_USERNAME）
+                    this.myPrs = await this.api('/api/pr-center/my-prs?state=all');
+                }
             } catch (e) {
                 this.showToast('加载 PR 失败', e.message, 'error');
             }
         },
 
+        // 切换责任人过滤
+        switchContributor(githubId) {
+            this.selectedContributorGithubId = githubId || '';
+            if (githubId) {
+                this.selectedContributor = this.users.find(u => u.github_id === githubId) || null;
+            } else {
+                this.selectedContributor = null;
+            }
+            this.loadAllContribData();
+        },
+
+        // 加载选中的责任人所有贡献数据
+        loadAllContribData() {
+            this.loadMyStats();
+            this.loadMyPRs();
+            if (this.contributionTab === 'issues') {
+                this.loadMyIssues();
+            }
+        },
+
         async openPR(pr) {
+            // 合并 watchlist 数据（备注/责任人）
+            const wl = this.findWatchlistItem(pr.pr_number, 'pr');
+            if (wl) {
+                pr.watchlist_note = wl.note || '';
+                pr.watchlist_assignee_id = wl.assignee_id || null;
+            }
             this.selectedPR = pr;
             this.prDetails = null;
             this.prLoadError = null;
@@ -184,12 +234,22 @@ function prCenterMixin() {
             this.loadingDetails = false;
             if (this.aiReviewTimer) { clearInterval(this.aiReviewTimer); this.aiReviewTimer = null; }
             this.aiReviewElapsed = 0;
+            this.prTranslatedBody = null;
+            this.expandedDiffFile = null;
+            this.fileDiffs = {};
+            this.prDiffData = null;
             // 不重置 pendingReviews/pendingSummaries，让进行中的请求继续
             // 不重置 aiReviewLoading/aiSummaryLoading（下次 openPR 会根据 pending 状态恢复）
         },
 
         // ===== Issue drawer =====
         async openIssue(issue) {
+            // 合并 watchlist 数据（备注/责任人）
+            const wl = this.findWatchlistItem(issue.number, 'issue');
+            if (wl) {
+                issue.watchlist_note = wl.note || '';
+                issue.watchlist_assignee_id = wl.assignee_id || null;
+            }
             this.selectedIssue = issue;
             this.issueDetails = issue.body ? issue : null;
             this.issueLoadError = null;
@@ -218,6 +278,7 @@ function prCenterMixin() {
             this.issueLoadError = null;
             this.aiSummary = null;
             this.loadingIssue = false;
+            this.issueTranslatedBody = null;
         },
 
         // 读取本地缓存的 AI 结果（summary/review），打开 drawer 时自动填充
@@ -249,6 +310,83 @@ function prCenterMixin() {
                 }
             } catch (e) {
                 // 缓存读取失败静默忽略
+            }
+        },
+
+        // ===== 加载 PR diff 全文 =====
+        async loadPRDiff() {
+            if (!this.selectedPR?.pr_number) return;
+            if (this.prDiffLoading) return;
+            this.prDiffLoading = true;
+            try {
+                const data = await this.api(`/api/pr-center/my-prs/${this.selectedPR.pr_number}/diff`, {}, 60000);
+                this.prDiffData = data.diff || '';
+                // 按文件拆分 diff
+                this._parseDiffFiles(this.prDiffData);
+            } catch (e) {
+                this.showToast('加载 diff 失败', e.message, 'error');
+            } finally {
+                this.prDiffLoading = false;
+            }
+        },
+
+        // 解析 diff 全文，按文件拆分
+        _parseDiffFiles(rawDiff) {
+            if (!rawDiff) return;
+            const files = {};
+            const fileBlocks = rawDiff.split(/(?=^diff --git )/m);
+            for (const block of fileBlocks) {
+                if (!block.trim()) continue;
+                const m = block.match(/^diff --git a\/(\S+) b\/(\S+)/m);
+                if (m) {
+                    const filename = m[2];
+                    files[filename] = block;
+                }
+            }
+            this.fileDiffs = files;
+        },
+
+        // 切换文件 diff 展开/收起
+        toggleFileDiff(filename) {
+            if (this.expandedDiffFile === filename) {
+                this.expandedDiffFile = null;
+                return;
+            }
+            this.expandedDiffFile = filename;
+            // 如果还没加载 diff 且该文件 diff 不存在，加载全部
+            if (!this.fileDiffs[filename] && !this.prDiffLoading) {
+                this.loadPRDiff();
+            }
+        },
+
+        // ===== AI 翻译 =====
+        async translateBody(itemType) {
+            if (this.translateLoading) return;
+            const isPR = itemType === 'pr';
+            const body = isPR ? (this.prDetails?.body || '') : (this.issueDetails?.body || '');
+            if (!body) {
+                this.showToast('无内容可翻译', '', 'info');
+                return;
+            }
+            this.translateLoading = true;
+            try {
+                const result = await this.api('/api/ai-assistant/translate', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        item_type: itemType,
+                        text: body,
+                    }),
+                }, 120000);
+                if (isPR) {
+                    this.prTranslatedBody = result.translated;
+                } else {
+                    this.issueTranslatedBody = result.translated;
+                }
+                this.showToast('翻译完成', '', 'success');
+            } catch (e) {
+                this.showToast('翻译失败', e.message, 'error');
+            } finally {
+                this.translateLoading = false;
             }
         },
 
@@ -643,7 +781,12 @@ function prCenterMixin() {
         async loadMyStats() {
             this.statsLoading = true;
             try {
-                this.myStats = await this.api('/api/my-stats');
+                const githubId = this.selectedContributor?.github_id;
+                if (githubId) {
+                    this.myStats = await this.api(`/api/contributions/stats?author=${encodeURIComponent(githubId)}`);
+                } else {
+                    this.myStats = await this.api('/api/my-stats');
+                }
             } catch (e) {
                 this.showToast('加载数据失败', e.message, 'error');
             } finally {
@@ -651,39 +794,8 @@ function prCenterMixin() {
             }
         },
 
-        // ===== File history state =====
-        fileHistoryData: null,
-        fileHistoryLoading: false,
-        fileHistoryFilePath: '',
 
-        async openFileHistory(filePath, repo = 'vllm') {
-            this.fileHistoryFilePath = filePath;
-            this.fileHistoryData = null;
-            this.fileHistoryLoading = true;
-            try {
-                this.fileHistoryData = await this.api(`/api/sync/file-history?repo=${encodeURIComponent(repo)}&file_path=${encodeURIComponent(filePath)}`, {}, 60000);
-            } catch (e) {
-                this.showToast('加载文件历史失败', e.message, 'error');
-            } finally {
-                this.fileHistoryLoading = false;
-            }
-        },
-
-        closeFileHistory() {
-            this.fileHistoryData = null;
-            this.fileHistoryFilePath = '';
-        },
-
-        // 从当前选中的 PR 的 URL 中提取仓库名
-        getRepoFromPR() {
-            const pr = this.selectedPR || this.prDetails?.pr;
-            if (pr?.url) {
-                const m = pr.url.match(/github\.com\/([^/]+\/[^/]+)\//);
-                if (m) return m[1].split('/')[1];  // repo name only
-            }
-            return 'vllm';
-        },
-
+        // ===== Monthly bar chart helpers =====
         // 月度柱状图高度计算（百分比归一化）
         monthBarHeight(count, allMonthly) {
             const max = Math.max(...Object.values(allMonthly), 1);

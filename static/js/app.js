@@ -53,6 +53,14 @@ function app() {
         manualAddNumber: '',
         manualAddLoading: false,
         showAddWatchlistModal: false,
+        // 备注编辑
+        showWatchlistEditModal: false,
+        editingWatchlistItem: null,
+        watchlistEditNote: '',
+        watchlistEditAssigneeId: null,
+        watchlistEditSaving: false,
+        manualAddNote: '',
+        manualAddAssigneeId: null,
 
         // 打开特别关注中的 PR -> 触发 PR drawer
         // watchlist 项字段是 number, openPR 期望 pr_number
@@ -62,7 +70,9 @@ function app() {
                     pr_number: w.number,
                     title: w.title,
                     url: w.url,
-                    state: 'open',  // 特别关注没有详细状态，先默认 open
+                    state: w.state || 'open',
+                    watchlist_note: w.note || '',
+                    watchlist_assignee_id: w.assignee_id || null,
                 });
             }
         },
@@ -77,16 +87,23 @@ function app() {
         nextSync: null,  // ISO 字符串，来自 /api/status 的 next_run_time
         nowTick: Date.now(),  // 用于驱动倒计时 computed 重算
 
+        // ===== Users state =====
+        users: [],
+        showUserManager: false,
+        userForm: { name: '', github_id: '' },
+        userFormMode: 'create',  // 'create' | 'edit'
+        editingUser: null,
+        userSaving: false,
+
         // ===== Computed view meta =====
         get currentViewTitle() {
             return {
                 'community': '社区动态',
-                'pr-center': '我的贡献',
+                'pr-center': '贡献数据',
                 'watchlist': '特别关注',
-                'personal-todo': '我的任务',
+                'personal-todo': '任务面板',
                 'intelligence': '洞察面板',
                 'articles': '学习文章',
-                'code-browser': '代码浏览',
                 'anatomy': '模型拆解',
             }[this.currentView] || '';
         },
@@ -100,7 +117,6 @@ function app() {
                 'watchlist': '搜索关注项…',
                 'personal-todo': '搜索任务…',
                 'intelligence': '搜索报告…',
-                'code-browser': '搜索文件…',
                 'anatomy': '搜索算子或模型…',
             };
             return map[this.currentView] || '搜索…';
@@ -263,6 +279,7 @@ function app() {
                     this.loadMyStats(),
                     this.loadSyncStatus(),
                     this.loadWatchlist(),
+                    this.loadUsers(),
                 ]);
                 this.lastSync = new Date().toISOString();
             } catch (e) {
@@ -376,6 +393,11 @@ function app() {
             return this.watchlistSet.has(this._watchKey(number, type));
         },
 
+        // 通过 type+number 在 watchlist 中查找完整项
+        findWatchlistItem(number, type) {
+            return this.watchlist.find(i => i.number === number && i.item_type === type) || null;
+        },
+
         async loadWatchlist() {
             try {
                 const items = await this.api('/api/watchlist');
@@ -436,14 +458,18 @@ function app() {
             }
             this.manualAddLoading = true;
             try {
+                const note = this.manualAddNote.trim();
+                const assignee_id = this.manualAddAssigneeId;
                 const item = await this.api('/api/watchlist/add-by-number', {
                     method: 'POST',
-                    body: JSON.stringify({ number: num, item_type: type }),
+                    body: JSON.stringify({ number: num, item_type: type, note, assignee_id }),
                 }, 30000);  // GitHub API 拉取可能慢，给 30s
                 this.watchlistSet.add(key);
                 this.watchlist.unshift(item);
                 this.showToast('已加入关注', `#${num} 已加入特别关注`, 'success');
                 this.manualAddNumber = '';
+                this.manualAddNote = '';
+                this.manualAddAssigneeId = null;
                 // 切换到对应 tab 显示刚添加的项
                 this.watchlistTab = type;
             } catch (e) {
@@ -452,6 +478,149 @@ function app() {
                 this.manualAddLoading = false;
                 this.showAddWatchlistModal = false;
             }
+        },
+
+        // ===== Watchlist item editing (note + assignee) =====
+        openWatchlistEditModal(w) {
+            this.editingWatchlistItem = w;
+            this.watchlistEditNote = w.note || '';
+            this.watchlistEditAssigneeId = w.assignee_id || null;
+            this.showWatchlistEditModal = true;
+        },
+
+        closeWatchlistEditModal() {
+            this.showWatchlistEditModal = false;
+            this.editingWatchlistItem = null;
+            this.watchlistEditNote = '';
+            this.watchlistEditAssigneeId = null;
+        },
+
+        async saveWatchlistItem() {
+            if (!this.editingWatchlistItem) return;
+            if (this.watchlistEditSaving) return;
+            const w = this.editingWatchlistItem;
+            const note = this.watchlistEditNote.trim();
+            const assignee_id = this.watchlistEditAssigneeId;
+            this.watchlistEditSaving = true;
+            try {
+                const updated = await this.api(`/api/watchlist/${w.item_type}/${w.number}/note`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ note, assignee_id }),
+                });
+                // 更新本地数据
+                w.note = updated.note;
+                w.assignee_id = updated.assignee_id;
+                const idx = this.watchlist.findIndex(i => i.number === w.number && i.item_type === w.item_type);
+                if (idx !== -1) {
+                    this.watchlist[idx].note = updated.note;
+                    this.watchlist[idx].assignee_id = updated.assignee_id;
+                }
+                // 同步更新详情抽屉中的显示
+                if (w.item_type === 'pr' && this.selectedPR?.pr_number === w.number) {
+                    this.selectedPR.watchlist_note = updated.note || '';
+                    this.selectedPR.watchlist_assignee_id = updated.assignee_id;
+                } else if (w.item_type === 'issue' && this.selectedIssue?.number === w.number) {
+                    this.selectedIssue.watchlist_note = updated.note || '';
+                    this.selectedIssue.watchlist_assignee_id = updated.assignee_id;
+                }
+                this.showToast('关注信息已保存', '', 'success');
+                this.closeWatchlistEditModal();
+            } catch (e) {
+                this.showToast('保存失败', e.message, 'error');
+            } finally {
+                this.watchlistEditSaving = false;
+            }
+        },
+
+        // ===== User management =====
+        async loadUsers() {
+            try {
+                const data = await this.api('/api/users');
+                this.users = data.users || [];
+            } catch (e) {
+                this.showToast('加载用户失败', e.message, 'error');
+            }
+        },
+
+        openUserManager() {
+            this.showUserManager = true;
+            this.resetUserForm();
+            this.loadUsers();
+        },
+
+        closeUserManager() {
+            this.showUserManager = false;
+            this.resetUserForm();
+        },
+
+        resetUserForm() {
+            this.userForm = { name: '', github_id: '' };
+            this.userFormMode = 'create';
+            this.editingUser = null;
+        },
+
+        openEditUser(user) {
+            this.userFormMode = 'edit';
+            this.editingUser = user;
+            this.userForm = { name: user.name, github_id: user.github_id || '' };
+        },
+
+        async saveUser() {
+            const name = this.userForm.name.trim();
+            if (!name) { this.showToast('显示名称不能为空', '', 'error'); return; }
+            // 规范化 GitHub 登录名：去空格、去前导 @、去 github.com/ 前缀
+            let githubId = (this.userForm.github_id || '').trim().replace(/^@+/, '');
+            githubId = githubId.replace(/^https?:\/\/github\.com\//i, '').replace(/\/.*$/, '');
+            if (githubId && !/^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/.test(githubId)) {
+                this.showToast('GitHub 登录名格式不正确', '请填写 GitHub 用户名（如 octocat），不要带 @ 或网址', 'error');
+                return;
+            }
+            if (this.userSaving) return;
+            this.userSaving = true;
+            const payload = { name, github_id: githubId };
+            try {
+                if (this.userFormMode === 'create') {
+                    const user = await this.api('/api/users', {
+                        method: 'POST',
+                        body: JSON.stringify(payload),
+                    });
+                    this.users.push(user);
+                    this.showToast('用户已创建', name, 'success');
+                } else if (this.editingUser) {
+                    const user = await this.api(`/api/users/${this.editingUser.id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(payload),
+                    });
+                    const idx = this.users.findIndex(u => u.id === user.id);
+                    if (idx >= 0) this.users[idx] = user;
+                    this.showToast('用户已更新', name, 'success');
+                }
+                this.resetUserForm();
+            } catch (e) {
+                this.showToast('保存失败', e.message, 'error');
+            } finally {
+                this.userSaving = false;
+            }
+        },
+
+        async deleteUser(user) {
+            if (!confirm(`确认删除用户「${user.name}」？\n删除后，已关联该用户为责任人的任务/算子/模型将显示为「未知用户」。`)) return;
+            try {
+                await this.api(`/api/users/${user.id}`, { method: 'DELETE' });
+                this.users = this.users.filter(u => u.id !== user.id);
+                if (this.editingUser && this.editingUser.id === user.id) {
+                    this.resetUserForm();
+                }
+                this.showToast('已删除', `用户「${user.name}」已删除`, 'info');
+            } catch (e) {
+                this.showToast('删除失败', e.message, 'error');
+            }
+        },
+
+        userName(userId) {
+            if (!userId) return '';
+            const user = this.users.find(u => u.id === userId);
+            return user ? user.name : '(未知用户)';
         },
 
         // ===== Time formatting =====
@@ -483,10 +652,6 @@ function app() {
             this.currentView = view;
             this.searchQuery = '';
             this.communityPage = 1;
-            // 切到代码浏览时自动折叠侧边栏
-            if (view === 'code-browser' && !this.sidebarCollapsed) {
-                this.toggleSidebar();
-            }
             // 切到我的贡献时自动加载统计数据
             if (view === 'pr-center' && !this.myStats && !this.statsLoading) {
                 this.loadMyStats();
@@ -529,8 +694,7 @@ function app() {
             else if (e.key === '4') { e.preventDefault(); this.switchView('personal-todo'); }
             else if (e.key === '5') { e.preventDefault(); this.switchView('intelligence'); }
             else if (e.key === '6') { e.preventDefault(); this.switchView('articles'); }
-            else if (e.key === '7') { e.preventDefault(); this.switchView('code-browser'); }
-            else if (e.key === '8') { e.preventDefault(); this.switchView('anatomy'); }
+            else if (e.key === '7') { e.preventDefault(); this.switchView('anatomy'); }
             else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); this.refreshAll(); }
         },
 
@@ -656,7 +820,7 @@ function app() {
 // 让整个合并失败 -> 所有变量未定义。
 // 用 defineProperty 复制 descriptor 能保留 getter，后续 Alpine 访问时才求值。
 window.buildApp = function() {
-    const sources = [app(), communityMixin(), prCenterMixin(), personalTodoMixin(), intelligenceMixin(), articlesMixin(), codeBrowserMixin(), modelAnatomyMixin()];
+    const sources = [app(), communityMixin(), prCenterMixin(), personalTodoMixin(), intelligenceMixin(), articlesMixin(), modelAnatomyMixin()];
     const result = {};
     for (const src of sources) {
         const descs = Object.getOwnPropertyDescriptors(src);

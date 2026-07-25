@@ -29,6 +29,8 @@ class WatchlistAddRequest(BaseModel):
     area: str = ""  # 领域 ID
     issue_type: str = ""  # issue 分类（bug/rfc/...），PR 可为空
     state: str = ""  # 'open' / 'closed' / 'merged'
+    note: str = ""  # 用户备注
+    assignee_id: Optional[int] = None  # 责任人
 
     @field_validator("item_type")
     @classmethod
@@ -42,6 +44,8 @@ class AddByNumberRequest(BaseModel):
     """通过 issue/PR 编号手动添加到特别关注"""
     number: int
     item_type: str  # 'issue' or 'pr'
+    note: str = ""  # 用户备注
+    assignee_id: Optional[int] = None  # 责任人
 
     @field_validator("item_type")
     @classmethod
@@ -102,6 +106,10 @@ async def add_to_watchlist(req: WatchlistAddRequest, db: Session = Depends(get_d
         existing.area = req.area or existing.area
         existing.issue_type = req.issue_type or existing.issue_type
         existing.state = req.state or existing.state
+        if req.note:
+            existing.note = req.note
+        if req.assignee_id is not None:
+            existing.assignee_id = req.assignee_id
         db.commit()
         db.refresh(existing)
         return existing.to_dict()
@@ -113,6 +121,8 @@ async def add_to_watchlist(req: WatchlistAddRequest, db: Session = Depends(get_d
         area=req.area or None,
         issue_type=req.issue_type or None,
         state=req.state or None,
+        note=req.note or None,
+        assignee_id=req.assignee_id,
         added_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     db.add(w)
@@ -197,6 +207,8 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
         area=area,
         issue_type=issue_type,
         state=state,
+        note=req.note or None,
+        assignee_id=req.assignee_id,
         added_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     db.add(w)
@@ -229,3 +241,28 @@ async def check_watchlist(item_type: str, number: int, db: Session = Depends(get
         Watchlist.item_type == item_type,
     ).first()
     return {"watched": w is not None}
+
+
+class UpdateWatchlistItemRequest(BaseModel):
+    """更新关注项信息（备注、责任人）"""
+    note: str = ""
+    assignee_id: Optional[int] = None
+
+
+@router.put("/{item_type}/{number}/note")
+async def update_watchlist_item(item_type: str, number: int, req: UpdateWatchlistItemRequest, db: Session = Depends(get_db)):
+    """更新特别关注项的备注和责任人"""
+    if item_type not in ("issue", "pr"):
+        raise HTTPException(status_code=400, detail="item_type must be 'issue' or 'pr'")
+    w = db.query(Watchlist).filter(
+        Watchlist.number == number,
+        Watchlist.item_type == item_type,
+    ).first()
+    if not w:
+        raise HTTPException(status_code=404, detail="Not in watchlist")
+    w.note = req.note or None
+    if req.assignee_id is not None:
+        w.assignee_id = req.assignee_id
+    db.commit()
+    db.refresh(w)
+    return w.to_dict()

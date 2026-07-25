@@ -251,6 +251,34 @@ function intelligenceMixin() {
             });
         },
 
+        // ===== 跳转到任务页面并打开对应任务 =====
+        async openTaskFromReport(report) {
+            const taskId = report.task_id || (this.reportDetails && this.reportDetails.task_id);
+            if (!taskId) {
+                this.showToast('无关联任务', '该报告没有关联的任务', 'info');
+                return;
+            }
+            // 关闭报告弹窗
+            this.closeReport();
+            // 切到任务页面
+            this.switchView('personal-todo');
+            // 等视图切换完成
+            await new Promise(r => setTimeout(r, 500));
+            // 找到对应任务并打开
+            const task = this.todoTasks.find(t => t.id === taskId);
+            if (task) {
+                this.openTask(task);
+            } else {
+                // 列表没有，尝试通过 API 加载详情
+                try {
+                    const details = await this.api(`/api/personal-todo/tasks/${taskId}`);
+                    this.openTask(details);
+                } catch (e) {
+                    this.showToast('加载任务失败', e.message, 'error');
+                }
+            }
+        },
+
         // ===== 来源标签 =====
         intelSourceLabel(source) {
             const map = { vllm: 'vLLM', 'vllm-ascend': 'vLLM-Ascend', sglang: 'sglang', academic: '学术', news: '新闻' };

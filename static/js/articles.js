@@ -22,6 +22,7 @@ function articlesMixin() {
             content: '',
             area: '',
             tags: [],
+            user_id: null,
             status: 'draft',
         },
         // 脏状态追踪：表单初始内容的快照，用于检测未保存修改
@@ -119,7 +120,7 @@ function articlesMixin() {
         openNewArticle() {
             if (!this._confirmDiscard()) return;
             this.articleEditorMode = 'create';
-            this.articleForm = { id: null, title: '', content: '', area: '', tags: [], status: 'draft' };
+            this.articleForm = { id: null, title: '', content: '', area: '', tags: [], user_id: null, status: 'draft' };
             this.editorTagInput = '';
             this.articleViewOpen = false;
             this.selectedArticle = null;
@@ -141,6 +142,7 @@ function articlesMixin() {
                 content: article.content || '',
                 area: article.area || '',
                 tags: article.tags || [],
+                user_id: article.user_id || null,
                 status: article.status || 'draft',
             };
             this.editorTagInput = '';
@@ -200,6 +202,7 @@ function articlesMixin() {
                 content,
                 area: this.articleForm.area || '',
                 tags: this.articleForm.tags,
+                user_id: this.articleForm.user_id,
                 status: this.articleForm.status || 'draft',
             };
 

@@ -226,6 +226,7 @@ async def create_operator(req: OperatorCreate, db: Session = Depends(get_db)):
         output_shape_desc=req.output_shape_desc,
         vllm_code_refs=json.dumps(req.vllm_code_refs, ensure_ascii=False),
         tags=json.dumps(req.tags, ensure_ascii=False),
+        user_id=req.user_id,
         created_at=now,
         updated_at=now,
     )
@@ -269,6 +270,8 @@ async def update_operator(operator_id: int, req: OperatorUpdate, db: Session = D
         op.vllm_code_refs = json.dumps(req.vllm_code_refs, ensure_ascii=False)
     if req.tags is not None:
         op.tags = json.dumps(req.tags, ensure_ascii=False)
+    if req.user_id is not None:
+        op.user_id = req.user_id
 
     op.updated_at = _utcnow()
     db.commit()
@@ -345,6 +348,7 @@ async def create_model(req: ModelAnatomyCreate, db: Session = Depends(get_db)):
         params_summary=json.dumps(req.params_summary, ensure_ascii=False),
         operators_count=len(used_ids),
         tags=json.dumps(req.tags, ensure_ascii=False),
+        user_id=req.user_id,
         created_at=now,
         updated_at=now,
     )
@@ -395,6 +399,8 @@ async def update_model(model_id: int, req: ModelAnatomyUpdate, db: Session = Dep
         model.params_summary = json.dumps(req.params_summary, ensure_ascii=False)
     if req.tags is not None:
         model.tags = json.dumps(req.tags, ensure_ascii=False)
+    if req.user_id is not None:
+        model.user_id = req.user_id
 
     model.updated_at = _utcnow()
     db.commit()

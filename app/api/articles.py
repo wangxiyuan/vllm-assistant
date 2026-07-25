@@ -32,6 +32,7 @@ class ArticleCreate(BaseModel):
     area: Optional[str] = ""
     tags: Optional[list] = []
     status: Optional[str] = "draft"
+    user_id: Optional[int] = None  # 作者
 
 
 class ArticleUpdate(BaseModel):
@@ -40,6 +41,7 @@ class ArticleUpdate(BaseModel):
     area: Optional[str] = None
     tags: Optional[list] = None
     status: Optional[str] = None
+    user_id: Optional[int] = None  # 作者
 
 
 class PreviewRequest(BaseModel):
@@ -113,6 +115,7 @@ async def create_article(req: ArticleCreate, db: Session = Depends(get_db)):
         content=req.content,
         area=req.area or None,
         tags=json.dumps(req.tags, ensure_ascii=False) if req.tags else None,
+        user_id=req.user_id,
         status=req.status or "draft",
         created_at=now,
         updated_at=now,
@@ -151,6 +154,8 @@ async def update_article(article_id: int, req: ArticleUpdate, db: Session = Depe
         article.tags = json.dumps(req.tags, ensure_ascii=False)
     if req.status is not None:
         article.status = req.status
+    if req.user_id is not None:
+        article.user_id = req.user_id
 
     article.updated_at = _utcnow()
 

@@ -69,11 +69,15 @@ class PersonalTaskCreate(BaseModel):
     source: str = "self"
     priority: str = "P2"
     area: str = ""
+    assignee_id: Optional[int] = None
     tags: List[str] = []
     due_date: Optional[date] = None
     related_issue_number: Optional[int] = None
     related_pr_number: Optional[int] = None
     related_url: str = ""
+    related_repo: Optional[str] = None  # 关联的仓库名: 'vllm' / 'vllm-ascend'
+    parent_id: Optional[int] = None  # 父任务 ID，用于创建子任务
+    subtask_order: Optional[int] = None  # 子任务排序序号（可选）
     trigger_dedup_check: bool = False
 
     @field_validator("due_date", mode="before")
@@ -106,11 +110,15 @@ class PersonalTaskUpdate(BaseModel):
     priority: Optional[str] = None
     status: Optional[str] = None
     area: Optional[str] = None
+    assignee_id: Optional[int] = None
     tags: Optional[List[str]] = None
     due_date: Optional[date] = None
     related_issue_number: Optional[int] = None
     related_pr_number: Optional[int] = None
     related_url: Optional[str] = None
+    related_repo: Optional[str] = None
+    parent_id: Optional[int] = None  # 父任务 ID
+    subtask_order: Optional[int] = None  # 子任务排序序号
 
     @field_validator("due_date", mode="before")
     @classmethod
@@ -162,6 +170,7 @@ class IntelligenceGenerateRequest(BaseModel):
     sources: List[str] = ["vllm", "vllm-ascend", "sglang", "academic", "news"]
     excluded_sources: List[str] = []
     extra_prompt: str = ""
+    user_id: Optional[int] = None  # 创建人
 
     @field_validator("task_id")
     @classmethod
@@ -201,6 +210,7 @@ class OperatorCreate(BaseModel):
     output_shape_desc: str = ""
     vllm_code_refs: list = []
     tags: list[str] = []
+    user_id: Optional[int] = None  # 责任人
 
 
 class OperatorUpdate(BaseModel):
@@ -214,6 +224,7 @@ class OperatorUpdate(BaseModel):
     output_shape_desc: Optional[str] = None
     vllm_code_refs: Optional[list] = None
     tags: Optional[list[str]] = None
+    user_id: Optional[int] = None  # 责任人
 
 
 class OperatorResponse(BaseModel):
@@ -244,6 +255,7 @@ class ModelAnatomyCreate(BaseModel):
     architecture: list = []
     params_summary: dict = {}
     tags: list[str] = []
+    user_id: Optional[int] = None  # 责任人
 
 
 class ModelAnatomyUpdate(BaseModel):
@@ -255,6 +267,7 @@ class ModelAnatomyUpdate(BaseModel):
     architecture: Optional[list] = None
     params_summary: Optional[dict] = None
     tags: Optional[list[str]] = None
+    user_id: Optional[int] = None  # 责任人
 
 
 class ModelAnatomyResponse(BaseModel):

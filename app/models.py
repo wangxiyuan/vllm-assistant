@@ -172,6 +172,8 @@ class Watchlist(Base):
     area = Column(String(50))  # 领域 ID（如 'attention', 'model'）
     issue_type = Column(String(30))  # issue 分类（如 'bug', 'rfc'），PR 为 None
     state = Column(String(20))  # 'open' / 'closed' / 'merged'
+    note = Column(Text)  # 用户备注，可选
+    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 责任人
     added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     __table_args__ = (
@@ -188,6 +190,8 @@ class Watchlist(Base):
             "area": self.area,
             "issue_type": self.issue_type,
             "state": self.state,
+            "note": self.note or "",
+            "assignee_id": self.assignee_id,
             "added_at": _iso_utc(self.added_at),
         }
 
@@ -272,10 +276,18 @@ class PersonalTask(Base):
     related_issue_number = Column(Integer)
     related_pr_number = Column(Integer)
     related_url = Column(String(500))
+    related_repo = Column(String(50))  # 关联的仓库名: 'vllm' / 'vllm-ascend'
 
     # 分类
     area = Column(String(50))
     tags = Column(Text)  # JSON array
+
+    # 责任人
+    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 任务责任人
+
+    # 子任务关系
+    parent_id = Column(Integer, ForeignKey("personal_tasks.id"), nullable=True, default=None)
+    subtask_order = Column(Integer, default=0)  # 子任务排序序号
 
     # 时间追踪
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
@@ -286,6 +298,10 @@ class PersonalTask(Base):
     # AI 辅助字段
     dedup_check_result = Column(Text)  # JSON: 去重检查结果
 
+    # ORM 关系
+    children = relationship("PersonalTask", backref="parent", remote_side=[id],
+                            cascade="all, delete")
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -294,10 +310,14 @@ class PersonalTask(Base):
             "source": self.source,
             "priority": self.priority,
             "status": self.status,
+            "parent_id": self.parent_id,
+            "subtask_order": self.subtask_order,
             "related_issue_number": self.related_issue_number,
             "related_pr_number": self.related_pr_number,
             "related_url": self.related_url,
+            "related_repo": self.related_repo,
             "area": self.area,
+            "assignee_id": self.assignee_id,
             "tags": json.loads(self.tags) if self.tags else [],
             "created_at": _iso_utc(self.created_at),
             "updated_at": _iso_utc(self.updated_at),
@@ -334,6 +354,7 @@ class IntelligenceReport(Base):
 
     # 关联信息
     task_id = Column(Integer, ForeignKey("personal_tasks.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 创建人
 
     # 来源范围 JSON 数组: ["vllm", "vllm-ascend", "sglang", "academic", "news"]
     sources = Column(Text, nullable=False)
@@ -350,6 +371,7 @@ class IntelligenceReport(Base):
             "id": self.id,
             "title": self.title,
             "task_id": self.task_id,
+            "user_id": self.user_id,
             "sources": json.loads(self.sources) if self.sources else [],
             "excluded_sources": json.loads(self.excluded_sources) if self.excluded_sources else [],
             "extra_prompt": self.extra_prompt or "",
@@ -382,6 +404,7 @@ class Article(Base):
     # 元信息
     area = Column(String(50))  # 所属领域 (engine/model/...)
     tags = Column(Text)  # JSON array
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 作者
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
@@ -407,6 +430,7 @@ class Article(Base):
             "content": self.content,
             "area": self.area,
             "tags": json.loads(self.tags) if self.tags else [],
+            "user_id": self.user_id,
             "status": self.status,
             "code_refs_count": self.code_refs_count or 0,
             "valid_refs_count": self.valid_refs_count or 0,
@@ -478,6 +502,24 @@ class RepoCache(Base):
     commit_sha = Column(String(40))
 
 
+class User(Base):
+    """用户（非租户，仅用于责任人关联）"""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)  # 姓名
+    github_id = Column(String(100))  # GitHub ID，可选
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "github_id": self.github_id or "",
+            "created_at": _iso_utc(self.created_at),
+        }
+
+
 class FileChangeHistory(Base):
     """文件变更历史记录（scheduler 同步时填充）
 
@@ -544,6 +586,7 @@ class Operator(Base):
     output_shape_desc = Column(String(200))
     vllm_code_refs = Column(Text)  # JSON array
     tags = Column(Text)  # JSON array
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 责任人
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
@@ -559,6 +602,7 @@ class Operator(Base):
             "output_shape_desc": self.output_shape_desc or "",
             "vllm_code_refs": json.loads(self.vllm_code_refs) if self.vllm_code_refs else [],
             "tags": json.loads(self.tags) if self.tags else [],
+            "user_id": self.user_id,
             "created_at": _iso_utc(self.created_at),
             "updated_at": _iso_utc(self.updated_at),
         }
@@ -577,6 +621,7 @@ class ModelAnatomy(Base):
     params_summary = Column(Text)  # JSON 参数汇总
     operators_count = Column(Integer, default=0)
     tags = Column(Text)  # JSON array
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 责任人
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
@@ -591,6 +636,7 @@ class ModelAnatomy(Base):
             "params_summary": json.loads(self.params_summary) if self.params_summary else {},
             "operators_count": self.operators_count or 0,
             "tags": json.loads(self.tags) if self.tags else [],
+            "user_id": self.user_id,
             "created_at": _iso_utc(self.created_at),
             "updated_at": _iso_utc(self.updated_at),
         }

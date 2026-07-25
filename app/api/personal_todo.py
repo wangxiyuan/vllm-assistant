@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, case as sa_case
 from sqlalchemy.orm import Session
 
 from app.config import Config
@@ -39,15 +39,19 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _task_list_dict(task: PersonalTask, db: Session, insight_task_ids: set = None) -> dict:
+def _task_list_dict(task: PersonalTask, db: Session, insight_task_ids: set = None,
+                    insight_report_ids: dict = None) -> dict:
     """列表场景下返回的精简 dict（含 has_dedup_check / has_ai_insight 标记）
 
     insight_task_ids: 已有 completed 报告的 task_id 集合（批量预查，避免 N+1）
+    insight_report_ids: task_id → latest report id 映射（批量预查，避免 N+1）
     """
     d = task.to_dict()
     d["has_dedup_check"] = bool(task.dedup_check_result)
     if insight_task_ids is not None:
         d["has_ai_insight"] = task.id in insight_task_ids
+        if d["has_ai_insight"] and insight_report_ids is not None:
+            d["latest_insight_report_id"] = insight_report_ids.get(task.id)
     else:
         insight_count = (
             db.query(IntelligenceReport)
@@ -58,14 +62,34 @@ def _task_list_dict(task: PersonalTask, db: Session, insight_task_ids: set = Non
             .count()
         )
         d["has_ai_insight"] = insight_count > 0
+        if d["has_ai_insight"]:
+            latest = (
+                db.query(IntelligenceReport.id)
+                .filter(
+                    IntelligenceReport.task_id == task.id,
+                    IntelligenceReport.status == "completed",
+                )
+                .order_by(IntelligenceReport.created_at.desc())
+                .first()
+            )
+            d["latest_insight_report_id"] = latest[0] if latest else None
+    return d
+
+
+def _merge_subtask_stats(d: dict, task_id: int, subtask_stats: dict) -> dict:
+    """将批量查询的子任务统计合并到任务 dict 中"""
+    if subtask_stats and task_id in subtask_stats:
+        d.update(subtask_stats[task_id])
     return d
 
 
 def _build_stats(db: Session) -> dict:
-    """聚合统计：按状态/优先级分组计数"""
+    """聚合统计：按状态/优先级分组计数（只统计顶层任务，排除子任务）"""
     by_status = {"todo": 0, "in_progress": 0, "done": 0}
     by_priority = {"P0": 0, "P1": 0, "P2": 0, "P3": 0}
-    rows = db.query(PersonalTask.status, PersonalTask.priority, func.count(PersonalTask.id)).group_by(
+    rows = db.query(PersonalTask.status, PersonalTask.priority, func.count(PersonalTask.id)).filter(
+        PersonalTask.parent_id.is_(None)
+    ).group_by(
         PersonalTask.status, PersonalTask.priority
     ).all()
     for status, priority, cnt in rows:
@@ -105,6 +129,9 @@ async def list_tasks(
     if area:
         q = q.filter(PersonalTask.area == area)
 
+    # 只显示顶层任务（非子任务）
+    q = q.filter(PersonalTask.parent_id.is_(None))
+
     sort_col = SORT_FIELDS[sort_by]
     if sort_order == "asc":
         q = q.order_by(sort_col.asc())
@@ -113,9 +140,25 @@ async def list_tasks(
 
     total = q.count()
     tasks = q.offset((page - 1) * per_page).limit(per_page).all()
-    # 批量预查哪些 task 有已完成的洞察报告（避免 N+1）
+    # 批量预查子任务统计（避免 N+1）
     task_ids = [t.id for t in tasks]
+    subtask_stats = {}
+    if task_ids:
+        rows = (
+            db.query(
+                PersonalTask.parent_id,
+                func.count(PersonalTask.id).label("total"),
+                func.sum(sa_case((PersonalTask.status == "done", 1), else_=0)).label("done"),
+            )
+            .filter(PersonalTask.parent_id.in_(task_ids))
+            .group_by(PersonalTask.parent_id)
+            .all()
+        )
+        for parent_id, total, done in rows:
+            subtask_stats[parent_id] = {"subtask_count": total, "subtask_done_count": done or 0}
+    # 批量预查哪些 task 有已完成的洞察报告（避免 N+1）
     insight_task_ids = set()
+    insight_report_ids = {}
     if task_ids:
         rows = (
             db.query(IntelligenceReport.task_id)
@@ -127,8 +170,29 @@ async def list_tasks(
             .all()
         )
         insight_task_ids = {r[0] for r in rows}
+        if insight_task_ids:
+            # 批量查询每个 task 最新报告的 id
+            from sqlalchemy import func as sa_func
+            subq = (
+                db.query(
+                    IntelligenceReport.task_id,
+                    sa_func.max(IntelligenceReport.id).label("max_id"),
+                )
+                .filter(
+                    IntelligenceReport.task_id.in_(list(insight_task_ids)),
+                    IntelligenceReport.status == "completed",
+                )
+                .group_by(IntelligenceReport.task_id)
+                .subquery()
+            )
+            report_rows = (
+                db.query(IntelligenceReport.id, IntelligenceReport.task_id)
+                .join(subq, IntelligenceReport.id == subq.c.max_id)
+                .all()
+            )
+            insight_report_ids = {r.task_id: r.id for r in report_rows}
     return {
-        "tasks": [_task_list_dict(t, db, insight_task_ids) for t in tasks],
+        "tasks": [_merge_subtask_stats(_task_list_dict(t, db, insight_task_ids, insight_report_ids), t.id, subtask_stats) for t in tasks],
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -151,11 +215,15 @@ async def create_task(req: PersonalTaskCreate, db: Session = Depends(get_db)):
         priority=req.priority,
         status="todo",
         area=req.area or None,
+        assignee_id=req.assignee_id,
         tags=json.dumps(req.tags, ensure_ascii=False) if req.tags else None,
         due_date=req.due_date,
         related_issue_number=req.related_issue_number,
         related_pr_number=req.related_pr_number,
         related_url=req.related_url or None,
+        related_repo=req.related_repo,
+        parent_id=req.parent_id,
+        subtask_order=req.subtask_order or 0,
         created_at=now,
         updated_at=now,
     )
@@ -210,11 +278,13 @@ async def update_task(task_id: int, req: PersonalTaskUpdate, db: Session = Depen
 async def delete_task(task_id: int, db: Session = Depends(get_db)):
     """删除任务（DESIGN-PERSONAL-TODO.md 3.1 DELETE）
 
-    级联清理：去重缓存 + 关联的洞察报告
+    级联清理：子任务 + 去重缓存 + 关联的洞察报告
     """
     task = db.query(PersonalTask).filter(PersonalTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    # 级联删除子任务
+    db.query(PersonalTask).filter(PersonalTask.parent_id == task_id).delete()
     # 级联清理去重缓存
     db.query(TaskDedupCache).filter(TaskDedupCache.task_id == task_id).delete()
     # 级联清理关联的洞察报告
@@ -222,6 +292,30 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
     db.delete(task)
     db.commit()
     return {"deleted": True}
+
+
+@router.get("/tasks/{task_id}/subtasks")
+async def list_subtasks(task_id: int, db: Session = Depends(get_db)):
+    """获取指定任务的所有子任务列表"""
+    task = db.query(PersonalTask).filter(PersonalTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    subtasks = (
+        db.query(PersonalTask)
+        .filter(PersonalTask.parent_id == task_id)
+        .order_by(PersonalTask.subtask_order.asc(), PersonalTask.created_at.asc())
+        .all()
+    )
+
+    total = len(subtasks)
+    done_count = sum(1 for s in subtasks if s.status == "done")
+
+    return {
+        "subtasks": [s.to_dict() for s in subtasks],
+        "total": total,
+        "done_count": done_count,
+    }
 
 
 @router.get("/tasks/{task_id}")

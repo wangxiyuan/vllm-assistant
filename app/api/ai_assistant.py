@@ -247,3 +247,28 @@ async def clear_ai_cache(request: CacheDeleteRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         db.close()
+
+class TranslateRequest(BaseModel):
+    """翻译请求"""
+    item_type: str  # 'issue' or 'pr'
+    text: str
+
+
+@router.post("/translate")
+def translate(request: TranslateRequest):
+    """将 Issue/PR 描述翻译为中文
+
+    用 def（非 async）避免同步 AI 调用阻塞事件循环。
+    """
+    if not request.text:
+        raise HTTPException(status_code=400, detail="text is required")
+    try:
+        _require_api_key()
+        ai = AIAssistant()
+        translated = ai.translate(request.text, request.item_type)
+        return {"translated": translated}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error in translate")
+        raise HTTPException(status_code=500, detail="Translation failed")

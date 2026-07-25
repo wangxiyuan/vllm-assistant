@@ -212,7 +212,7 @@ fi
 # 可选：询问是否配置 REPOS（仅在首次部署时提示）
 if ! grep -q "^REPOS=" .env 2>/dev/null || grep -q "^REPOS=$" .env 2>/dev/null; then
     echo ""
-    print_info "是否配置代码仓库列表？（用于代码浏览器/学习文章功能）[y/N]"
+    print_info "是否配置代码仓库列表？（用于学习文章代码引用功能）[y/N]"
     read -r config_repos
     if [[ "$config_repos" =~ ^[Yy]$ ]]; then
         echo "  请输入仓库配置（格式: name=url，多个用逗号分隔）"

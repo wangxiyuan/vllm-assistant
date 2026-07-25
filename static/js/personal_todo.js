@@ -13,7 +13,7 @@ function personalTodoMixin() {
 
         // ===== 快速添加任务表单 =====
         showAddTaskModal: false,
-        newTask: { title: '', description: '', source: 'self', priority: 'P2', area: '', due_date: '', trigger_dedup_check: false },
+        newTask: { title: '', description: '', source: 'self', priority: 'P2', area: '', assignee_id: null, due_date: '', related_repo: '', related_issue_number: null, related_pr_number: null, trigger_dedup_check: false },
         newTaskLoading: false,
 
         // ===== 任务详情抽屉 =====
@@ -33,11 +33,19 @@ function personalTodoMixin() {
         // ===== 优先级配置 =====
         priorities: ['P0', 'P1', 'P2', 'P3'],
         sources: [
-            { value: 'self', label: '自己发现' },
-            { value: 'team', label: '团队反馈' },
-            { value: 'community', label: '社区提出' },
+            { value: 'self', label: '主动规划' },
+            { value: 'team', label: '产品反馈' },
+            { value: 'community', label: '社区反馈' },
             { value: 'meeting', label: '会议纪要' },
         ],
+
+        // ===== 子任务 =====
+        subtasks: [],
+        subtasksLoading: false,
+        showSubtaskForm: false,
+        newSubtask: { title: '', priority: 'P2', assignee_id: null },
+        editingSubtaskId: null,
+        editSubtaskForm: {},
 
         // ===== 加载任务列表 =====
         async loadTodoTasks() {
@@ -72,6 +80,9 @@ function personalTodoMixin() {
                 const { trigger_dedup_check, ...payload } = this.newTask;
                 if (!payload.due_date) delete payload.due_date;
                 if (!payload.area) delete payload.area;
+                if (!payload.related_repo) delete payload.related_repo;
+                if (!payload.related_issue_number) delete payload.related_issue_number;
+                if (!payload.related_pr_number) delete payload.related_pr_number;
                 const result = await this.api('/api/personal-todo/tasks', {
                     method: 'POST',
                     body: JSON.stringify(payload),
@@ -82,7 +93,7 @@ function personalTodoMixin() {
                 if (this.todoStats.by_priority) this.todoStats.by_priority[result.priority] = (this.todoStats.by_priority[result.priority] || 0) + 1;
                 this.showToast('任务已创建', `#${result.id} ${result.title}`, 'success');
                 // 重置表单并关闭弹窗
-                this.newTask = { title: '', description: '', source: 'self', priority: 'P2', area: '', due_date: '', trigger_dedup_check: false };
+                this.newTask = { title: '', description: '', source: 'self', priority: 'P2', area: '', assignee_id: null, due_date: '', related_repo: '', related_issue_number: null, related_pr_number: null, trigger_dedup_check: false };
                 this.showAddTaskModal = false;
                 // 如果有去重结果，显示提示
                 if (result.dedup_check_result && result.dedup_check_result.matches && result.dedup_check_result.matches.length > 0) {
@@ -102,8 +113,11 @@ function personalTodoMixin() {
             this.taskDrawerLoading = false;
             this.editingTask = false;
             this.dedupResult = task.dedup_check_result || null;
+            this.subtasks = [];
+            this.showSubtaskForm = false;
             // 加载详情
             this.loadTaskDetails(task.id);
+            this.loadSubtasks(task.id);
         },
 
         closeTask() {
@@ -111,6 +125,9 @@ function personalTodoMixin() {
             this.selectedTaskDetails = null;
             this.editingTask = false;
             this.dedupResult = null;
+            this.subtasks = [];
+            this.showSubtaskForm = false;
+            this.newSubtask = { title: '', priority: 'P2', assignee_id: null };
         },
 
         async loadTaskDetails(taskId) {
@@ -149,7 +166,7 @@ function personalTodoMixin() {
             }
             try {
                 const updates = {};
-                const fields = ['title', 'description', 'source', 'priority', 'status', 'area', 'due_date', 'related_issue_number', 'related_pr_number', 'related_url'];
+                const fields = ['title', 'description', 'source', 'priority', 'status', 'area', 'assignee_id', 'due_date', 'related_issue_number', 'related_pr_number', 'related_url', 'related_repo'];
                 for (const f of fields) {
                     if (this.editTaskForm[f] !== this.selectedTaskDetails[f]) {
                         let val = this.editTaskForm[f];
@@ -255,6 +272,27 @@ function personalTodoMixin() {
             }
         },
 
+        // ===== 跳转到洞察面板并打开对应报告 =====
+        async openTaskInsight(task) {
+            const reportId = task.latest_insight_report_id;
+            if (!reportId) {
+                this.showToast('暂无报告', '该任务还没有已完成的洞察报告', 'info');
+                return;
+            }
+            // 先切到洞察面板（loadIntelReports 会自动触发）
+            this.switchView('intelligence');
+            // 等一会让视图切换 + 数据加载完成
+            await new Promise(r => setTimeout(r, 500));
+            // 找到对应报告并打开
+            const report = this.intelReports.find(r => r.id === reportId);
+            if (report) {
+                this.viewReport(report);
+            } else {
+                // 列表没有，直接通过 API 加载
+                this.viewReport({ id: reportId });
+            }
+        },
+
         // ===== 从任务详情生成洞察报告 =====
         async generateInsightFromTask(task) {
             if (this.insightGenLoading) return;
@@ -284,7 +322,7 @@ function personalTodoMixin() {
         get tasksByPriority() {
             const groups = { P0: [], P1: [], P2: [], P3: [] };
             for (const t of this.todoTasks) {
-                if (t.status === 'done') continue;
+                if (t.status === 'done' || t.status === 'cancelled') continue;
                 if (groups[t.priority]) groups[t.priority].push(t);
             }
             return groups;
@@ -296,11 +334,11 @@ function personalTodoMixin() {
 
         // ===== 标签辅助 =====
         sourceLabel(source) {
-            const map = { self: '自己发现', team: '团队反馈', community: '社区提出', meeting: '会议纪要' };
+            const map = { self: '主动规划', team: '产品反馈', community: '社区反馈', meeting: '会议纪要' };
             return map[source] || source;
         },
         statusLabel(status) {
-            const map = { todo: '待处理', in_progress: '进行中', done: '已完成' };
+            const map = { todo: '待处理', in_progress: '进行中', done: '已完成', cancelled: '已取消' };
             return map[status] || status;
         },
         // 今天日期（YYYY-MM-DD），用于过期判断
@@ -316,6 +354,183 @@ function personalTodoMixin() {
         },
         statusClass(status) {
             return 'status-' + (status || 'todo');
+        },
+
+        // ===== 关联 issue/PR 辅助 =====
+        repoMap: {
+            vllm: 'vllm-project/vllm',
+            'vllm-ascend': 'vllm-project/vllm-ascend',
+        },
+        // 解析 repo#number 格式，返回 { repo, number, url } 或 null
+        parseRelatedRef(ref) {
+            if (!ref || !ref.trim()) return null;
+            const m = ref.trim().match(/^(vllm|vllm-ascend)\s*#\s*(\d+)$/i);
+            if (!m) return null;
+            const repo = m[1].toLowerCase();
+            const number = parseInt(m[2], 10);
+            const repoPath = this.repoMap[repo] || repo;
+            // 先尝试判断是 issue 还是 PR（默认为 issue）
+            const url = `https://github.com/${repoPath}/issues/${number}`;
+            return { repo, number, url };
+        },
+        // 根据 related_repo + related_issue_number / related_pr_number 生成跳转链接
+        relatedUrl(task) {
+            if (!task) return null;
+            if (task.related_url) return task.related_url;
+            if (task.related_repo && (task.related_issue_number || task.related_pr_number)) {
+                const repoPath = this.repoMap[task.related_repo] || task.related_repo;
+                const num = task.related_issue_number || task.related_pr_number;
+                const type = task.related_pr_number ? 'pull' : 'issues';
+                return `https://github.com/${repoPath}/${type}/${num}`;
+            }
+            return null;
+        },
+        // 跳转到关联链接
+        openRelatedLink(task) {
+            const url = this.relatedUrl(task);
+            if (url) window.open(url, '_blank');
+        },
+
+        // ===== 子任务 =====
+
+        async loadSubtasks(taskId) {
+            if (!taskId) return;
+            this.subtasksLoading = true;
+            try {
+                const data = await this.api(`/api/personal-todo/tasks/${taskId}/subtasks`);
+                this.subtasks = data.subtasks || [];
+                return data; // 返回 { subtasks, total, done_count } 用于更新进度
+            } catch (e) {
+                this.showToast('加载子任务失败', e.message, 'error');
+                this.subtasks = [];
+            } finally {
+                this.subtasksLoading = false;
+            }
+        },
+
+        async createSubtask() {
+            if (!this.newSubtask.title.trim() || !this.selectedTask) return;
+            const parentId = this.selectedTask.id;
+            try {
+                const result = await this.api('/api/personal-todo/tasks', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        title: this.newSubtask.title.trim(),
+                        priority: this.newSubtask.priority,
+                        assignee_id: this.newSubtask.assignee_id,
+                        parent_id: parentId,
+                        source: 'self',
+                    }),
+                });
+                this.subtasks.push(result);
+                this.newSubtask = { title: '', priority: 'P2', assignee_id: null };
+                this.showSubtaskForm = false;
+                // 更新父任务列表中的子任务计数
+                this._updateSubtaskCountOnCard(parentId);
+                this.showToast('子任务已创建', result.title, 'success');
+            } catch (e) {
+                this.showToast('创建子任务失败', e.message, 'error');
+            }
+        },
+
+        async toggleSubtaskDone(subtask) {
+            let newStatus;
+            if (subtask.status === 'cancelled') {
+                newStatus = 'todo';
+            } else {
+                newStatus = subtask.status === 'done' ? 'todo' : 'done';
+            }
+            try {
+                const result = await this.api(`/api/personal-todo/tasks/${subtask.id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ status: newStatus }),
+                });
+                const idx = this.subtasks.findIndex(s => s.id === subtask.id);
+                if (idx >= 0) {
+                    this.subtasks[idx] = result;
+                }
+                // 更新父任务的子任务计数
+                this._updateSubtaskCountOnCard(this.selectedTask?.id);
+                this.showToast(newStatus === 'done' ? '子任务已完成' : '子任务已恢复', result.title, 'success');
+            } catch (e) {
+                this.showToast('操作失败', e.message, 'error');
+            }
+        },
+
+        async deleteSubtask(subtask) {
+            if (!confirm(`确认删除子任务「${subtask.title}」？`)) return;
+            try {
+                await this.api(`/api/personal-todo/tasks/${subtask.id}`, { method: 'DELETE' });
+                this.subtasks = this.subtasks.filter(s => s.id !== subtask.id);
+                this._updateSubtaskCountOnCard(this.selectedTask?.id);
+                this.showToast('子任务已删除', '', 'info');
+            } catch (e) {
+                this.showToast('删除失败', e.message, 'error');
+            }
+        },
+
+        // ===== 子任务编辑 =====
+        startEditSubtask(subtask) {
+            this.editingSubtaskId = subtask.id;
+            this.editSubtaskForm = { ...subtask };
+        },
+        cancelEditSubtask() {
+            this.editingSubtaskId = null;
+            this.editSubtaskForm = {};
+        },
+        async saveSubtask() {
+            if (!this.editingSubtaskId) return;
+            const subtask = this.subtasks.find(s => s.id === this.editingSubtaskId);
+            if (!subtask) return;
+            if (!this.editSubtaskForm.title || !this.editSubtaskForm.title.trim()) {
+                this.showToast('标题不能为空', '', 'error');
+                return;
+            }
+            try {
+                const updates = {};
+                const fields = ['title', 'priority', 'source', 'assignee_id', 'status', 'related_repo', 'related_issue_number', 'related_pr_number', 'related_url', 'area'];
+                for (const f of fields) {
+                    if (this.editSubtaskForm[f] !== subtask[f]) {
+                        let val = this.editSubtaskForm[f];
+                        if (val === '') val = null;
+                        updates[f] = val;
+                    }
+                }
+                if (Object.keys(updates).length === 0) {
+                    this.editingSubtaskId = null;
+                    return;
+                }
+                const result = await this.api(`/api/personal-todo/tasks/${subtask.id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(updates),
+                });
+                const idx = this.subtasks.findIndex(s => s.id === subtask.id);
+                if (idx >= 0) {
+                    this.subtasks[idx] = result;
+                }
+                this.editingSubtaskId = null;
+                this.editSubtaskForm = {};
+                this.showToast('子任务已更新', result.title, 'success');
+            } catch (e) {
+                this.showToast('保存失败', e.message, 'error');
+            }
+        },
+
+        _updateSubtaskCountOnCard(parentId) {
+            if (!parentId) return;
+            // 更新列表中的父任务卡片显示（子任务计数靠 to_dict 的 children 关系，需要重新加载整个列表）
+            // 简单处理：刷新列表来更新卡片上的计数
+            this.loadTodoTasks();
+        },
+
+        get subtaskProgress() {
+            if (!this.subtasks.length) return 0;
+            const done = this.subtasks.filter(s => s.status === 'done').length;
+            return done;
+        },
+
+        get subtaskProgressText() {
+            return `${this.subtaskProgress}/${this.subtasks.length}`;
         },
 
         // ===== 筛选切换 =====

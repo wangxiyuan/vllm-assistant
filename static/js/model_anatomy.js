@@ -28,6 +28,7 @@ function modelAnatomyMixin() {
             output_shape_desc: '',
             vllm_code_refs: '[]',
             tags: [],
+            user_id: null,
         },
         operatorTagInput: '',
         operatorParamsSchemaValid: true,
@@ -53,6 +54,7 @@ function modelAnatomyMixin() {
             architecture: [],
             params_summary: '',
             tags: [],
+            user_id: null,
         },
         modelTagInput: '',
         modelFormSnapshot: null,
@@ -217,7 +219,7 @@ function modelAnatomyMixin() {
                 id: null, name: '', display_name: '', description: '',
                 category: 'other', params_schema: '{}',
                 input_shape_desc: '', output_shape_desc: '',
-                vllm_code_refs: '[]', tags: [],
+                vllm_code_refs: '[]', tags: [], user_id: null,
             };
             this.operatorTagInput = '';
             this.operatorParamsSchemaValid = true;
@@ -238,6 +240,7 @@ function modelAnatomyMixin() {
                 output_shape_desc: op.output_shape_desc || '',
                 vllm_code_refs: JSON.stringify(op.vllm_code_refs || [], null, 2),
                 tags: [...(op.tags || [])],
+                user_id: op.user_id || null,
             };
             this.operatorTagInput = '';
             this.operatorParamsSchemaValid = true;
@@ -313,6 +316,7 @@ function modelAnatomyMixin() {
                 output_shape_desc: this.operatorForm.output_shape_desc,
                 vllm_code_refs: parsedRefs,
                 tags: this.operatorForm.tags,
+                user_id: this.operatorForm.user_id,
             };
 
             try {
@@ -392,7 +396,7 @@ function modelAnatomyMixin() {
             this.modelEditorMode = 'create';
             this.modelForm = {
                 id: null, name: '', display_name: '', description: '',
-                category: 'other', architecture: [], params_summary: '', tags: [],
+                category: 'other', architecture: [], params_summary: '', tags: [], user_id: null,
             };
             this.editingArchitecture = [];
             this._stageIdCounter = 0;
@@ -417,6 +421,7 @@ function modelAnatomyMixin() {
                     ? JSON.stringify(this.selectedModel.params_summary, null, 2)
                     : '',
                 tags: [...(this.selectedModel.tags || [])],
+                user_id: this.selectedModel.user_id || null,
             };
             this.editingArchitecture = JSON.parse(JSON.stringify(arch));
             this.modelTagInput = '';
@@ -634,6 +639,7 @@ function modelAnatomyMixin() {
                 architecture: this.editingArchitecture,
                 params_summary: parsedSummary,
                 tags: this.modelForm.tags,
+                user_id: this.modelForm.user_id,
             };
 
             try {
