@@ -195,11 +195,15 @@ function prCenterMixin() {
         },
 
         async openPR(pr) {
-            // 合并 watchlist 数据（备注/责任人）
+            // 合并 watchlist 数据（备注/责任人/关联任务）
             const wl = this.findWatchlistItem(pr.pr_number, 'pr');
             if (wl) {
                 pr.watchlist_note = wl.note || '';
                 pr.watchlist_assignee_id = wl.assignee_id || null;
+                pr._linked_tasks = wl.linked_tasks || [];
+            } else if (pr._linked_tasks) {
+                // 从 openWatchlistPR 直接传入的 linked_tasks
+                pr._linked_tasks = pr._linked_tasks || [];
             }
             this.selectedPR = pr;
             this.prDetails = null;
@@ -247,11 +251,14 @@ function prCenterMixin() {
 
         // ===== Issue drawer =====
         async openIssue(issue) {
-            // 合并 watchlist 数据（备注/责任人）
+            // 合并 watchlist 数据（备注/责任人/关联任务）
             const wl = this.findWatchlistItem(issue.number, 'issue');
             if (wl) {
                 issue.watchlist_note = wl.note || '';
                 issue.watchlist_assignee_id = wl.assignee_id || null;
+                issue._linked_tasks = wl.linked_tasks || [];
+            } else {
+                issue._linked_tasks = issue._linked_tasks || [];
             }
             this.selectedIssue = issue;
             this.issueDetails = issue.body ? issue : null;
@@ -509,7 +516,9 @@ function prCenterMixin() {
         // ===== 轻量 Markdown 渲染（仅前端，无外部依赖）=====
         renderMarkdown(text) {
             if (!text) return '';
-            const lines = text.split('\n');
+            // 统一换行符：GitHub API 返回 CRLF (\r\n)，去掉 \r 避免正则 $ 锚点失效
+            let normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            const lines = normalized.split('\n');
             const out = [];
             let inList = null;  // 'ul' | 'ol' | null
             let inCode = false;
@@ -566,7 +575,9 @@ function prCenterMixin() {
                 const imgMatch = line.match(/^\s*<img\s+[^>]*src\s*=\s*"([^"]+)"[^>]*\/?>\s*$/i);
                 if (imgMatch) {
                     flushList(); flushBlockquote(); flushTable();
-                    const alt = line.match(/alt\s*=\s*"([^"]+)"/i);
+                    // 安全过滤：移除 on* 事件处理器
+                    const safeLine = line.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+                    const alt = safeLine.match(/alt\s*=\s*"([^"]+)"/i);
                     const altText = alt ? alt[1] : '';
                     out.push(`<img src="${this.esc(imgMatch[1])}" alt="${this.esc(altText)}" style="max-width:100%;border-radius:var(--radius);margin:var(--space-3) 0;" />`);
                     continue;
@@ -656,10 +667,20 @@ function prCenterMixin() {
                 const olMatch = line.match(/^[\s]*\d+\.\s+(.*)$/);
                 if (ulMatch || olMatch) {
                     const tag = olMatch ? 'ol' : 'ul';
-                    const content = (olMatch || ulMatch)[1];
-                    if (inList && inList !== tag) flushList();
-                    if (!inList) { out.push(`<${tag}>`); inList = tag; }
-                    out.push(`<li>${this.renderInlineMarkdown(content)}</li>`);
+                    const raw = (olMatch || ulMatch)[1];
+                    // 处理 task list: - [ ] / - [x]
+                    const taskMatch = raw.match(/^\[([ xX])\]\s+(.*)$/);
+                    if (taskMatch) {
+                        const checked = taskMatch[1].toLowerCase() === 'x';
+                        const text = this.renderInlineMarkdown(taskMatch[2]);
+                        if (inList && inList !== tag) flushList();
+                        if (!inList) { out.push(`<${tag}>`); inList = tag; }
+                        out.push(`<li><input type="checkbox" disabled${checked ? ' checked' : ''}> ${text}</li>`);
+                    } else {
+                        if (inList && inList !== tag) flushList();
+                        if (!inList) { out.push(`<${tag}>`); inList = tag; }
+                        out.push(`<li>${this.renderInlineMarkdown(raw)}</li>`);
+                    }
                     continue;
                 } else {
                     flushList();
@@ -685,14 +706,19 @@ function prCenterMixin() {
             // 保存 <img> 标签，跳过 esc
             const preserved = [];
             s = s.replace(/<img\s+[^>]*src\s*=\s*"([^"]+)"[^>]*\/?>/gi, function(match) {
+                // 安全过滤：移除 on* 事件处理器
+                const safe = match.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
                 const idx = preserved.length;
-                preserved.push(match);
+                preserved.push(safe);
                 return `\x00IMG${idx}\x00`;
             });
             // 保存 <a> 标签
             s = s.replace(/<a\s+[^>]*>.*?<\/a>/gi, function(match) {
+                // 安全过滤：移除 on* 事件处理器和 javascript: 链接
+                let safe = match.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+                safe = safe.replace(/\bhref\s*=\s*(?:"javascript:[^"]*"|'javascript:[^']*')/gi, 'href="#"');
                 const idx = preserved.length;
-                preserved.push(match);
+                preserved.push(safe);
                 return `\x00HTML${idx}\x00`;
             });
 
@@ -725,6 +751,10 @@ function prCenterMixin() {
             });
             // 裸链接 — 只允许 http/https
             s = s.replace(/(^|[^"\'>=])(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+            // 安全过滤：移除所有 HTML 标签上的 on* 事件处理器和 javascript: URL
+            s = s.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+            s = s.replace(/\bhref\s*=\s*(?:"javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi, 'href="#"');
+            s = s.replace(/\bsrc\s*=\s*(?:"javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi, 'src="#"');
             return s;
         },
 

@@ -482,3 +482,71 @@ def resolve_ref(req: ResolveRefRequest, db: Session = Depends(get_db)):
         pass
 
     raise HTTPException(status_code=404, detail=f"在 {repo_path} 中未找到 #{number}")
+
+
+class LinkToWatchlistRequest(BaseModel):
+    """从 watchlist 关联到个人任务的请求"""
+    watchlist_item_type: str  # 'issue' or 'pr'
+    watchlist_number: int
+    watchlist_title: str = ""
+    task_id: Optional[int] = None  # 关联已有任务
+    new_task_title: Optional[str] = None  # 或创建新任务
+    new_task_description: str = ""
+    new_task_source: str = "self"  # 任务类型（来源）: self/team/community/meeting
+
+
+@router.post("/link-to-watchlist")
+async def link_to_watchlist(req: LinkToWatchlistRequest, db: Session = Depends(get_db)):
+    """从 watchlist 关联到个人任务（双向关联）
+
+    支持两种模式：
+    1. 传入 task_id → 关联到已有任务
+    2. 传入 new_task_title → 创建新任务并自动关联
+    """
+    from app.config import Config
+
+    now = _utcnow()
+    repo_path = f"{Config.GITHUB_OWNER}/{Config.GITHUB_REPO}"
+    ref = {
+        "type": req.watchlist_item_type,
+        "number": req.watchlist_number,
+        "repo": "vllm",
+        "url": f"https://github.com/{repo_path}/{ 'pull' if req.watchlist_item_type == 'pr' else 'issues' }/{req.watchlist_number}",
+        "title": req.watchlist_title or "",
+    }
+
+    if req.task_id:
+        # 模式 1：关联到已有任务
+        task = db.query(PersonalTask).filter(PersonalTask.id == req.task_id).first()
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        refs = task.related_refs or []
+        # 去重：已存在相同 type+number 则不重复添加
+        if not any(
+            r.get("type") == ref["type"] and r.get("number") == ref["number"]
+            for r in refs
+        ):
+            refs.append(ref)
+            task.related_refs = refs
+            task.updated_at = now
+        db.commit()
+        db.refresh(task)
+        return task.to_dict()
+    elif req.new_task_title:
+        # 模式 2：创建新任务
+        task = PersonalTask(
+            title=req.new_task_title.strip(),
+            description=req.new_task_description or "",
+            source=req.new_task_source,
+            priority="P2",
+            status="todo",
+            related_refs=[ref],
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        return task.to_dict()
+    else:
+        raise HTTPException(status_code=400, detail="Must provide task_id or new_task_title")

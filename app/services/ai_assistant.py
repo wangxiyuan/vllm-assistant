@@ -348,12 +348,12 @@ Return valid JSON only."""
 - 保持原文的语气（疑问、陈述、强调等）
 
 原文（{'Issue' if item_type == 'issue' else 'PR'} 描述）：
-{text[:8000]}
+{text}
 
 翻译："""
 
         try:
-            content = self._chat(prompt, max_tokens=8192, temperature=0.1)
+            content = self._chat(prompt, max_tokens=65536, temperature=0.1)
             return content.strip() if content else text
         except Exception:
             logger.exception("translate failed")

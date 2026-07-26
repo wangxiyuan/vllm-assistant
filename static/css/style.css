@@ -392,6 +392,104 @@ code, kbd, samp {
     border-top: 1px solid var(--border-faint);
 }
 
+/* ── Nav user manager button ── */
+.nav-user-btn {
+    border-top: 1px solid var(--border-faint);
+    margin-top: 4px;
+    padding-top: 8px;
+}
+
+/* ── Item title clickable (cursor pointer) ── */
+.item-title-clickable {
+    cursor: pointer;
+}
+
+/* ── Arrow icon color ── */
+.arrow-tertiary {
+    color: var(--text-tertiary);
+}
+
+/* ── Refresh button spacing ── */
+/* ── Danger text button ── */
+.btn-danger-text {
+    color: var(--signal-red);
+}
+
+/* ── Report icon ── */
+.report-icon {
+    color: var(--text-tertiary);
+}
+
+/* ── Empty icon font ── */
+.empty-icon-mono {
+    font-family: var(--font-mono);
+}
+
+/* ── Stat grid no bottom margin ── */
+.stat-grid-mb0 {
+    margin-bottom: 0;
+}
+
+/* ── Chart panel hint ── */
+.chart-panel-hint {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+}
+
+/* ── Panel title tabs spacing ── */
+.panel-title .tabs {
+    margin-left: 12px;
+}
+
+/* ── Tabs no margin ── */
+.tabs-m0 {
+    margin: 0;
+}
+
+/* ── Tooltip inline-block host ── */
+.tt-host-inline {
+    display: inline-block;
+}
+
+/* ── Watchlist assignee badge ── */
+.watchlist-assignee {
+    font-size: 11px;
+    padding: 1px 6px;
+    background: var(--bg-elev-2);
+    color: var(--text-secondary);
+}
+
+/* ── Filter bar with border and flex ── */
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border-faint);
+}
+
+/* ── Ref input flex container ── */
+.ref-input-flex {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+.ref-input-field {
+    flex: 1;
+    min-width: 200px;
+    border: none;
+    outline: none;
+    background: transparent;
+}
+
+/* ── Assignee select min-width ── */
+.select-assignee {
+    min-width: 90px;
+}
+
 .sidebar-footer {
     margin-top: auto;
     padding: var(--space-3) var(--space-5);
@@ -399,6 +497,19 @@ code, kbd, samp {
     font-size: var(--text-sm);
     color: var(--text-tertiary);
     font-family: var(--font-mono);
+}
+.sidebar-version {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+.sidebar-shortcuts {
+    position: relative;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-disabled);
+    cursor: help;
 }
 .sidebar-footer-row {
     display: flex;
@@ -438,7 +549,102 @@ code, kbd, samp {
 
 .amber { color: var(--amber-bright); }
 
-/* ── Custom tooltips (replace native title) ── */
+/* ── Sync status in header ── */
+.sync-status-header {
+    margin-right: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.sync-status-header .sync-countdown {
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    display: inline-flex;
+    align-items: center;
+}
+.sync-status-header .sync-countdown::before {
+    content: "·";
+    margin: 0 5px;
+    color: var(--text-disabled);
+}
+.sync-dot-wrap {
+    flex-shrink: 0;
+}
+
+/* ── Contributor search (PR Center) ── */
+.contrib-search {
+    position: relative;
+    min-width: 160px;
+}
+.contrib-search-input {
+    width: 100%;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+.contrib-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border-faint);
+    border-radius: var(--radius-md);
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: var(--z-modal);
+    margin-top: 2px;
+    box-shadow: var(--shadow-lg);
+}
+.contrib-dropdown-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    transition: background var(--t-fast);
+}
+.contrib-dropdown-item:hover {
+    background: var(--bg-elev-2);
+}
+.contrib-dropdown-item.active {
+    background: var(--amber-glow-soft);
+}
+.contrib-dropdown-item .check {
+    margin-left: auto;
+    color: var(--amber);
+}
+.contrib-dropdown-empty {
+    padding: 12px;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    text-align: center;
+}
+.contrib-current {
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.contrib-current-all {
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+.contrib-github-id {
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+.contrib-clear-btn {
+    color: var(--signal-red);
+    font-size: 11px;
+}
 .sync-status .tt,
 .tt-host > .tt {
     position: absolute;
@@ -489,6 +695,66 @@ code, kbd, samp {
 .tt-host > .tt::after {
     left: 12px;
     transform: none;
+}
+/* ── Right-aligned tooltip (for header buttons near viewport edge) ── */
+.tt-host-right > .tt {
+    left: auto;
+    right: 0;
+    transform: none;
+}
+.tt-host-right > .tt::after {
+    left: auto;
+    right: 8px;
+    transform: none;
+}
+
+/* ── Global mouse-follow tooltip ── */
+.global-tooltip {
+    position: fixed;
+    z-index: var(--z-tooltip);
+    pointer-events: none;
+    background: var(--bg-elev-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    box-shadow: var(--shadow-lg);
+    line-height: 1.6;
+}
+
+/* ── Watchlist note display ── */
+.watchlist-note {
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-elev-2);
+    padding: 1px 8px;
+    border-radius: var(--radius-xs);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.watchlist-note svg {
+    flex-shrink: 0;
+}
+
+/* ── Linked tasks in watchlist ── */
+.linked-tasks {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.linked-tasks-label {
+    font-size: 10px;
+    color: var(--text-tertiary);
 }
 
 /* ── Sidebar collapsed ── */
@@ -763,7 +1029,9 @@ code, kbd, samp {
 }
 .btn-starred:hover {
     background: var(--amber-glow-strong);
+    border-color: var(--amber-dim);
     color: var(--amber);
+    box-shadow: var(--shadow-sm);
 }
 
 /* ── Sizes ── */
@@ -1035,6 +1303,19 @@ code, kbd, samp {
     transform: translateX(14px);
     background: var(--amber);
 }
+.toggle-sm .toggle-track {
+    width: 24px;
+    height: 14px;
+}
+.toggle-sm .toggle-track::after {
+    width: 8px;
+    height: 8px;
+    top: 2px;
+    left: 2px;
+}
+.toggle-sm input:checked + .toggle-track::after {
+    transform: translateX(10px);
+}
 
 /* =====================================================================
    PANELS / CARDS
@@ -1090,6 +1371,19 @@ code, kbd, samp {
 .panel-body {
     padding: var(--space-3);
 }
+.panel-body-nopad {
+    padding: 0;
+}
+.panel-body-wide {
+    padding: 40px;
+    text-align: center;
+}
+.panel-body-pad {
+    padding: var(--space-5);
+}
+.panel-sub-header {
+    border-top: none;
+}
 
 /* =====================================================================
    TABS
@@ -1131,6 +1425,10 @@ code, kbd, samp {
 .tab-sm {
     padding: 3px 8px;
     font-size: 11px;
+}
+.tab-xs {
+    padding: 2px 6px;
+    font-size: 10px;
 }
 .tab .badge {
     font-family: var(--font-mono);
@@ -1604,6 +1902,16 @@ a.item-title:hover { color: var(--amber-bright); }
     animation: skeleton-shimmer 1.4s ease-in-out infinite;
     border-radius: var(--radius-sm);
 }
+.skeleton-block {
+    background: linear-gradient(90deg, var(--bg-elev-2), var(--bg-elev-3), var(--bg-elev-2));
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+    width: 100%;
+}
+.drawer-skeleton {
+    padding: 24px 20px;
+}
 @keyframes skeleton-shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
@@ -1916,7 +2224,10 @@ a.item-title:hover { color: var(--amber-bright); }
 }
 .ai-result-body strong { color: var(--text-primary); font-weight: 600; }
 
-.severity-critical { color: var(--signal-red); font-weight: 600; }
+.load-more-wrap {
+    padding: 12px;
+    text-align: center;
+}
 .severity-important { color: var(--signal-yellow); font-weight: 600; }
 .severity-minor { color: var(--text-tertiary); }
 
@@ -1952,6 +2263,11 @@ a.item-title:hover { color: var(--amber-bright); }
 .pr-body h2 { font-size: var(--text-xl); }
 .pr-body h3 { font-size: var(--text-lg); }
 .pr-body h4 { font-size: var(--text-base); }
+.pr-body input[type="checkbox"] {
+    margin-right: var(--space-2);
+    accent-color: var(--accent);
+    transform: translateY(1px);
+}
 .pr-body p { margin: 0 0 var(--space-3); }
 .pr-body ul, .pr-body ol { margin: 0 0 var(--space-4); padding-left: var(--space-6); }
 .pr-body li { margin-bottom: var(--space-1); }
@@ -2120,7 +2436,7 @@ a.item-title:hover { color: var(--amber-bright); }
     overflow-x: auto;
     max-height: 500px;
     overflow-y: auto;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
 }
 .diff-line {
     display: flex;
@@ -2238,6 +2554,22 @@ a.item-title:hover { color: var(--amber-bright); }
     font-weight: 600;
     margin-bottom: var(--space-1);
     font-size: var(--text-base);
+}
+.toast-undo {
+    margin-left: auto;
+    background: none;
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
+    transition: all var(--t-base);
+}
+.toast-undo:hover {
+    background: var(--amber-glow-soft);
 }
 .toast-msg {
     font-size: var(--text-sm);
@@ -2515,9 +2847,70 @@ a.item-title:hover { color: var(--amber-bright); }
     cursor: not-allowed;
 }
 
-/* =====================================================================
-   TODO / TASK KANBAN
-   ===================================================================== */
+/* ── Monthly contribution bar chart ── */
+.chart-scroll {
+    overflow-x: auto;
+    padding-bottom: 8px;
+}
+.chart-bars {
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+    height: 140px;
+    padding: 12px 4px 28px;
+    min-width: 100%;
+}
+.chart-bar-col {
+    flex: 0 0 36px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+}
+.chart-bar {
+    width: 28px;
+    border-radius: 2px 2px 0 0;
+    transition: height 0.3s;
+}
+.chart-bar.active {
+    background: var(--amber);
+}
+.chart-bar.inactive {
+    background: var(--border-faint);
+}
+.chart-bar-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-tertiary);
+    position: absolute;
+    bottom: -22px;
+    white-space: nowrap;
+}
+.chart-bar-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.chart-legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 14px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+}
+.chart-legend-dot {
+    color: var(--amber);
+}
+.chart-legend-muted {
+    color: var(--text-tertiary);
+}
+.chart-hint {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+}
 .todo-add-form {
     display: flex;
     flex-direction: column;
@@ -3148,6 +3541,7 @@ pre code.embedded-code.outdated {
     flex: 0 0 220px;
     position: sticky;
     top: 0;
+    z-index: 1;
     max-height: calc(100vh - 120px);
     overflow-y: auto;
     padding: var(--space-2) 0 var(--space-2) var(--space-4);
@@ -3635,7 +4029,6 @@ pre code.embedded-code.outdated {
     .kanban { grid-template-columns: 1fr; }
     .drawer-wide { width: 100vw; max-width: none; }
     .hamburger { display: inline-flex; align-items: center; justify-content: center; }
-    .mobile-overlay { display: flex; }
 
     .article-content-wrapper { flex-direction: column; }
     .article-toc-sidebar {
@@ -3658,9 +4051,8 @@ pre code.embedded-code.outdated {
     .auth-card { width: 92vw; max-width: 380px; padding: var(--space-8) var(--space-7); }
 }
 
-/* Mobile sidebar overlay */
+/* Mobile sidebar overlay — hidden by default via x-cloak, shown via x-show */
 .mobile-overlay {
-    display: none;
     position: fixed;
     inset: 0;
     z-index: 150;
@@ -3687,16 +4079,29 @@ pre code.embedded-code.outdated {
    REDUCED MOTION
    ===================================================================== */
 @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
+    .view,
+    .modal,
+    .drawer,
+    .toast,
+    .empty-state,
+    .list-item,
+    .loading-bar,
+    .auth-card,
+    .mobile-sidebar,
+    .mobile-overlay,
+    .stat-card,
+    .nav-item,
+    .task-card,
+    .subtask-item,
+    .tt-host > .tt,
+    .sync-status .tt {
+        animation: none !important;
         transition-duration: 0.01ms !important;
     }
-    .brand-logo::before,
-    .sync-dot.syncing,
-    .list-item {
+    .sync-dot.syncing {
+        animation: none !important;
+    }
+    .brand-logo::before {
         animation: none !important;
     }
 }

@@ -59,8 +59,27 @@ function app() {
         watchlistEditNote: '',
         watchlistEditAssigneeId: null,
         watchlistEditSaving: false,
+        // 编辑 watchlist 时关联任务（支持多选）
+        watchlistEditTaskList: [],
+        watchlistEditLinkTaskId: '',
+        watchlistEditSelectedTasks: [],  // [{id, title, ...}]
+        watchlistEditShowCreate: false,  // 是否显示创建新任务表单
+        watchlistEditNewTaskTitle: '',
+        watchlistEditNewTaskSource: 'self',
+        watchlistEditNewTaskPriority: 'P2',
         manualAddNote: '',
         manualAddAssigneeId: null,
+        // 手动添加 watchlist 时关联任务
+        manualAddLinkTaskMode: 'none',  // 'none' | 'existing' | 'new'
+        manualAddTaskSearchQuery: '',
+        manualAddTaskSearchResults: [],
+        manualAddTaskSearchLoading: false,
+        manualAddTaskOpen: false,
+        manualAddNewTaskTitle: '',
+        manualAddNewTaskPriority: 'P2',
+        manualAddNewTaskSource: 'self',
+        manualAddSelectedTaskId: null,
+        manualAddSelectedTaskTitle: '',
 
         // 打开特别关注中的 PR -> 触发 PR drawer
         // watchlist 项字段是 number, openPR 期望 pr_number
@@ -73,7 +92,20 @@ function app() {
                     state: w.state || 'open',
                     watchlist_note: w.note || '',
                     watchlist_assignee_id: w.assignee_id || null,
+                    _linked_tasks: w.linked_tasks || [],
                 });
+            }
+        },
+
+        // ===== 关联任务弹窗 =====
+        // 同步 drawer 中的 _linked_tasks（关联后立即在 drawer 中显示，无需关闭重开）
+        _syncDrawerLinkedTasks(number, itemType) {
+            const updated = this.findWatchlistItem(number, itemType);
+            const tasks = updated?.linked_tasks || [];
+            if (itemType === 'pr' && this.selectedPR?.pr_number === number) {
+                this.selectedPR._linked_tasks = tasks;
+            } else if (itemType === 'issue' && this.selectedIssue?.number === number) {
+                this.selectedIssue._linked_tasks = tasks;
             }
         },
 
@@ -86,6 +118,44 @@ function app() {
         lastSync: null,
         nextSync: null,  // ISO 字符串，来自 /api/status 的 next_run_time
         nowTick: Date.now(),  // 用于驱动倒计时 computed 重算
+
+        // ===== Confirm dialog =====
+        confirmDialog: {
+            show: false,
+            title: '',
+            message: '',
+            confirmText: '确认',
+            cancelText: '取消',
+            danger: false,
+            resolve: null,
+        },
+
+        // 显示确认弹窗，返回 Promise<boolean>
+        showConfirm(opts = {}) {
+            return new Promise((resolve) => {
+                this.confirmDialog = {
+                    show: true,
+                    title: opts.title || '确认操作',
+                    message: opts.message || '',
+                    confirmText: opts.confirmText || '确认',
+                    cancelText: opts.cancelText || '取消',
+                    danger: opts.danger || false,
+                    resolve,
+                };
+            });
+        },
+
+        confirmOk() {
+            const r = this.confirmDialog.resolve;
+            if (r) r(true);
+            this.confirmDialog.show = false;
+        },
+
+        confirmCancel() {
+            const r = this.confirmDialog.resolve;
+            if (r) r(false);
+            this.confirmDialog.show = false;
+        },
 
         // ===== Users state =====
         users: [],
@@ -286,12 +356,22 @@ function app() {
             } finally {
                 this.hideLoading();
             }
-            // 每 5 分钟自动刷新数据
-            setInterval(() => this.silentRefresh(), 5 * 60 * 1000);
-            // 每 30 秒拉取一次下次同步时间（轻量接口）
-            setInterval(() => this.loadSyncStatus(), 30 * 1000);
-            // 每秒 tick 驱动倒计时重算
-            setInterval(() => { this.nowTick = Date.now(); }, 1000);
+            // 统一 tick 驱动：每 30 秒检查一次，同时驱动倒计时和静默刷新
+            let tickCount = 0;
+            setInterval(() => {
+                tickCount++;
+                this.nowTick = Date.now();
+                // 每 30 秒（1 tick）拉取下次同步时间
+                this.loadSyncStatus();
+                // 每 10 个 tick（5 分钟）静默刷新数据
+                if (tickCount % 10 === 0) {
+                    this.silentRefresh();
+                }
+            }, 30000);
+            // 每秒更新 nowTick 驱动倒计时实时刷新
+            setInterval(() => {
+                this.nowTick = Date.now();
+            }, 1000);
         },
 
         // ===== 拉取 scheduler 状态（下次同步时间）=====
@@ -314,6 +394,14 @@ function app() {
         showLoading() { this.loading = true; },
         hideLoading() { this.loading = false; },
 
+        // ===== 自动聚焦弹窗的第一个输入框 =====
+        focusModalInput(selector = '.modal input:not([type="hidden"]), .modal textarea, .modal select') {
+            this.$nextTick(() => {
+                const el = document.querySelector(selector);
+                if (el) setTimeout(() => el.focus(), 100);
+            });
+        },
+
         // ===== Toast system =====
         showToast(title, msg = '', type = 'info', duration = 4000) {
             const id = ++this.toastId;
@@ -321,6 +409,30 @@ function app() {
             setTimeout(() => {
                 this.toasts = this.toasts.filter(t => t.id !== id);
             }, duration);
+        },
+
+        // 显示带"撤销"操作的 Toast
+        showUndoToast(title, msg, undoCallback, duration = 8000) {
+            const id = ++this.toastId;
+            this.toasts.push({id, title, msg, type: 'undo', undo: true, undoCallback});
+            const timer = setTimeout(() => {
+                this.toasts = this.toasts.filter(t => t.id !== id);
+            }, duration);
+            // 存储 timer 以便撤销时清除
+            this.toasts[this.toasts.length - 1]._timer = timer;
+        },
+
+        // 执行撤销
+        executeUndo(id) {
+            const toast = this.toasts.find(t => t.id === id);
+            if (!toast) return;
+            if (toast.undoCallback) {
+                toast.undoCallback();
+            }
+            // 清除自动移除计时器并立即移除 toast
+            if (toast._timer) clearTimeout(toast._timer);
+            this.toasts = this.toasts.filter(t => t.id !== id);
+            this.showToast('已撤销', '', 'success', 2000);
         },
 
         // ===== Auth =====
@@ -354,11 +466,15 @@ function app() {
                 if (this.authToken) {
                     headers['Authorization'] = 'Bearer ' + this.authToken;
                 }
-                // 提取 options 中的 headers/signal，防止被 ...options 覆盖安全字段
-                const { headers: extraHeaders, signal: _, ...restOptions } = options;
+                // 提取 options 中的 headers，防止被 ...options 覆盖安全字段
+                // 合并自定义 signal（如果有，通过 Promise.race 竞争）
+                const { headers: extraHeaders, signal: customSignal, ...restOptions } = options;
+                const signal = customSignal
+                    ? anySignal([controller.signal, customSignal])
+                    : controller.signal;
                 const res = await fetch(path, {
                     headers: { ...headers, ...extraHeaders },
-                    signal: controller.signal,
+                    signal,
                     ...restOptions,
                 });
                 if (res.status === 401) {
@@ -410,6 +526,14 @@ function app() {
         async toggleWatch(number, type, title, url, extra) {
             const key = this._watchKey(number, type);
             if (this.watchlistSet.has(key)) {
+                // 移除前确认，防止误触
+                const ok = await this.showConfirm({
+                    title: '取消关注',
+                    message: `确认将 #${number} 移出特别关注？`,
+                    confirmText: '确认移出',
+                    danger: true,
+                });
+                if (!ok) return;
                 // 移除
                 try {
                     await this.api(`/api/watchlist/${type}/${number}`, { method: 'DELETE' });
@@ -467,10 +591,45 @@ function app() {
                 const key = this._watchKey(item.number, item.item_type);
                 this.watchlistSet.add(key);
                 this.watchlist.unshift(item);
+
+                // 如果选择了关联任务，执行关联
+                if (this.manualAddLinkTaskMode === 'existing' && this.manualAddSelectedTaskId) {
+                    await this.api('/api/personal-todo/link-to-watchlist', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            watchlist_item_type: item.item_type,
+                            watchlist_number: item.number,
+                            watchlist_title: item.title || '',
+                            task_id: this.manualAddSelectedTaskId,
+                        }),
+                    });
+                } else if (this.manualAddLinkTaskMode === 'new' && this.manualAddNewTaskTitle.trim()) {
+                    await this.api('/api/personal-todo/link-to-watchlist', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            watchlist_item_type: item.item_type,
+                            watchlist_number: item.number,
+                            watchlist_title: item.title || '',
+                            new_task_title: this.manualAddNewTaskTitle.trim(),
+                            new_task_source: this.manualAddNewTaskSource || 'self',
+                        }),
+                    });
+                }
+                // 刷新 watchlist 获取 linked_tasks
+                await this.loadWatchlist();
+
                 this.showToast('已加入关注', `#${num} 已加入特别关注`, 'success');
                 this.manualAddNumber = '';
                 this.manualAddNote = '';
                 this.manualAddAssigneeId = null;
+                this.manualAddLinkTaskMode = 'none';
+                this.manualAddTaskSearchQuery = '';
+                this.manualAddTaskSearchResults = [];
+                this.manualAddSelectedTaskId = null;
+                this.manualAddNewTaskTitle = '';
+                this.manualAddNewTaskPriority = 'P2';
+                this.manualAddNewTaskSource = 'self';
+                this.manualAddSelectedTaskTitle = '';
                 // 切换到对应 tab 显示刚添加的项
                 this.watchlistTab = item.item_type;
             } catch (e) {
@@ -480,13 +639,43 @@ function app() {
                 this.showAddWatchlistModal = false;
             }
         },
+        openAddWatchlistModal() {
+            this.showAddWatchlistModal = true;
+            this.focusModalInput();
+            this.loadManualAddTaskList();
+        },
+        // 手动添加 watchlist 时加载任务列表供下拉选择
+        async loadManualAddTaskList() {
+            this.manualAddTaskSearchLoading = true;
+            try {
+                const data = await this.api('/api/personal-todo/tasks?per_page=50&status=all');
+                this.manualAddTaskSearchResults = data.tasks || [];
+            } catch (e) {
+                this.showToast('加载任务列表失败', e.message, 'error');
+            } finally {
+                this.manualAddTaskSearchLoading = false;
+            }
+        },
+        selectManualAddTask(task) {
+            this.manualAddSelectedTaskId = task.id;
+            this.manualAddSelectedTaskTitle = task.title;
+            this.manualAddTaskSearchQuery = '';
+            this.manualAddTaskSearchResults = [];
+        },
 
         // ===== Watchlist item editing (note + assignee) =====
         openWatchlistEditModal(w) {
             this.editingWatchlistItem = w;
             this.watchlistEditNote = w.note || '';
             this.watchlistEditAssigneeId = w.assignee_id || null;
+            this.watchlistEditLinkTaskId = '';
+            this.watchlistEditSelectedTasks = [];
+            this.watchlistEditShowCreate = false;
+            this.watchlistEditNewTaskTitle = '';
+            this.watchlistEditNewTaskSource = 'self';
+            this.watchlistEditNewTaskPriority = 'P2';
             this.showWatchlistEditModal = true;
+            this._loadWatchlistEditTaskList();
         },
 
         closeWatchlistEditModal() {
@@ -494,6 +683,40 @@ function app() {
             this.editingWatchlistItem = null;
             this.watchlistEditNote = '';
             this.watchlistEditAssigneeId = null;
+            this.watchlistEditTaskList = [];
+            this.watchlistEditLinkTaskId = '';
+            this.watchlistEditSelectedTasks = [];
+            this.watchlistEditShowCreate = false;
+            this.watchlistEditNewTaskTitle = '';
+        },
+
+        watchlistEditAddTask() {
+            const id = this.watchlistEditLinkTaskId;
+            if (!id) return;
+            if (id === '__new__') {
+                this.watchlistEditShowCreate = true;
+                this.watchlistEditLinkTaskId = '';
+                return;
+            }
+            // 去重
+            if (this.watchlistEditSelectedTasks.some(t => t.id === parseInt(id, 10))) return;
+            const task = this.watchlistEditTaskList.find(t => t.id === parseInt(id, 10));
+            if (task) {
+                this.watchlistEditSelectedTasks.push(task);
+            }
+            this.watchlistEditLinkTaskId = '';
+        },
+        watchlistEditRemoveTask(taskId) {
+            this.watchlistEditSelectedTasks = this.watchlistEditSelectedTasks.filter(t => t.id !== taskId);
+        },
+
+        async _loadWatchlistEditTaskList() {
+            try {
+                const data = await this.api('/api/personal-todo/tasks?per_page=50&status=all');
+                this.watchlistEditTaskList = data.tasks || [];
+            } catch (_) {
+                // 静默失败
+            }
         },
 
         async saveWatchlistItem() {
@@ -524,10 +747,59 @@ function app() {
                     this.selectedIssue.watchlist_note = updated.note || '';
                     this.selectedIssue.watchlist_assignee_id = updated.assignee_id;
                 }
+                // 如果有关联任务操作，执行关联
+                for (const t of this.watchlistEditSelectedTasks) {
+                    await this.api('/api/personal-todo/link-to-watchlist', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            watchlist_item_type: w.item_type,
+                            watchlist_number: w.number,
+                            watchlist_title: w.title || '',
+                            task_id: t.id,
+                        }),
+                    });
+                }
+                await this.loadWatchlist();
+                this._syncDrawerLinkedTasks(w.number, w.item_type);
                 this.showToast('关注信息已保存', '', 'success');
                 this.closeWatchlistEditModal();
             } catch (e) {
                 this.showToast('保存失败', e.message, 'error');
+            } finally {
+                this.watchlistEditSaving = false;
+            }
+        },
+
+        async saveWatchlistItemAndCreateTask() {
+            if (!this.editingWatchlistItem || !this.watchlistEditNewTaskTitle.trim()) return;
+            if (this.watchlistEditSaving) return;
+            const w = this.editingWatchlistItem;
+            const note = this.watchlistEditNote.trim();
+            const assignee_id = this.watchlistEditAssigneeId;
+            this.watchlistEditSaving = true;
+            try {
+                // 先保存备注/责任人
+                await this.api(`/api/watchlist/${w.item_type}/${w.number}/note`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ note, assignee_id }),
+                });
+                // 创建任务并关联
+                await this.api('/api/personal-todo/link-to-watchlist', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        watchlist_item_type: w.item_type,
+                        watchlist_number: w.number,
+                        watchlist_title: w.title || '',
+                        new_task_title: this.watchlistEditNewTaskTitle.trim(),
+                        new_task_source: this.watchlistEditNewTaskSource,
+                    }),
+                });
+                await this.loadWatchlist();
+                this._syncDrawerLinkedTasks(w.number, w.item_type);
+                this.showToast('已保存并创建任务', '', 'success');
+                this.closeWatchlistEditModal();
+            } catch (e) {
+                this.showToast('操作失败', e.message, 'error');
             } finally {
                 this.watchlistEditSaving = false;
             }
@@ -547,6 +819,11 @@ function app() {
             this.showUserManager = true;
             this.resetUserForm();
             this.loadUsers();
+            // 聚焦用户名字段
+            this.$nextTick(() => {
+                const el = document.querySelector('#user-manager-name');
+                if (el) setTimeout(() => el.focus(), 100);
+            });
         },
 
         closeUserManager() {
@@ -650,6 +927,10 @@ function app() {
 
         // ===== View switching =====
         switchView(view) {
+            // 如果文章编辑器打开且有未保存修改，阻止切换
+            if (this.articleEditorOpen && typeof this.articleFormDirty !== 'undefined' && this.articleFormDirty) {
+                if (!confirm('文章有未保存的修改，确定要放弃吗？')) return;
+            }
             this.currentView = view;
             this.searchQuery = '';
             this.communityPage = 1;
@@ -687,6 +968,9 @@ function app() {
             // Number keys 1-7 to switch views (when not in input)
             const tag = e.target.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            // 保护 contenteditable 元素（如文章编辑器），防止误触发全局快捷键
+            if (e.target.closest && e.target.closest('[contenteditable="true"]')) return;
+            if (e.target.isContentEditable) return;
             if (e.metaKey || e.ctrlKey || e.altKey) return;
 
             if (e.key === '1') { e.preventDefault(); this.switchView('community'); }
@@ -697,11 +981,87 @@ function app() {
             else if (e.key === '6') { e.preventDefault(); this.switchView('articles'); }
             else if (e.key === '7') { e.preventDefault(); this.switchView('anatomy'); }
             else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); this.refreshAll(); }
+            // 全局 Esc：关闭当前打开的弹窗或抽屉（从最内层到最外层）
+            else if (e.key === 'Escape') {
+                this.handleGlobalEsc();
+            }
+        },
+
+        // ===== 全局 Esc 关闭逻辑（从最内层到最外层）=====
+        handleGlobalEsc() {
+            // 1. 文章编辑器的预览模式
+            if (typeof this.closePreview === 'function' && this.articleEditorOpen && this.articleEditorSubView === 'preview') {
+                this.closePreview(); return;
+            }
+            // 2. 插入代码引用弹窗
+            if (this.showInsertRef && typeof this.closeInsertRef === 'function') {
+                this.closeInsertRef(); return;
+            }
+            // 3. 文章详情
+            if (this.selectedArticle && typeof this.closeArticleView === 'function') {
+                this.closeArticleView(); return;
+            }
+            // 4. 文章编辑器
+            if (this.articleEditorOpen && typeof this._confirmDiscard === 'function' && this._confirmDiscard()) {
+                this.articleEditorOpen = false; this.articleFormSnapshot = null; return;
+            }
+            // 5. PR 抽屉
+            if (this.selectedPR && typeof this.closePR === 'function') {
+                this.closePR(); return;
+            }
+            // 6. Issue 抽屉
+            if (this.selectedIssue && typeof this.closeIssue === 'function') {
+                this.closeIssue(); return;
+            }
+            // 7. 任务详情抽屉
+            if (this.selectedTask && typeof this.closeTask === 'function') {
+                this.closeTask(); return;
+            }
+            // 8. 报告查看弹窗
+            if (this.selectedReport && typeof this.closeReport === 'function') {
+                this.closeReport(); return;
+            }
+            // 9. 各个模态弹窗（从最内层到最外层）
+            if (this.showAddTaskModal) { this.showAddTaskModal = false; return; }
+            if (this.showIntelModal) { this.showIntelModal = false; return; }
+            if (this.showAddWatchlistModal) { this.showAddWatchlistModal = false; return; }
+            if (this.showWatchlistEditModal && typeof this.closeWatchlistEditModal === 'function') {
+                this.closeWatchlistEditModal(); return;
+            }
+            if (this.showUserManager && typeof this.closeUserManager === 'function') {
+                this.closeUserManager(); return;
+            }
+            if (this.showOperatorEditor && typeof this.closeOperatorEditor === 'function') {
+                this.closeOperatorEditor(); return;
+            }
+            if (this.showModelEditor && typeof this.closeModelEditor === 'function') {
+                this.closeModelEditor(); return;
+            }
+            if (this.showCategoryManager) { this.showCategoryManager = false; return; }
+            if (this.showOperatorDetail && typeof this.closeOperatorDetail === 'function') {
+                this.closeOperatorDetail(); return;
+            }
+            if (this.showModelDetail && typeof this.closeModelDetail === 'function') {
+                this.closeModelDetail(); return;
+            }
+            // 10. 移动端侧边栏
+            if (this.mobileMenuOpen) { this.mobileMenuOpen = false; }
         },
 
         // ===== Search input handler =====
         onSearchInput(e) {
             this.communityPage = 1;
+            // 将全局搜索词同步到各个视图的内部搜索
+            const q = (this.searchQuery || '').toLowerCase().trim();
+            if (this.currentView === 'anatomy') {
+                if (typeof this.operatorSearch !== 'undefined') this.operatorSearch = q;
+                if (typeof this.modelSearch !== 'undefined') this.modelSearch = q;
+                // 触发各自视图的搜索
+                if (typeof this.loadOperators === 'function') this.loadOperators();
+                if (typeof this.loadModels === 'function') this.loadModels();
+            } else if (this.currentView === 'articles' && typeof this.loadArticles === 'function') {
+                // articles 视图已有 articleFilterArea，搜索词可以用于后续筛选
+            }
         },
 
         // ===== Refresh all data =====
@@ -743,7 +1103,8 @@ function app() {
                     this.loadCommunityData(),
                 ]);
                 this.lastSync = new Date().toISOString();
-                this.communityLoadingMore = false;
+                // 不重置 communityLoadingMore，避免与"加载更多"状态冲突
+                // 如果用户正在加载更多，静默刷新不应打断
             } catch (_) {}
         },
 
@@ -753,6 +1114,48 @@ function app() {
             return String(s).replace(/[&<>"']/g, c => ({
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
             }[c]));
+        },
+
+        // ===== Searchable select state factory =====
+        // 创建一个可搜索的选择器状态对象，用于替代大列表 <select>
+        createSearchableSelect(initialValue = null) {
+            return {
+                _value: initialValue,
+                _search: '',
+                _open: false,
+                get value() { return this._value; },
+                set value(v) { this._value = v; },
+                get search() { return this._search; },
+                set search(s) { this._search = s; },
+                get open() { return this._open; },
+                set open(o) { this._open = o; },
+                // 过滤用户列表，排除当前已选
+                filtered(users) {
+                    if (!this._search.trim()) return users;
+                    const q = this._search.toLowerCase().trim();
+                    return users.filter(u =>
+                        (u.name || '').toLowerCase().includes(q) ||
+                        (u.github_id || '').toLowerCase().includes(q)
+                    );
+                },
+                select(user) {
+                    this._value = user ? user.id : null;
+                    this._search = user ? user.name : '';
+                    this._open = false;
+                },
+                clear() {
+                    this._value = null;
+                    this._search = '';
+                    this._open = false;
+                },
+                // 初始化：如果已有值，回填显示名称
+                initFromValue(users) {
+                    if (this._value) {
+                        const u = users.find(usr => usr.id === this._value);
+                        if (u) this._search = u.name;
+                    }
+                },
+            };
         },
 
         // ===== Markdown-ish renderer for AI JSON results =====
@@ -813,6 +1216,20 @@ function app() {
             return area ? area.name : areaId;
         },
     };
+}
+
+// ===== AbortSignal 合并工具 =====
+// 将多个 AbortSignal 合并为一个，任一 signal 触发 abort 则合并 signal 也触发
+function anySignal(signals) {
+    const controller = new AbortController();
+    for (const signal of signals) {
+        if (signal.aborted) {
+            controller.abort(signal.reason);
+            return controller.signal;
+        }
+        signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+    }
+    return controller.signal;
 }
 
 // 正确合并多个 mixin：用 descriptors 保留 getter，避免 Object.assign 立即求值 getter 导致报错

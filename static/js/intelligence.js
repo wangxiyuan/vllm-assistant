@@ -125,20 +125,20 @@ function intelligenceMixin() {
             }
         },
 
-        // ===== 轮询报告状态 =====
+        // ===== 轮询报告状态（指数退避）=====
         pollReportStatus(reportId) {
             if (this.pollingTimer) clearInterval(this.pollingTimer);
             const startTime = Date.now();
             const timeout = 600000; // 10 分钟超时（agent 多轮调用耗时较长）
-            this.pollingTimer = setInterval(async () => {
+            let attempt = 0;
+            const poll = async () => {
+                attempt++;
                 // 用户已离开洞察面板且没在看报告弹窗，停止轮询
                 if (this.currentView !== 'intelligence' && !this.selectedReport) {
-                    clearInterval(this.pollingTimer);
                     this.pollingTimer = null;
                     return;
                 }
                 if (Date.now() - startTime > timeout) {
-                    clearInterval(this.pollingTimer);
                     this.pollingTimer = null;
                     return;
                 }
@@ -160,18 +160,22 @@ function intelligenceMixin() {
                         this.reportDetails = report;
                     }
                     if (report.status === 'completed' || report.status === 'failed') {
-                        clearInterval(this.pollingTimer);
                         this.pollingTimer = null;
                         if (report.status === 'completed') {
                             this.showToast('报告已生成', report.title, 'success');
                         } else {
                             this.showToast('报告生成失败', report.error_message || '未知错误', 'error');
                         }
+                        return;
                     }
                 } catch (_) {
                     // 静默失败，继续轮询
                 }
-            }, 3000);
+                // 指数退避：3s, 6s, 12s, 24s, 30s max
+                const delay = Math.min(3000 * Math.pow(2, attempt - 1), 30000);
+                this.pollingTimer = setTimeout(poll, delay);
+            };
+            poll();
         },
 
         // ===== 查看报告 =====
@@ -196,13 +200,38 @@ function intelligenceMixin() {
         // ===== 删除报告 =====
         async deleteReport(report) {
             if (!confirm(`确认删除报告 "${report.title}"？此操作不可撤销。`)) return;
+            const backup = { ...report };
             try {
                 await this.api(`/api/intelligence/reports/${report.id}`, { method: 'DELETE' });
                 this.intelReports = this.intelReports.filter(r => r.id !== report.id);
                 if (this.selectedReport && this.selectedReport.id === report.id) {
                     this.closeReport();
                 }
-                this.showToast('已删除', '报告已删除', 'info');
+                // 撤销：重新生成报告（仅保留基本信息，不完全恢复）
+                this.showUndoToast('已删除', report.title, async () => {
+                    try {
+                        const payload = {
+                            task_id: backup.task_id,
+                            sources: backup.sources || ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'],
+                            excluded_sources: backup.excluded_sources || [],
+                            extra_prompt: backup.extra_prompt || '',
+                        };
+                        if (backup.title) payload.title = backup.title;
+                        const result = await this.api('/api/intelligence/generate', {
+                            method: 'POST',
+                            body: JSON.stringify(payload),
+                        }, 30000);
+                        this.intelReports.unshift({
+                            id: result.report_id, title: result.title || backup.title,
+                            task_id: backup.task_id, sources: payload.sources,
+                            created_at: new Date().toISOString(), status: 'generating', word_count: 0,
+                        });
+                        this.pollReportStatus(result.report_id);
+                        this.showToast('已重新生成', '', 'success');
+                    } catch (e) {
+                        this.showToast('恢复失败', e.message, 'error');
+                    }
+                }, 10000);
             } catch (e) {
                 this.showToast('删除失败', e.message, 'error');
             }

@@ -3,6 +3,7 @@
 function personalTodoMixin() {
     return {
         // ===== 任务列表 =====
+        refSuggestOpen: false,  // 编辑任务时关联引用下拉选择
         todoTasks: [],
         todoStats: { by_status: { todo: 0, in_progress: 0, done: 0 }, by_priority: { P0: 0, P1: 0, P2: 0, P3: 0 } },
         todoLoading: false,
@@ -10,6 +11,7 @@ function personalTodoMixin() {
         todoFilterPriority: 'all',
         todoSortBy: 'created',
         todoSortOrder: 'desc',
+        todoUseKanban: true,  // 默认卡片视图，允许用户切换
 
         // ===== 快速添加任务表单 =====
         showAddTaskModal: false,
@@ -148,7 +150,13 @@ function personalTodoMixin() {
         // ===== 编辑任务 =====
         startEditTask() {
             if (!this.selectedTaskDetails) return;
-            this.editTaskForm = { ...this.selectedTaskDetails };
+            // 深拷贝 related_refs，防止编辑时同步修改原始数据
+            const details = this.selectedTaskDetails;
+            this.editTaskForm = {
+                ...details,
+                related_refs: details.related_refs ? JSON.parse(JSON.stringify(details.related_refs)) : [],
+                tags: details.tags ? [...details.tags] : [],
+            };
             this.editingTask = true;
         },
         cancelEditTask() {
@@ -165,11 +173,16 @@ function personalTodoMixin() {
                 const updates = {};
                 const fields = ['title', 'description', 'source', 'priority', 'status', 'area', 'assignee_id', 'due_date', 'related_refs'];
                 for (const f of fields) {
-                    if (this.editTaskForm[f] !== this.selectedTaskDetails[f]) {
-                        let val = this.editTaskForm[f];
-                        // 空字符串归一为 null，与后端一致
-                        if (val === '') val = null;
-                        updates[f] = val;
+                    let oldVal = this.selectedTaskDetails[f];
+                    let newVal = this.editTaskForm[f];
+                    // 空字符串归一为 null，与后端一致
+                    if (newVal === '') newVal = null;
+                    // 数组用 JSON 序列化做深度比较，避免引用比较导致漏判
+                    const isEqual = Array.isArray(oldVal) && Array.isArray(newVal)
+                        ? JSON.stringify(oldVal) === JSON.stringify(newVal)
+                        : oldVal === newVal;
+                    if (!isEqual) {
+                        updates[f] = newVal;
                     }
                 }
                 if (Object.keys(updates).length === 0) {
@@ -193,16 +206,40 @@ function personalTodoMixin() {
             }
         },
 
-        // ===== 删除任务 =====
+        // ===== 删除任务（带撤销）=====
         async deleteTask(task) {
             if (!confirm(`确认删除任务 #${task.id} "${task.title}"？`)) return;
+            const backup = { ...task };
             try {
                 await this.api(`/api/personal-todo/tasks/${task.id}`, { method: 'DELETE' });
                 this.todoTasks = this.todoTasks.filter(t => t.id !== task.id);
                 if (this.selectedTaskDetails && this.selectedTaskDetails.id === task.id) {
                     this.closeTask();
                 }
-                this.showToast('已删除', '任务已删除', 'info');
+                // 提供撤销
+                this.showUndoToast('已删除', `#${task.id} ${task.title}`, async () => {
+                    try {
+                        const result = await this.api('/api/personal-todo/tasks', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                title: backup.title,
+                                description: backup.description,
+                                source: backup.source || 'self',
+                                priority: backup.priority || 'P2',
+                                area: backup.area || '',
+                                assignee_id: backup.assignee_id || null,
+                                due_date: backup.due_date || '',
+                                related_refs: backup.related_refs || [],
+                                status: backup.status || 'todo',
+                            }),
+                        });
+                        this.todoTasks.unshift(result);
+                        this.showToast('已恢复', `#${result.id} ${result.title}`, 'success');
+                        this.loadTodoTasks();
+                    } catch (e) {
+                        this.showToast('恢复失败', e.message, 'error');
+                    }
+                }, 10000);
             } catch (e) {
                 this.showToast('删除失败', e.message, 'error');
             }
@@ -338,13 +375,22 @@ function personalTodoMixin() {
             const map = { todo: '待处理', in_progress: '进行中', done: '已完成', cancelled: '已取消' };
             return map[status] || status;
         },
-        // 今天日期（YYYY-MM-DD），用于过期判断
-        todayISO() {
+        // 今天日期（YYYY-MM-DD），用于过期判断。由 nowTick 驱动重算，避免每次调用 new Date()
+        _todayCache: null,
+        _todayCacheDate: null,
+        get todayISO() {
+            // 引用 nowTick 让 Alpine 在 tick 时重算
+            void this.nowTick;
             const d = new Date();
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${y}-${m}-${day}`;
+            const todayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+            if (this._todayCacheDate !== todayKey) {
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                this._todayCache = `${y}-${m}-${day}`;
+                this._todayCacheDate = todayKey;
+            }
+            return this._todayCache;
         },
         priorityClass(priority) {
             return 'priority-' + (priority || 'P2').toLowerCase();
@@ -493,7 +539,10 @@ function personalTodoMixin() {
         // ===== 子任务编辑 =====
         startEditSubtask(subtask) {
             this.editingSubtaskId = subtask.id;
-            this.editSubtaskForm = { ...subtask };
+            this.editSubtaskForm = {
+                ...subtask,
+                related_refs: subtask.related_refs ? JSON.parse(JSON.stringify(subtask.related_refs)) : [],
+            };
         },
         cancelEditSubtask() {
             this.editingSubtaskId = null;
@@ -511,10 +560,14 @@ function personalTodoMixin() {
                 const updates = {};
                 const fields = ['title', 'priority', 'source', 'assignee_id', 'status', 'related_refs', 'area'];
                 for (const f of fields) {
-                    if (this.editSubtaskForm[f] !== subtask[f]) {
-                        let val = this.editSubtaskForm[f];
-                        if (val === '') val = null;
-                        updates[f] = val;
+                    let oldVal = subtask[f];
+                    let newVal = this.editSubtaskForm[f];
+                    if (newVal === '') newVal = null;
+                    const isEqual = Array.isArray(oldVal) && Array.isArray(newVal)
+                        ? JSON.stringify(oldVal) === JSON.stringify(newVal)
+                        : oldVal === newVal;
+                    if (!isEqual) {
+                        updates[f] = newVal;
                     }
                 }
                 if (Object.keys(updates).length === 0) {

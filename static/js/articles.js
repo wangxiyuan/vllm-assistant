@@ -157,19 +157,17 @@ function articlesMixin() {
         },
 
         // ===== 编辑器初始化 =====
-        cmEditor: null,
         _focusEditor() {
             setTimeout(() => {
-                this.initCodeMirror();
+                this._syncEditorContent();
                 const el = document.getElementById('article-editor');
                 if (el) el.focus();
             }, 100);
         },
-        async initCodeMirror() {
+        async _syncEditorContent() {
             const el = document.getElementById('article-editor');
             if (!el) return;
             el.value = this.articleForm.content;
-            this.cmEditor = el;
         },
 
         onEditorInput(e) {
@@ -234,13 +232,32 @@ function articlesMixin() {
             if (this.deletingArticle) return;
             if (!confirm(`确定删除文章「${article.title}」？此操作不可撤销。`)) return;
             this.deletingArticle = true;
+            const backup = { ...article };
             try {
                 await this.api(`/api/articles/${article.id}`, { method: 'DELETE' });
-                this.showToast('文章已删除', '', 'success');
                 if (this.selectedArticle && this.selectedArticle.id === article.id) {
                     this.closeArticleView();
                 }
                 await this.loadArticles();
+                // 提供撤销
+                this.showUndoToast('文章已删除', article.title, async () => {
+                    try {
+                        await this.api('/api/articles', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                title: backup.title,
+                                content: backup.content || '',
+                                area: backup.area || '',
+                                tags: backup.tags || [],
+                                status: backup.status || 'draft',
+                            }),
+                        });
+                        this.showToast('已恢复', backup.title, 'success');
+                        await this.loadArticles();
+                    } catch (e) {
+                        this.showToast('恢复失败', e.message, 'error');
+                    }
+                }, 10000);
             } catch (e) {
                 this.showToast('删除失败', e.message, 'error');
             } finally {
@@ -422,10 +439,22 @@ function articlesMixin() {
             const lineEnd = ref.line_end || ref.line_start;
             const codeRef = `\`${ref.repo}/${ref.file_path}:${ref.line_start}-${lineEnd}\``;
             // 插入到编辑器光标位置或末尾
-            const content = this.articleForm.content;
-            this.articleForm.content = content + '\n' + codeRef + '\n';
-            if (this.cmEditor && typeof this.cmEditor === 'object' && this.cmEditor.tagName === 'TEXTAREA') {
-                this.cmEditor.value = this.articleForm.content;
+            const el = document.getElementById('article-editor');
+            if (el && el.selectionStart !== undefined) {
+                const start = el.selectionStart;
+                const end = el.selectionEnd;
+                const before = this.articleForm.content.slice(0, start);
+                const after = this.articleForm.content.slice(end);
+                this.articleForm.content = before + codeRef + after;
+                el.value = this.articleForm.content;
+                // 光标移到插入内容之后
+                const newPos = start + codeRef.length;
+                el.setSelectionRange(newPos, newPos);
+                el.focus();
+            } else {
+                // 无选区支持，追加到末尾
+                this.articleForm.content = this.articleForm.content + '\n' + codeRef;
+                if (el) el.value = this.articleForm.content;
             }
             this.showInsertRef = false;
             this.showToast('已插入代码引用', '', 'success');
@@ -453,12 +482,6 @@ function articlesMixin() {
             if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
                 e.preventDefault();
                 this.previewArticle();
-            }
-            if (e.key === 'Escape') {
-                if (this.articleEditorOpen && this.articleEditorSubView === 'preview') this.closePreview();
-                else if (this.showInsertRef) this.closeInsertRef();
-                else if (this.selectedArticle) this.closeArticleView();
-                else if (this.articleEditorOpen && this._confirmDiscard()) { this.articleEditorOpen = false; this.articleFormSnapshot = null; }
             }
         },
     };
