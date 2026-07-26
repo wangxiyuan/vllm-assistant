@@ -38,6 +38,14 @@ export function useKeyboard() {
       return
     }
 
+    // / key to focus search
+    if (e.key === '/') {
+      e.preventDefault()
+      const searchInput = document.querySelector('.search-bar input') as HTMLInputElement
+      searchInput?.focus()
+      return
+    }
+
     // R key for refresh
     if (e.key === 'r' || e.key === 'R') {
       e.preventDefault()

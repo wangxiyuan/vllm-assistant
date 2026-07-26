@@ -13,6 +13,7 @@ const viewTitles: Record<string, string> = {
   'intelligence': '洞察面板',
   'articles': '技术Blog',
   'anatomy': '模型拆解',
+  'ai-agent': 'AI Agent',
 }
 
 const viewPlaceholders: Record<string, string> = {
@@ -24,8 +25,8 @@ const viewPlaceholders: Record<string, string> = {
   'anatomy': '搜索算子或模型…',
 }
 
-const currentTitle = '任务控制台'
-const searchPlaceholder = '搜索…'
+const currentTitle = viewTitles[route.name as string] || '任务控制台'
+const searchPlaceholder = viewPlaceholders[route.name as string] || '搜索…'
 </script>
 
 <template>
@@ -45,6 +46,7 @@ const searchPlaceholder = '搜索…'
         </svg>
         <input type="text" v-model="appStore.searchQuery"
                :placeholder="searchPlaceholder" />
+        <span class="search-kbd">/</span>
       </div>
     </div>
     <div class="header-actions">
@@ -54,7 +56,7 @@ const searchPlaceholder = '搜索…'
           <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
         </svg>
         <span class="sync-text">{{ appStore.syncStatusText }}</span>
-        <span v-if="appStore.nextSyncCountdown" class="sync-countdown">{{ appStore.nextSyncCountdown }}</span>
+        <span v-if="appStore.nextSyncCountdown" class="sync-countdown">下次: {{ appStore.nextSync }}</span>
       </div>
       <button class="header-btn" @click="appStore.refreshAll()" title="手动同步 (R)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

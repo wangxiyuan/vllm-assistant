@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useIntelStore } from '@/stores/intel'
+import { renderMarkdown } from '@/composables/useMarkdown'
 
 const intelStore = useIntelStore()
 
@@ -15,6 +16,9 @@ onMounted(() => {
     <div class="view-header">
       <h2 class="view-title">洞察面板</h2>
       <div class="view-actions">
+        <button class="btn btn-sm" @click="intelStore.loadReports()" :disabled="intelStore.loading">
+          {{ intelStore.loading ? '加载中…' : '刷新' }}
+        </button>
         <button class="btn btn-primary btn-sm" @click="intelStore.showModal = true; intelStore.loadIntelTasks()">
           + 生成报告
         </button>
@@ -30,11 +34,21 @@ onMounted(() => {
           </span>
         </div>
         <div class="report-meta">
+          <span v-if="report.task_title" class="meta-item" style="cursor:pointer;" @click.stop="intelStore.viewReport(report)" title="触发任务">触发任务: <strong>{{ report.task_title }}</strong></span>
+          <span v-for="s in report.sources" :key="s" class="badge badge-source" :class="intelStore.intelSourceClass(s)">{{ intelStore.intelSourceLabel(s) }}</span>
           <span>{{ report.word_count }} 字</span>
           <span>{{ new Date(report.created_at).toLocaleDateString('zh-CN') }}</span>
         </div>
-        <div class="report-sources">
-          <span v-for="s in report.sources" :key="s" class="source-tag">{{ intelStore.intelSourceLabel(s) }}</span>
+        <div class="report-actions">
+          <button class="btn btn-sm" @click.stop="intelStore.viewReport(report)" title="查看">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <button class="btn btn-sm btn-ghost" @click.stop="intelStore.regenerateReport(report)" title="重新生成">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+          <button class="btn btn-sm btn-ghost" @click.stop="intelStore.deleteReport(report)" title="删除" style="color:var(--signal-red);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
         </div>
       </div>
       <div v-if="intelStore.reports.length === 0 && !intelStore.loading" class="empty-state">
@@ -106,7 +120,7 @@ onMounted(() => {
             加载中…
           </div>
           <div v-else class="modal-body report-content">
-            <pre>{{ intelStore.reportDetails?.content || '(无内容)' }}</pre>
+            <div class="pr-body" v-html="renderMarkdown(intelStore.reportDetails?.content || '(无内容)')"></div>
           </div>
         </div>
       </div>

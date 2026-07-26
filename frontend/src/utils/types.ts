@@ -105,9 +105,12 @@ export interface TodoTask {
   tags?: string[]
   dedup_check_result?: any
   has_dedup_check?: boolean
+  has_ai_insight?: boolean
   latest_insight_report_id?: number
   children?: TodoTask[]
   parent_id?: number | null
+  subtask_count?: number
+  subtask_done_count?: number
 }
 
 export interface IntelReport {

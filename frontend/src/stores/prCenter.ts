@@ -373,6 +373,9 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     aiSummaryLoading.value = true
     aiSummaryCollapsed.value = false
     pendingSummaries.value[pendingKey] = true
+    // 切换到总结 tab
+    if (isPR) prDetailTab.value = 'summary'
+    else issueDetailTab.value = 'summary'
 
     try {
       await api('/api/ai-assistant/clear-cache', {
@@ -420,6 +423,8 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     aiReviewElapsed.value = 0
     aiReviewCollapsed.value = false
     pendingReviews.value[prNumber] = true
+    // 切换到 review tab
+    prDetailTab.value = 'review'
     if (aiReviewTimer.value) clearInterval(aiReviewTimer.value)
     aiReviewTimer.value = setInterval(() => { aiReviewElapsed.value++ }, 1000)
 
@@ -484,6 +489,10 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     }
   }
 
+  // Detail tabs (no 'translate' — translation is a toggle inside details tab)
+  const prDetailTab = ref<'details' | 'summary' | 'review'>('details')
+  const issueDetailTab = ref<'details' | 'summary'>('details')
+
   // Chart helpers
   function monthBarHeight(count: number, allMonthly: Record<string, number>) {
     const max = Math.max(...Object.values(allMonthly), 1)
@@ -512,6 +521,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     selectedIssue, issueDetails, issueLoadError, loadingIssue,
     translateLoading, prTranslatedBody, issueTranslatedBody,
     prShowChinese, issueShowChinese,
+    prDetailTab, issueDetailTab,
     expandedDiffFile, fileDiffs, prDiffData, prDiffLoading,
     filteredMyPRs, filteredMyIssues, myIssueTypeCounts,
     openPRCount, mergedPRCount, closedPRCount, allPRCount,
