@@ -807,7 +807,7 @@ def stop_scheduler():
 
 
 def sync_all_repos_job():
-    """定时任务：同步所有仓库代码到 LocalCodeCache"""
+    """定时任务：同步所有仓库代码到 LocalCodeCache，然后增量更新知识库"""
     job_id = "sync_all_repos"
     if job_id in _running_jobs:
         logger.debug(f"{job_id} already running, skipping")
@@ -821,10 +821,13 @@ def sync_all_repos_job():
             return
 
         manager = RepoManager()
+        has_changes = False
         for repo_name in Config.REPOS:
             try:
                 result = manager.pull_and_sync(repo_name)
                 logger.info(f"Repo {repo_name} synced: {result}")
+                if result.get("created", 0) > 0 or result.get("updated", 0) > 0:
+                    has_changes = True
             except Exception:
                 logger.exception(f"Error syncing repo {repo_name}")
 
@@ -833,6 +836,16 @@ def sync_all_repos_job():
             manager.validate_all_refs()
         except Exception:
             logger.exception("Error validating refs after sync")
+
+        # 如果仓库有变更，增量更新知识库
+        if has_changes:
+            try:
+                from app.services.memory_service import MemoryService
+                mem = MemoryService()
+                stats = mem.build_code_knowledge()
+                logger.info(f"Knowledge base incremental build: {stats}")
+            except Exception:
+                logger.exception("Error updating knowledge base after repo sync")
     finally:
         _running_jobs.discard(job_id)
 

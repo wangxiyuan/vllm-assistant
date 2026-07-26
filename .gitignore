@@ -54,9 +54,12 @@ Thumbs.db
 
 .codegraph
 .claude
-# Node.js (not used by this project)
+# Node.js
 package.json
 package-lock.json
 node_modules/
+
+# Frontend build output
+static/dist/
 .agents
 skills-lock.json

@@ -125,15 +125,20 @@ fi
 print_success "配置验证通过"
 echo ""
 
-# 数据库迁移检查（如果 schema 有变更，自动备份并迁移）
-print_info "检查数据库 schema..."
-python3 scripts/migrate_db.py || {
-    print_warning "数据库迁移失败，尝试修复..."
-    python3 scripts/migrate_db.py --force || {
-        print_error "数据库迁移失败，请检查错误信息"
-        exit 1
-    }
+# 构建前端（Vue 3 SPA）
+print_info "构建前端..."
+cd frontend
+if [ ! -d "node_modules" ]; then
+    print_info "安装前端依赖..."
+    npm install
+fi
+npm run build 2>/dev/null && {
+    print_success "前端构建成功"
+} || {
+    print_warning "前端构建失败，请检查 frontend/ 目录"
+    print_warning "新前端（Vue 3 SPA）不可用，将仅运行后端"
 }
+cd ..
 
 # 启动服务
 print_info "启动vLLM Assistant..."

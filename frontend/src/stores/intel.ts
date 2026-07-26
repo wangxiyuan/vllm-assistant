@@ -1,0 +1,254 @@
+import { ref } from 'vue'
+import { defineStore } from 'pinia'
+import { api } from '@/api/client'
+import { useAppStore } from './app'
+import type { IntelReport } from '@/utils/types'
+
+export const useIntelStore = defineStore('intel', () => {
+  const reports = ref<IntelReport[]>([])
+  const loading = ref(false)
+  const showModal = ref(false)
+  const intelForm = ref({
+    task_id: '',
+    title: '',
+    sources: ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'] as string[],
+    excluded_sources: [] as string[],
+    extra_prompt: '',
+  })
+  const genLoading = ref(false)
+  const intelTasks = ref<any[]>([])
+  const selectedReport = ref<IntelReport | null>(null)
+  const reportDetails = ref<any>(null)
+  const reportModalLoading = ref(false)
+  const pollingTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+
+  async function loadReports() {
+    loading.value = true
+    try {
+      const data: any = await api('/api/intelligence/reports')
+      reports.value = data.reports || []
+    } catch (e: any) {
+      useAppStore().showToast('加载报告失败', e.message, 'error')
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function loadIntelTasks() {
+    try {
+      const params = new URLSearchParams()
+      params.set('status', 'all')
+      params.set('per_page', '50')
+      const data: any = await api('/api/personal-todo/tasks?' + params)
+      intelTasks.value = data.tasks || []
+    } catch (_) {}
+  }
+
+  function toggleSource(source: string) {
+    const idx = intelForm.value.sources.indexOf(source)
+    if (idx >= 0) {
+      intelForm.value.sources.splice(idx, 1)
+    } else {
+      intelForm.value.sources.push(source)
+    }
+  }
+
+  function isSourceSelected(source: string): boolean {
+    return intelForm.value.sources.includes(source)
+  }
+
+  async function generateReport() {
+    if (!intelForm.value.task_id) {
+      useAppStore().showToast('请选择任务', '关联任务是必填项', 'error')
+      return
+    }
+    if (intelForm.value.sources.length === 0) {
+      useAppStore().showToast('请选择来源', '至少选择一个来源', 'error')
+      return
+    }
+    if (genLoading.value) return
+    genLoading.value = true
+    try {
+      const payload: any = {
+        task_id: parseInt(intelForm.value.task_id, 10),
+        sources: intelForm.value.sources,
+        excluded_sources: intelForm.value.excluded_sources,
+        extra_prompt: intelForm.value.extra_prompt,
+      }
+      if (intelForm.value.title.trim()) payload.title = intelForm.value.title.trim()
+      const result: any = await api('/api/intelligence/generate', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }, { timeout: 30000 })
+      useAppStore().showToast('报告生成中', result.message || '请稍后查看', 'success', 6000)
+      showModal.value = false
+      reports.value.unshift({
+        id: result.report_id,
+        title: result.title,
+        task_id: result.task_id,
+        sources: intelForm.value.sources,
+        created_at: new Date().toISOString(),
+        status: 'generating',
+        word_count: 0,
+      })
+      intelForm.value.title = ''
+      intelForm.value.extra_prompt = ''
+      pollReportStatus(result.report_id)
+    } catch (e: any) {
+      useAppStore().showToast('生成失败', e.message, 'error')
+    } finally {
+      genLoading.value = false
+    }
+  }
+
+  function pollReportStatus(reportId: number) {
+    if (pollingTimer.value) clearTimeout(pollingTimer.value)
+    const startTime = Date.now()
+    const timeout = 600000
+    let attempt = 0
+    const poll = async () => {
+      attempt++
+      if (Date.now() - startTime > timeout) {
+        pollingTimer.value = null
+        return
+      }
+      try {
+        const report: any = await api(`/api/intelligence/reports/${reportId}`, {}, { timeout: 10000 })
+        const idx = reports.value.findIndex(r => r.id === reportId)
+        if (idx >= 0) {
+          reports.value[idx] = {
+            ...reports.value[idx],
+            status: report.status,
+            word_count: report.word_count,
+            error_message: report.error_message,
+          }
+        }
+        if (selectedReport.value?.id === reportId) {
+          reportDetails.value = report
+        }
+        if (report.status === 'completed' || report.status === 'failed') {
+          pollingTimer.value = null
+          if (report.status === 'completed') {
+            useAppStore().showToast('报告已生成', report.title, 'success')
+          } else {
+            useAppStore().showToast('报告生成失败', report.error_message || '未知错误', 'error')
+          }
+          return
+        }
+      } catch (_) {}
+      const delay = Math.min(3000 * Math.pow(2, attempt - 1), 30000)
+      pollingTimer.value = setTimeout(poll, delay)
+    }
+    poll()
+  }
+
+  async function viewReport(report: IntelReport) {
+    selectedReport.value = report
+    reportDetails.value = null
+    reportModalLoading.value = true
+    try {
+      reportDetails.value = await api(`/api/intelligence/reports/${report.id}`)
+    } catch (e: any) {
+      useAppStore().showToast('加载报告失败', e.message, 'error')
+    } finally {
+      reportModalLoading.value = false
+    }
+  }
+
+  function closeReport() {
+    selectedReport.value = null
+    reportDetails.value = null
+  }
+
+  async function deleteReport(report: IntelReport) {
+    if (!confirm(`确认删除报告 "${report.title}"？此操作不可撤销。`)) return
+    const backup = { ...report }
+    try {
+      await api(`/api/intelligence/reports/${report.id}`, { method: 'DELETE' })
+      reports.value = reports.value.filter(r => r.id !== report.id)
+      if (selectedReport.value?.id === report.id) closeReport()
+      useAppStore().showUndoToast('已删除', report.title, async () => {
+        try {
+          const payload: any = {
+            task_id: backup.task_id,
+            sources: backup.sources || ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'],
+            excluded_sources: backup.excluded_sources || [],
+            extra_prompt: backup.extra_prompt || '',
+          }
+          if (backup.title) payload.title = backup.title
+          const result: any = await api('/api/intelligence/generate', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          }, { timeout: 30000 })
+          reports.value.unshift({
+            id: result.report_id, title: result.title || backup.title,
+            task_id: backup.task_id, sources: payload.sources,
+            created_at: new Date().toISOString(), status: 'generating' as const, word_count: 0,
+          })
+          pollReportStatus(result.report_id)
+          useAppStore().showToast('已重新生成', '', 'success')
+        } catch (e: any) {
+          useAppStore().showToast('恢复失败', e.message, 'error')
+        }
+      }, 10000)
+    } catch (e: any) {
+      useAppStore().showToast('删除失败', e.message, 'error')
+    }
+  }
+
+  async function regenerateReport(report: IntelReport) {
+    if (!confirm(`确认重新生成报告 "${report.title}"？`)) return
+    try {
+      const payload: any = {
+        task_id: report.task_id,
+        sources: report.sources || ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'],
+        excluded_sources: report.excluded_sources || [],
+        extra_prompt: report.extra_prompt || '',
+      }
+      const result: any = await api('/api/intelligence/generate', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }, { timeout: 30000 })
+      useAppStore().showToast('重新生成中', result.message, 'success')
+      reports.value.unshift({
+        id: result.report_id, title: result.title,
+        task_id: result.task_id, sources: payload.sources,
+        created_at: new Date().toISOString(), status: 'generating' as const, word_count: 0,
+      })
+      pollReportStatus(result.report_id)
+    } catch (e: any) {
+      useAppStore().showToast('重新生成失败', e.message, 'error')
+    }
+  }
+
+  async function copyReportMarkdown() {
+    if (!reportDetails.value || !reportDetails.value.content) {
+      useAppStore().showToast('无内容', '报告内容尚未加载', 'error')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(reportDetails.value.content)
+      useAppStore().showToast('已复制', 'Markdown 内容已复制到剪贴板', 'success')
+    } catch {
+      useAppStore().showToast('复制失败', '请手动选择文本复制', 'error')
+    }
+  }
+
+  function intelSourceLabel(source: string): string {
+    const map: Record<string, string> = { vllm: 'vLLM', 'vllm-ascend': 'vLLM-Ascend', sglang: 'sglang', academic: '学术', news: '新闻' }
+    return map[source] || source
+  }
+
+  function intelSourceClass(source: string): string {
+    return 'source-' + source
+  }
+
+  return {
+    reports, loading, showModal, intelForm, genLoading, intelTasks,
+    selectedReport, reportDetails, reportModalLoading, pollingTimer,
+    loadReports, loadIntelTasks, toggleSource, isSourceSelected,
+    generateReport, pollReportStatus, viewReport, closeReport,
+    deleteReport, regenerateReport, copyReportMarkdown,
+    intelSourceLabel, intelSourceClass,
+  }
+})

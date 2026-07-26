@@ -32,6 +32,7 @@ class RepoManager:
         """
         异步确保仓库已 clone（不阻塞服务启动）。
         已存在则 git pull --ff-only，不存在则 git clone --depth 1。
+        clone/pull 完成后自动同步到 LocalCodeCache。
         """
         import asyncio
 
@@ -60,6 +61,22 @@ class RepoManager:
                 logger.error(f"git clone failed for {repo_name}: {stderr.decode()}")
                 raise RuntimeError(f"Failed to clone {repo_name}: {stderr.decode()}")
             logger.info(f"git clone succeeded for {repo_name}")
+
+        # clone/pull 完成后同步到 LocalCodeCache
+        try:
+            from app.database import SessionLocal
+            db = SessionLocal()
+            try:
+                stats = self._sync_to_cache(repo_name, local_path, db)
+                db.commit()
+                logger.info(f"Synced {repo_name} to cache: {stats}")
+            except Exception:
+                db.rollback()
+                logger.exception(f"Sync to cache failed for {repo_name}")
+            finally:
+                db.close()
+        except Exception:
+            logger.exception(f"Failed to sync {repo_name} to cache")
 
     def pull_and_sync(self, repo_name: str) -> Dict:
         """
@@ -93,25 +110,30 @@ class RepoManager:
             db.close()
 
     def _sync_to_cache(self, repo_name: str, local_path: Path, db) -> Dict:
-        """扫描仓库下所有 .py 文件，更新 LocalCodeCache"""
+        """扫描仓库下所有代码文件和文档文件，更新 LocalCodeCache"""
         from app.models import LocalCodeCache
 
         stats = {"created": 0, "updated": 0, "unchanged": 0, "errors": []}
 
-        for py_file in sorted(local_path.rglob("*.py")):
-            # 跳过 .git 目录下的文件
-            if ".git" in py_file.parts:
-                continue
-            relative_path = str(py_file.relative_to(local_path)).replace("\\", "/")
-            result = self._sync_file(repo_name, relative_path, py_file, db)
-            if result["status"] == "created":
-                stats["created"] += 1
-            elif result["status"] == "updated":
-                stats["updated"] += 1
-            elif result["status"] == "unchanged":
-                stats["unchanged"] += 1
-            else:
-                stats["errors"].append(result)
+        # 所有需要同步的文件扩展名
+        exts = (".py", ".cpp", ".cu", ".h", ".hpp", ".cuh",
+                ".md", ".rst", ".txt")
+
+        # 逐扩展名搜索（比 rglob(*) 快很多，跳过 .git 等无关目录）
+        for ext in exts:
+            for file_path in sorted(local_path.rglob(f"*{ext}")):
+                if ".git" in file_path.parts:
+                    continue
+                relative_path = str(file_path.relative_to(local_path)).replace("\\", "/")
+                result = self._sync_file(repo_name, relative_path, file_path, db)
+                if result["status"] == "created":
+                    stats["created"] += 1
+                elif result["status"] == "updated":
+                    stats["updated"] += 1
+                elif result["status"] == "unchanged":
+                    stats["unchanged"] += 1
+                else:
+                    stats["errors"].append(result)
 
         return stats
 

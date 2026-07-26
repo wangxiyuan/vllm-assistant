@@ -245,15 +245,15 @@ fi
 NEED_REBUILD=false
 BUILD_CACHE_FILE=".deploy_build_hash"
 
-# 计算当前代码的哈希值（检测 app/ static/ requirements.txt Dockerfile 的变更）
+# 计算当前代码的哈希值（检测 app/ frontend/ requirements.txt Dockerfile 的变更）
 compute_code_hash() {
     # 如果 git 可用，用 git 的 HEAD 哈希
     if git rev-parse --git-dir > /dev/null 2>&1; then
-        git log -1 --format=%H -- app/ static/ requirements.txt Dockerfile docker-compose.yml 2>/dev/null || \
+        git log -1 --format=%H -- app/ frontend/ requirements.txt Dockerfile docker-compose.yml 2>/dev/null || \
         git rev-parse HEAD 2>/dev/null
     else
         # 否则用文件内容的 md5
-        find app/ static/ -type f -name "*.py" -o -name "*.html" -o -name "*.js" -o -name "*.css" 2>/dev/null | \
+        find app/ frontend/ -type f \( -name "*.py" -o -name "*.html" -o -name "*.js" -o -name "*.css" -o -name "*.ts" -o -name "*.vue" \) 2>/dev/null | \
             sort | xargs md5 -r 2>/dev/null | md5 -r | awk '{print $1}'
     fi
 }
@@ -319,23 +319,7 @@ fi
 print_info "启动新容器..."
 $DOCKER_COMPOSE_CMD up -d
 
-# ============================================================================
-# 数据库 Schema 迁移（在容器内执行）
-# ============================================================================
-print_step "数据库迁移检查"
-# 等待容器启动（确保数据库文件已创建）
-sleep 3
-if docker exec vllm-assistant python3 /app/scripts/migrate_db.py --check 2>/dev/null; then
-    print_success "数据库 schema 与代码一致，无需迁移"
-else
-    print_warning "检测到 schema 差异，执行数据库迁移..."
-    if docker exec vllm-assistant python3 /app/scripts/migrate_db.py; then
-        print_success "数据库迁移完成"
-    else
-        print_error "数据库迁移失败，请检查日志"
-        print_info "   docker logs vllm-assistant"
-    fi
-fi
+print_step "部署完成"
 
 # ============================================================================
 # 等待服务就绪
@@ -363,6 +347,7 @@ if [ "$SERVICE_READY" = true ]; then
     echo ""
     echo -e "  ${GREEN}访问地址:${NC}      http://localhost:${PORT:-8000}"
     echo -e "  ${GREEN}API 文档:${NC}      http://localhost:${PORT:-8000}/docs"
+    echo -e "  ${GREEN}新前端 (Vue 3 SPA):${NC} http://localhost:${PORT:-8000}/app"
     echo -e "  ${GREEN}健康检查:${NC}      http://localhost:${PORT:-8000}/health"
     echo ""
     print_info "查看容器日志："

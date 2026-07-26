@@ -4,7 +4,9 @@ AI Assistant - OpenAI API 集成
 """
 import json
 import logging
-from typing import List, Dict, Any
+import re
+import time
+from typing import List, Dict, Any, Optional
 
 try:
     from openai import OpenAI
@@ -39,22 +41,59 @@ class AIAssistant:
         self.model = Config.OPENAI_MODEL
 
     def _chat(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        """统一的 chat 调用 + 错误处理"""
+        """统一的 chat 调用 + 重试 + 错误处理
+
+        退避策略：优先用 Retry-After 头，否则指数退避（1s→max 10s），最多 10 次。
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(10):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=self.DEFAULT_TIMEOUT,
+                )
+                content = response.choices[0].message.content
+                if not content:
+                    logger.warning("AI returned empty content")
+                return content or ""
+            except Exception as e:
+                last_exc = e
+                if attempt < 9:
+                    retry_after = self._parse_retry_after(e)
+                    wait = min(retry_after if retry_after > 0 else (2 ** attempt), 10.0)
+                    logger.warning(
+                        "AI chat failed (attempt %d/10, retry in %.1fs): %s",
+                        attempt + 1, wait, e
+                    )
+                    time.sleep(wait)
+                else:
+                    logger.exception("AI chat failed after 10 attempts")
+        raise last_exc  # type: ignore[misc]
+
+    @staticmethod
+    def _parse_retry_after(e: Exception) -> float:
+        """从 OpenAI API 异常中解析 Retry-After 时间。"""
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                timeout=self.DEFAULT_TIMEOUT,
-            )
-            content = response.choices[0].message.content
-            if not content:
-                logger.warning("AI returned empty content")
-            return content or ""
-        except Exception as e:
-            logger.exception("AI chat call failed")
-            raise
+            resp = getattr(e, "response", None)
+            if resp is not None and hasattr(resp, "headers"):
+                ra = resp.headers.get("retry-after") or resp.headers.get("Retry-After")
+                if ra:
+                    return min(float(ra), 10.0)
+                reset = resp.headers.get("x-ratelimit-reset") or resp.headers.get("X-RateLimit-Reset")
+                if reset:
+                    wait = float(reset) - time.time()
+                    if wait > 0:
+                        return min(wait, 10.0)
+            msg = str(e).lower()
+            m = re.search(r"(?:retry after|try again in)\s*([\d.]+)\s*s", msg)
+            if m:
+                return min(float(m.group(1)), 10.0)
+        except (ValueError, TypeError, AttributeError):
+            pass
+        return 0.0
 
     def _safe_json(self, content: str, default: Any) -> Any:
         """解析 AI 返回的 JSON，失败时尝试自动修复常见格式错误"""

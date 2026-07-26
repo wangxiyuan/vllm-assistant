@@ -66,7 +66,7 @@ def _article_to_response(a: Article) -> dict:
 
 # ===== 文章 CRUD =====
 
-@router.get("/")
+@router.get("")
 async def list_articles(
     area: Optional[str] = Query(None),
     status: Optional[str] = Query(None, pattern="^(all|draft|published|archived)?$"),
@@ -106,7 +106,7 @@ async def list_articles(
     }
 
 
-@router.post("/")
+@router.post("")
 async def create_article(req: ArticleCreate, db: Session = Depends(get_db)):
     """创建新文章"""
     now = _utcnow()

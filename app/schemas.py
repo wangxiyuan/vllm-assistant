@@ -25,6 +25,40 @@ class ItemResponse(BaseModel):
         from_attributes = True
 
 
+class AIChatSessionResponse(BaseModel):
+    """AI 对话会话响应"""
+    id: str
+    title: str
+    message_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AIChatMessageResponse(BaseModel):
+    """AI 对话消息响应"""
+    id: int
+    session_id: str
+    role: str
+    content: str
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AIChatSessionCreateRequest(BaseModel):
+    """创建会话请求"""
+    title: str = "新对话"
+
+
+class AIChatSessionTitleRequest(BaseModel):
+    """更新会话标题请求"""
+    title: str
+
+
 class MyPRResponse(BaseModel):
     """用户PR响应"""
     pr_number: int
@@ -41,6 +75,40 @@ class MyPRResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AIChatSessionResponse(BaseModel):
+    """AI 对话会话响应"""
+    id: str
+    title: str
+    message_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AIChatMessageResponse(BaseModel):
+    """AI 对话消息响应"""
+    id: int
+    session_id: str
+    role: str
+    content: str
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AIChatSessionCreateRequest(BaseModel):
+    """创建会话请求"""
+    title: str = "新对话"
+
+
+class AIChatSessionTitleRequest(BaseModel):
+    """更新会话标题请求"""
+    title: str
 
 
 class AIReviewRequest(BaseModel):
@@ -240,6 +308,40 @@ class OperatorResponse(BaseModel):
         from_attributes = True
 
 
+class AIChatSessionResponse(BaseModel):
+    """AI 对话会话响应"""
+    id: str
+    title: str
+    message_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AIChatMessageResponse(BaseModel):
+    """AI 对话消息响应"""
+    id: int
+    session_id: str
+    role: str
+    content: str
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AIChatSessionCreateRequest(BaseModel):
+    """创建会话请求"""
+    title: str = "新对话"
+
+
+class AIChatSessionTitleRequest(BaseModel):
+    """更新会话标题请求"""
+    title: str
+
+
 class ModelAnatomyCreate(BaseModel):
     """创建模型"""
     name: str
@@ -280,3 +382,37 @@ class ModelAnatomyResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AIChatSessionResponse(BaseModel):
+    """AI 对话会话响应"""
+    id: str
+    title: str
+    message_count: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AIChatMessageResponse(BaseModel):
+    """AI 对话消息响应"""
+    id: int
+    session_id: str
+    role: str
+    content: str
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AIChatSessionCreateRequest(BaseModel):
+    """创建会话请求"""
+    title: str = "新对话"
+
+
+class AIChatSessionTitleRequest(BaseModel):
+    """更新会话标题请求"""
+    title: str

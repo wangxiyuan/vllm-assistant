@@ -644,3 +644,53 @@ class ModelAnatomy(Base):
             "created_at": _iso_utc(self.created_at),
             "updated_at": _iso_utc(self.updated_at),
         }
+
+
+class AIMemory(Base):
+    """持久记忆/知识库条目（AI Agent 用）
+
+    存储从 issue/PR/文档/代码/对话中提取的结构化知识，
+    通过 FTS5 全文检索，供 AI 调用时快速 recall。
+    """
+    __tablename__ = "ai_memory"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    content = Column(Text, nullable=False)  # 知识内容（Markdown 格式）
+    source_type = Column(String(30), nullable=False, default="manual")  # issue/pr/article/conversation/manual/code_structure/docs
+    source_ref = Column(Text)  # 来源引用，如 "vllm-project/vllm#1234"
+    tags = Column(Text)  # JSON 数组标签，如 '["attention","kernel"]'
+    checksum = Column(String(64))  # 文件内容 hash（增量更新用，非代码/文档知识为 null）
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    last_accessed_at = Column(DateTime)  # 最后访问时间
+    access_count = Column(Integer, default=0)  # 访问次数
+    is_stale = Column(Boolean, default=False)  # 是否过时
+
+    __table_args__ = (
+        Index("idx_ai_memory_source_type", "source_type"),
+        Index("idx_ai_memory_source_ref", "source_ref"),
+        Index("idx_ai_memory_updated_at", "updated_at"),
+        Index("idx_ai_memory_is_stale", "is_stale"),
+    )
+
+
+class AIChatSession(Base):
+    """AI 对话会话"""
+    __tablename__ = "ai_chat_sessions"
+
+    id = Column(String(36), primary_key=True)  # UUID
+    title = Column(String(200), default="新对话")
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    message_count = Column(Integer, default=0)
+
+
+class AIChatMessage(Base):
+    """AI 对话消息"""
+    __tablename__ = "ai_chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), ForeignKey("ai_chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # user / assistant
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

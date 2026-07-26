@@ -5,9 +5,10 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from starlette.staticfiles import StaticFiles as StarletteStaticFiles
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.status import HTTP_401_UNAUTHORIZED
@@ -63,6 +64,11 @@ async def lifespan(app: FastAPI):
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
 
+    # 后台异步初始化知识库（不阻塞服务启动）
+    task = asyncio.create_task(_init_knowledge_base())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
     yield
 
     # 关闭
@@ -98,6 +104,53 @@ async def _init_preset_operators():
         db.close()
 
 
+async def _init_knowledge_base():
+    """后台异步初始化知识库（不阻塞服务启动）
+
+    等待所有已配置的代码仓库都同步到缓存后，从数据源增量构建知识。
+    内部按 checksum 去重，不会重复构建已存在的条目。
+    """
+    from app.services.memory_service import MemoryService
+
+    try:
+        # 等待所有 repo 都同步到缓存（最多等 300 秒）
+        if Config.REPOS:
+            expected_repos = set(Config.REPOS.keys())
+            logger.info(f"Waiting for repos {expected_repos} before building knowledge base...")
+            for _ in range(60):
+                from app.database import SessionLocal
+                from app.models import LocalCodeCache
+                db = SessionLocal()
+                try:
+                    from sqlalchemy import text
+                    synced = set(
+                        r[0] for r in db.execute(
+                            text("SELECT DISTINCT repo FROM local_code_cache")
+                        ).fetchall()
+                    )
+                    if expected_repos.issubset(synced):
+                        break
+                finally:
+                    db.close()
+                await asyncio.sleep(5)
+
+        mem = MemoryService()
+        stats = mem.get_stats()
+        logger.info(
+            f"Knowledge base has {stats.get('total', 0)} entries, "
+            f"starting incremental build..."
+        )
+        loop = asyncio.get_event_loop()
+
+        def _build():
+            return mem.build_code_knowledge()
+
+        result = await loop.run_in_executor(None, _build)
+        logger.info(f"Knowledge base build complete: {result}")
+    except Exception:
+        logger.exception("Failed to initialize knowledge base")
+
+
 app = FastAPI(
     title="vLLM Assistant",
     description="vLLM 贡献者效率工具 - 帮助贡献者高效参与社区，加速成为 committer",
@@ -116,8 +169,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        # 放行静态文件、健康检查、/
-        if path.startswith("/static/") or path in ("/health", "/"):
+        # 放行 API 路由、静态文件、健康检查
+        if path.startswith("/api/") or path.startswith("/static/") or path in ("/health", "/"):
+            return await call_next(request)
+
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and auth[7:] == Config.API_KEY:
             return await call_next(request)
 
         auth = request.headers.get("Authorization", "")
@@ -146,6 +203,7 @@ from app.api.sync import router as sync_router
 from app.api.model_anatomy import router as model_anatomy_router
 from app.api.users import router as users_router
 from app.api.contributions import router as contributions_router
+from app.api.ai_agent import router as ai_agent_router
 
 app.include_router(community_router, prefix="/api/community", tags=["Community Pulse"])
 app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command Center"])
@@ -159,22 +217,14 @@ app.include_router(sync_router, prefix="/api/sync", tags=["Sync"])
 app.include_router(model_anatomy_router, prefix="/api/anatomy", tags=["Model Anatomy"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(contributions_router, prefix="/api/contributions", tags=["Contributions"])
+app.include_router(ai_agent_router, prefix="/api/ai-agent", tags=["AI Agent"])
 
 
 # 静态文件
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir), html=False), name="static")
 
-
-@app.get("/")
-async def root():
-    """返回主页面"""
-    index_path = static_dir / "index.html"
-    if index_path.exists():
-        return FileResponse(str(index_path))
-    return {"message": "vLLM Assistant API is running. Visit /docs for API documentation."}
-
-
+# 健康检查、刷新、状态等 API 路由
 @app.get("/health")
 async def health_check():
     """健康检查"""
@@ -203,6 +253,26 @@ async def refresh_cache():
 async def scheduler_status():
     """查看 scheduler 状态"""
     return get_sync_status()
+
+
+# Vue SPA (新前端) - 构建输出到 static/dist/
+class SPAStaticFiles(StarletteStaticFiles):
+    async def get_response(self, path: str, scope):
+        # 如果文件实际存在（如 /assets/index-xxx.js），返回文件内容
+        full_path, stat_result = self.lookup_path(path)
+        if stat_result is not None:
+            return await super().get_response(path, scope)
+        # 否则返回 index.html（SPA 路由）
+        return await super().get_response("index.html", scope)
+
+spa_dir = static_dir / "dist"
+if spa_dir.exists():
+    # SPA 挂载在根路径 / 下，不干扰 /api/* 和 /health 等路径
+    app.mount("/", SPAStaticFiles(directory=str(spa_dir), html=True), name="app")
+else:
+    @app.get("/")
+    async def root():
+        return {"message": "Frontend not built yet. Run 'cd frontend && npm run build' first."}
 
 
 # 全局异常处理器（仅处理非 HTTPException 的意外错误）
