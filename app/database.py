@@ -44,32 +44,60 @@ def _ensure_indexes():
         existing |= {idx["name"] for idx in inspect(conn).get_indexes("ai_memory")}
         existing |= {idx["name"] for idx in inspect(conn).get_indexes("ai_chat_messages")}
 
-        new_indexes = [
-            "CREATE INDEX IF NOT EXISTS idx_items_type_state ON items(type, state)",
-            "CREATE INDEX IF NOT EXISTS idx_items_area ON items(area)",
-            "CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at)",
-            "CREATE INDEX IF NOT EXISTS idx_my_prs_state ON my_prs(state)",
-            "CREATE INDEX IF NOT EXISTS idx_my_prs_created_at ON my_prs(created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_my_prs_github_id ON my_prs(github_id)",
-            "CREATE INDEX IF NOT EXISTS idx_user_issues_state ON user_issues(state)",
-            "CREATE INDEX IF NOT EXISTS idx_user_issues_github_id ON user_issues(github_id)",
-            "CREATE INDEX IF NOT EXISTS idx_ai_cache_created_at ON ai_cache(created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_intel_reports_created_at ON intelligence_reports(created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_fch_repo_file ON file_change_history(repo, file_path)",
-            "CREATE INDEX IF NOT EXISTS idx_fch_pr_number ON file_change_history(pr_number)",
-            "CREATE INDEX IF NOT EXISTS idx_ai_memory_source_type ON ai_memory(source_type)",
-            "CREATE INDEX IF NOT EXISTS idx_ai_memory_source_ref ON ai_memory(source_ref)",
-            "CREATE INDEX IF NOT EXISTS idx_ai_memory_updated_at ON ai_memory(updated_at)",
-            "CREATE INDEX IF NOT EXISTS idx_ai_memory_is_stale ON ai_memory(is_stale)",
-            "CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_session_id ON ai_chat_messages(session_id)",
-            "CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_created_at ON ai_chat_messages(created_at)",
+        # 先获取每张表的列名，用于跳过列不存在的索引
+        table_columns = {}
+        for table in ("items", "my_prs", "user_issues", "ai_cache",
+                      "intelligence_reports", "file_change_history",
+                      "ai_memory", "ai_chat_messages"):
+            try:
+                cols = {c["name"] for c in inspect(conn).get_columns(table)}
+                table_columns[table] = cols
+            except Exception:
+                table_columns[table] = set()
+
+        # 索引定义：（表名, SQL）
+        index_definitions = [
+            ("items", "CREATE INDEX IF NOT EXISTS idx_items_type_state ON items(type, state)"),
+            ("items", "CREATE INDEX IF NOT EXISTS idx_items_area ON items(area)"),
+            ("items", "CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at)"),
+            ("my_prs", "CREATE INDEX IF NOT EXISTS idx_my_prs_state ON my_prs(state)"),
+            ("my_prs", "CREATE INDEX IF NOT EXISTS idx_my_prs_created_at ON my_prs(created_at)"),
+            ("my_prs", "CREATE INDEX IF NOT EXISTS idx_my_prs_github_id ON my_prs(github_id)"),
+            ("user_issues", "CREATE INDEX IF NOT EXISTS idx_user_issues_state ON user_issues(state)"),
+            ("user_issues", "CREATE INDEX IF NOT EXISTS idx_user_issues_github_id ON user_issues(github_id)"),
+            ("ai_cache", "CREATE INDEX IF NOT EXISTS idx_ai_cache_created_at ON ai_cache(created_at)"),
+            ("intelligence_reports", "CREATE INDEX IF NOT EXISTS idx_intel_reports_created_at ON intelligence_reports(created_at)"),
+            ("file_change_history", "CREATE INDEX IF NOT EXISTS idx_fch_repo_file ON file_change_history(repo, file_path)"),
+            ("file_change_history", "CREATE INDEX IF NOT EXISTS idx_fch_pr_number ON file_change_history(pr_number)"),
+            ("ai_memory", "CREATE INDEX IF NOT EXISTS idx_ai_memory_source_type ON ai_memory(source_type)"),
+            ("ai_memory", "CREATE INDEX IF NOT EXISTS idx_ai_memory_source_ref ON ai_memory(source_ref)"),
+            ("ai_memory", "CREATE INDEX IF NOT EXISTS idx_ai_memory_updated_at ON ai_memory(updated_at)"),
+            ("ai_memory", "CREATE INDEX IF NOT EXISTS idx_ai_memory_is_stale ON ai_memory(is_stale)"),
+            ("ai_chat_messages", "CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_session_id ON ai_chat_messages(session_id)"),
+            ("ai_chat_messages", "CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_created_at ON ai_chat_messages(created_at)"),
         ]
 
-        for ddl in new_indexes:
+        for table_name, ddl in index_definitions:
             idx_name = ddl.split()[5]
             if idx_name not in existing:
-                conn.execute(DDL(ddl))
-                conn.commit()
+                # 提取索引涉及的列名（括号内的部分）
+                cols_part = ddl.split("ON")[1].split("(")[1].split(")")[0].split(",")
+                cols_part = [c.strip() for c in cols_part]
+                # 检查所有列是否都存在，不存在的列跳过该索引
+                available = table_columns.get(table_name, set())
+                missing = [c for c in cols_part if c not in available]
+                if missing:
+                    logger.warning(
+                        f"Skipping index {idx_name} on {table_name}: "
+                        f"column(s) {missing} not found in table. "
+                        f"This may happen when the DB schema is outdated."
+                    )
+                    continue
+                try:
+                    conn.execute(DDL(ddl))
+                    conn.commit()
+                except Exception as e:
+                    logger.warning(f"Failed to create index {idx_name}: {e}")
 
         # 创建 FTS5 虚拟表（用于全文检索）
         # unicode61 是 FTS5 内置 tokenizer，支持中文和数字

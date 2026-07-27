@@ -133,9 +133,14 @@ case "$ACTION" in
 
         # 删除数据卷
         print_info "删除数据卷..."
-        docker volume rm vllm-assistant-data vllm-assistant-repos-cache 2>/dev/null && \
-            print_success "数据卷已删除" || \
-            print_info "数据卷不存在或已被删除"
+        for vname in \
+            "vllm-assistant-data" \
+            "vllm-assistant_vllm-assistant-data" \
+            "vllm-assistant-repos-cache" \
+            "vllm-assistant_vllm-assistant-repos-cache"; do
+            docker volume rm "$vname" 2>/dev/null && \
+                print_success "删除数据卷: $vname"
+        done
         print_success "数据清除完成"
         exit 0
         ;;
@@ -163,11 +168,21 @@ if [ "$ACTION" = "reset" ]; then
         print_success "容器已停止"
     fi
 
-    # 删除数据卷
+    # 删除数据卷（支持 docker-compose 命名卷前缀格式：project_name_volume_name）
     print_info "删除数据卷..."
     VOLUMES_DELETED=false
-    docker volume rm vllm-assistant-data 2>/dev/null && VOLUMES_DELETED=true
-    docker volume rm vllm-assistant-repos-cache 2>/dev/null && VOLUMES_DELETED=true
+    # docker-compose 创建卷时会在前面加 project name 前缀，尝试多种命名格式
+    for vname in \
+        "vllm-assistant-data" \
+        "vllm-assistant_vllm-assistant-data" \
+        "vllm-assistant-repos-cache" \
+        "vllm-assistant_vllm-assistant-repos-cache"; do
+        if docker volume inspect "$vname" &>/dev/null 2>&1; then
+            docker volume rm "$vname" &>/dev/null && \
+                print_success "删除数据卷: $vname" && \
+                VOLUMES_DELETED=true
+        fi
+    done
     if [ "$VOLUMES_DELETED" = true ]; then
         print_success "数据卷已删除（数据库 + 代码仓库缓存已重置）"
     else
