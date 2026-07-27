@@ -169,10 +169,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        # 放行 SPA 静态资源、FastAPI 静态文件、健康检查
-        # 注意：/api/* 不在此白名单，API 请求需 Bearer Token 认证
-        if path.startswith("/assets/") or path.startswith("/static/") or path in ("/health", "/"):
+        # 放行：SPA 静态资源、FastAPI 静态文件、健康检查
+        if path.startswith("/assets/") or path.startswith("/static/") or path in ("/health",):
             return await call_next(request)
+
+        # 放行 SPA 客户端路由（非 /api/ 开头的路径，交给 SPAStaticFiles 返回 index.html）
+        if not path.startswith("/api/"):
+            return await call_next(request)
+
+        # /api/* 路径：需要 Bearer Token 认证
 
         auth = request.headers.get("Authorization", "")
         if auth.startswith("Bearer ") and auth[7:] == Config.API_KEY:
