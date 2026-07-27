@@ -104,6 +104,7 @@ async def list_watchlist(db: Session = Depends(get_db)):
                         "id": t.id,
                         "title": t.title,
                         "status": t.status,
+                        "priority": t.priority,
                         "parent_id": t.parent_id,
                     })
                     break

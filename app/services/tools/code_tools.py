@@ -5,6 +5,7 @@ AI 可以通过这些工具读取本地缓存的代码文件。
 仅在知识库检索不够时使用（避免重复读取源码）。
 """
 import logging
+from typing import Optional
 
 from app.database import SessionLocal
 from app.models import LocalCodeCache
@@ -21,7 +22,11 @@ READ_LOCAL_CODE = {
     "type": "function",
     "function": {
         "name": "read_local_code",
-        "description": "读取本地已缓存的代码文件或文档文件。当知识库检索不够时，用此工具读取具体文件。",
+        "description": (
+            "读取本地已缓存的代码文件或文档文件（支持指定行号区间）。"
+            "当知识库检索不够时，用此工具读取具体文件。"
+            "读取大文件时，先用 search_code 定位关键行，再用 start_line + max_lines 精准切片，避免重叠读取。"
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -33,9 +38,13 @@ READ_LOCAL_CODE = {
                     "type": "string",
                     "description": "仓库名，如 'vllm'，'vllm-ascend' 等，默认 'vllm'",
                 },
+                "start_line": {
+                    "type": "integer",
+                    "description": "起始行号（0-based，包含），默认 0。读取大文件时分段用，从上次结束的行开始",
+                },
                 "max_lines": {
                     "type": "integer",
-                    "description": "最大返回行数，默认 100",
+                    "description": "最大返回行数，默认 100，上限 1500。设为 0 或超过文件总行数表示读到文件末尾",
                 },
             },
             "required": ["file_path"],
@@ -51,7 +60,23 @@ async def handle_read_local_code(args: dict) -> dict:
         return {"error": "file_path is required"}
 
     repo = args.get("repo", "vllm")
-    max_lines = min(args.get("max_lines", 100), 500)
+    # max_lines 默认 100，上限 1500；0 或负数视为「读到文件末尾」
+    raw_max = args.get("max_lines", 100)
+    try:
+        raw_max = int(raw_max)
+    except (TypeError, ValueError):
+        raw_max = 100
+    if raw_max <= 0:
+        max_lines = None  # 读完全文
+    else:
+        max_lines = min(raw_max, 1500)
+
+    try:
+        start_line = int(args.get("start_line", 0) or 0)
+    except (TypeError, ValueError):
+        start_line = 0
+    if start_line < 0:
+        start_line = 0
 
     db = SessionLocal()
     try:
@@ -69,21 +94,26 @@ async def handle_read_local_code(args: dict) -> dict:
         lines = entry.content.split("\n")
         total_lines = len(lines)
 
-        # 截断
-        if total_lines > max_lines:
-            # 取前 max_lines 行
-            content = "\n".join(lines[:max_lines])
-            truncated = True
-        else:
-            content = entry.content
-            truncated = False
+        if start_line >= total_lines:
+            return {
+                "error": f"start_line {start_line} out of range (total_lines={total_lines})",
+                "file_path": file_path,
+                "repo": repo,
+                "total_lines": total_lines,
+            }
+
+        end_line = total_lines if max_lines is None else min(total_lines, start_line + max_lines)
+        content = "\n".join(lines[start_line:end_line])
+        truncated = end_line < total_lines
 
         return {
             "file_path": file_path,
             "repo": repo,
             "content": content,
             "total_lines": total_lines,
-            "returned_lines": min(total_lines, max_lines),
+            "returned_lines": end_line - start_line,
+            "start_line": start_line,
+            "end_line": end_line,
             "truncated": truncated,
             "checksum": entry.checksum,
         }
@@ -102,7 +132,10 @@ SEARCH_CODE = {
     "type": "function",
     "function": {
         "name": "search_code",
-        "description": "在本地缓存的代码中搜索关键词。返回匹配的文件路径和行号。适合快速定位代码位置。",
+        "description": (
+            "在本地缓存的代码中搜索关键词。返回匹配的文件路径和行号。"
+            "可用 file_pattern 限定到某目录/文件前缀，节省全仓库扫描。"
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -113,6 +146,13 @@ SEARCH_CODE = {
                 "repo": {
                     "type": "string",
                     "description": "仓库名，如 'vllm'，'vllm-ascend' 等，默认 'vllm'",
+                },
+                "file_pattern": {
+                    "type": "string",
+                    "description": (
+                        "可选的文件路径前缀，例如 'vllm/v1/metrics/'。"
+                        "会自动作为前缀匹配（无需自己加 %）。"
+                    ),
                 },
                 "max_results": {
                     "type": "integer",
@@ -134,12 +174,22 @@ async def handle_search_code(args: dict) -> dict:
     repo = args.get("repo", "vllm")
     max_results = min(args.get("max_results", 10), 30)
 
+    # file_pattern 当作前缀：去末尾 /，转义 LIKE 通配符，再追加 %
+    raw_pattern = (args.get("file_pattern") or "").strip().rstrip("/")
+    like_pattern: Optional[str] = None
+    if raw_pattern:
+        escaped = raw_pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like_pattern = f"{escaped}%"
+
     db = SessionLocal()
     try:
         query = db.query(LocalCodeCache).filter(
             LocalCodeCache.repo == repo,
             LocalCodeCache.content.contains(keyword),
-        ).limit(max_results)
+        )
+        if like_pattern:
+            query = query.filter(LocalCodeCache.file_path.like(like_pattern, escape="\\"))
+        query = query.limit(max_results)
 
         results = []
         for entry in query.all():

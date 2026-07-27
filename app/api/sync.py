@@ -29,6 +29,23 @@ class EmbedRequest(BaseModel):
     refs: List[EmbedRef]
 
 
+@router.get("/code/files")
+async def list_cached_files(
+    repo: str = Query("vllm"),
+    q: str = Query("", description="搜索关键词"),
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+):
+    """列出缓存的代码文件，支持前缀搜索"""
+    query = db.query(LocalCodeCache.file_path).filter(
+        LocalCodeCache.repo == repo,
+    )
+    if q:
+        query = query.filter(LocalCodeCache.file_path.ilike(f"%{q}%"))
+    rows = query.order_by(LocalCodeCache.file_path).limit(limit).all()
+    return {"files": [r[0] for r in rows]}
+
+
 @router.get("/code/{file_path:path}")
 async def get_cached_code(
     file_path: str,

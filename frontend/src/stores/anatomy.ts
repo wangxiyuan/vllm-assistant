@@ -14,6 +14,7 @@ export const useAnatomyStore = defineStore('anatomy', () => {
   const operatorSearch = ref('')
   const showOperatorDetail = ref(false)
   const selectedOperator = ref<Operator | null>(null)
+  const operatorDetailReadOnly = ref(false)
   const showOperatorEditor = ref(false)
   const operatorEditorMode = ref<'create' | 'edit'>('create')
   const operatorForm = ref({
@@ -87,14 +88,16 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     return operators.value.find(o => o.id === id)
   }
 
-  function viewOperatorDetail(op: Operator) {
+  function viewOperatorDetail(op: Operator, readOnly = false) {
     selectedOperator.value = op
+    operatorDetailReadOnly.value = readOnly
     showOperatorDetail.value = true
   }
 
   function closeOperatorDetail() {
     showOperatorDetail.value = false
     selectedOperator.value = null
+    operatorDetailReadOnly.value = false
   }
 
   function editFromDetail() {
@@ -564,7 +567,7 @@ export const useAnatomyStore = defineStore('anatomy', () => {
   return {
     anatomyTab,
     operators, operatorsLoading, operatorFilterCategory, operatorSearch,
-    showOperatorDetail, selectedOperator, showOperatorEditor,
+    showOperatorDetail, selectedOperator, operatorDetailReadOnly, showOperatorEditor,
     operatorEditorMode, operatorForm, operatorTagInput,
     operatorParamsSchemaValid, operatorParamsSchemaError,
     operatorCategoryOptions, showCategoryManager, categoryManagerLoading,

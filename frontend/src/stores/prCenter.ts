@@ -188,7 +188,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   function loadAllContribData() {
     loadMyStats()
     loadMyPRs()
-    if (contributionTab.value === 'issues') loadMyIssues()
+    loadMyIssues()
   }
 
   // PR drawer

@@ -3,6 +3,8 @@ import { onMounted } from 'vue'
 import { useAnatomyStore } from '@/stores/anatomy'
 import { useAppStore } from '@/stores/app'
 import { useUsersStore } from '@/stores/users'
+import ArchitectureDiagram from '@/components/anatomy/ArchitectureDiagram.vue'
+import ParamsSummary from '@/components/anatomy/ParamsSummary.vue'
 
 const anatomyStore = useAnatomyStore()
 const appStore = useAppStore()
@@ -10,6 +12,7 @@ const usersStore = useUsersStore()
 
 onMounted(() => {
   anatomyStore.switchAnatomyTab('operators')
+  anatomyStore.loadModels()
 })
 
 function removeItem<T>(arr: T[], item: T) {
@@ -33,18 +36,19 @@ function countModelLayers(arch: any[] | undefined): number {
 const modelIcons: Record<string, string> = {
   moe: '🧩', dense: '⬛', hybrid: '🔀', state_space: '〰️',
 }
+
+function onOperatorClickFromDiagram(operatorId: number) {
+  const op = anatomyStore.operators.find(o => o.id === operatorId)
+  if (op) {
+    anatomyStore.viewOperatorDetail(op, true)
+  }
+}
 </script>
 
 <template>
   <div class="view-container">
     <div class="view-header">
       <h2 class="view-title">模型拆解</h2>
-      <div class="view-actions">
-        <button class="btn btn-sm" @click="anatomyStore.openCategoryManager()">分类管理</button>
-        <button v-if="anatomyStore.anatomyTab === 'operators'" class="btn btn-primary btn-sm"
-                @click="anatomyStore.openNewOperator()">+ 新建算子</button>
-        <button v-else class="btn btn-primary btn-sm" @click="anatomyStore.openNewModel()">+ 新建模型</button>
-      </div>
     </div>
 
     <div class="tab-bar" style="margin-bottom:var(--space-5)">
@@ -62,6 +66,8 @@ const modelIcons: Record<string, string> = {
           <option value="">全部分类</option>
           <option v-for="cat in anatomyStore.operatorCategoryOptions" :key="cat.value" :value="cat.value">{{ cat.label }}</option>
         </select>
+        <button class="btn btn-sm" @click="anatomyStore.openCategoryManager()">分类管理</button>
+        <button class="btn btn-primary btn-sm" @click="anatomyStore.openNewOperator()">+ 新建算子</button>
       </div>
 
       <!-- Operators grouped by category -->
@@ -88,10 +94,10 @@ const modelIcons: Record<string, string> = {
             </div>
           </div>
           <div class="op-card-actions">
-            <button class="btn btn-sm btn-ghost" @click.stop="anatomyStore.openEditOperator(op)" title="编辑">
+            <button class="card-action-btn" @click.stop="anatomyStore.openEditOperator(op)" title="编辑">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             </button>
-            <button class="btn btn-sm btn-ghost" @click.stop="anatomyStore.deleteOperator(op)" title="删除" style="color:var(--signal-red);">
+            <button class="card-action-btn is-danger" @click.stop="anatomyStore.deleteOperator(op)" title="删除">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           </div>
@@ -118,6 +124,9 @@ const modelIcons: Record<string, string> = {
                   <option value="">所有架构</option>
                   <option v-for="cat in anatomyStore.modelCategoryOptions" :key="cat.value" :value="cat.value">{{ cat.label }}</option>
                 </select>
+              </div>
+              <div class="panel-actions" style="width:100%;">
+                <button class="btn btn-primary btn-sm" style="width:100%;" @click="anatomyStore.openNewModel()">+ 新建模型</button>
               </div>
             </div>
             <div class="panel-body" style="padding:0;max-height:600px;overflow-y:auto;">
@@ -174,8 +183,14 @@ const modelIcons: Record<string, string> = {
                 <span v-if="anatomyStore.selectedModel.user_id" class="badge-assignee" style="margin-left:4px;">{{ usersStore.userName(anatomyStore.selectedModel.user_id) }}</span>
               </div>
               <div class="panel-actions">
-                <button class="btn btn-sm" @click="anatomyStore.openEditModel()">编辑</button>
-                <button class="btn btn-sm btn-ghost" @click="anatomyStore.deleteModel(anatomyStore.selectedModel)" style="color:var(--signal-red);">删除</button>
+                <button class="btn btn-sm" @click="anatomyStore.openEditModel()">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  编辑
+                </button>
+                <button class="btn btn-sm btn-danger" @click="anatomyStore.deleteModel(anatomyStore.selectedModel)">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  删除
+                </button>
               </div>
             </div>
             <div v-if="anatomyStore.modelDetailLoading" class="empty-state"><div class="empty-icon">⟳</div><div class="empty-title">加载中…</div></div>
@@ -187,12 +202,8 @@ const modelIcons: Record<string, string> = {
 
               <!-- Params summary -->
               <div v-if="anatomyStore.selectedModel.params_summary && typeof anatomyStore.selectedModel.params_summary === 'object' && Object.keys(anatomyStore.selectedModel.params_summary).length > 0" style="margin-bottom:16px;">
-                <div style="display:flex;gap:12px;flex-wrap:wrap;">
-                  <div v-for="(val, key) in anatomyStore.selectedModel.params_summary" :key="key" class="stat-card" style="--accent-color:var(--signal-blue);padding:8px 16px;min-width:100px;">
-                    <div class="stat-label" style="font-size:11px;">{{ key }}</div>
-                    <div class="stat-value" style="font-size:16px;">{{ val }}</div>
-                  </div>
-                </div>
+                <div class="section-heading" style="margin-top:0;">参数汇总</div>
+                <ParamsSummary :data="anatomyStore.selectedModel.params_summary" />
               </div>
 
               <!-- Architecture structure -->
@@ -201,21 +212,14 @@ const modelIcons: Record<string, string> = {
                   <strong>模型结构</strong>
                   <span class="badge">{{ countModelLayers(anatomyStore.selectedModel.architecture) }} 层</span>
                 </div>
-                <div v-if="anatomyStore.selectedModel.architecture && anatomyStore.selectedModel.architecture.length > 0">
-                  <div v-for="(stage, idx) in anatomyStore.selectedModel.architecture" :key="idx" style="margin-bottom:6px;padding:8px 12px;background:var(--bg-secondary);border-radius:4px;border:1px solid var(--border-faint);">
-                    <div style="display:flex;align-items:center;gap:6px;">
-                      <span class="badge" style="background:var(--bg-tertiary);color:var(--text-secondary);">#{{ idx + 1 }}</span>
-                      <span class="badge" :class="stage.type === 'operator' ? 'badge-info' : 'badge-warning'">{{ stage.type === 'operator' ? '算子' : '重复块' }}</span>
-                      <template v-if="stage.type === 'operator'">
-                        <span style="font-weight:500;">{{ stage.operator_name || stage.label || '未知' }}</span>
-                      </template>
-                      <template v-if="stage.type === 'repeat_block'">
-                        <span>{{ stage.label || '重复块' }}</span>
-                        <span class="badge">{{ stage.repeat_count || 1 }}×</span>
-                        <span v-if="stage.contents && stage.contents.length > 0">{{ stage.contents[0].length }} 个算子</span>
-                      </template>
-                    </div>
-                  </div>
+                <ArchitectureDiagram
+                  v-if="anatomyStore.selectedModel.architecture && anatomyStore.selectedModel.architecture.length > 0"
+                  :architecture="anatomyStore.selectedModel.architecture"
+                  :operators="anatomyStore.operators"
+                  @operatorClick="onOperatorClickFromDiagram"
+                />
+                <div v-else style="padding:24px;text-align:center;color:var(--text-tertiary);font-family:var(--font-mono);font-size:var(--text-sm);">
+                  暂无架构数据
                 </div>
               </div>
 
@@ -308,7 +312,7 @@ const modelIcons: Record<string, string> = {
                         <button class="btn btn-sm btn-ghost" @click="anatomyStore.moveStageDown(idx)" :disabled="idx === anatomyStore.editingArchitecture.length - 1" title="下移" style="padding:2px;">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                         </button>
-                        <button class="btn btn-sm btn-ghost" @click="anatomyStore.removeStage(idx)" title="删除" style="color:var(--signal-red);padding:2px;">
+                        <button class="card-action-btn is-danger" @click="anatomyStore.removeStage(idx)" title="删除">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                         </button>
                       </div>
@@ -426,72 +430,86 @@ const modelIcons: Record<string, string> = {
               <span class="badge" style="margin-left:4px;font-size:10px;">{{ anatomyStore.selectedOperator.category }}</span>
               <span v-if="anatomyStore.selectedOperator.user_id" class="badge-assignee" style="margin-left:4px;">{{ usersStore.userName(anatomyStore.selectedOperator.user_id) }}</span>
             </h3>
-            <button class="btn btn-sm" @click="anatomyStore.editFromDetail()">编辑</button>
-            <button class="modal-close" @click="anatomyStore.closeOperatorDetail()">&times;</button>
+            <button v-if="!anatomyStore.operatorDetailReadOnly" class="btn btn-sm" @click="anatomyStore.editFromDetail()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              编辑
+            </button>
+            <button class="modal-close" @click="anatomyStore.closeOperatorDetail()" title="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
-          <div class="modal-body">
+          <div class="modal-body form-stack">
             <!-- Description -->
-            <div v-if="anatomyStore.selectedOperator.description" style="margin-bottom:16px;padding:12px;background:var(--bg-secondary);border-radius:6px;color:var(--text-secondary);font-size:13px;line-height:1.6;">
+            <div v-if="anatomyStore.selectedOperator.description" class="op-detail-desc">
               {{ anatomyStore.selectedOperator.description }}
             </div>
 
             <!-- Shape info -->
-            <div v-if="anatomyStore.selectedOperator.input_shape_desc || anatomyStore.selectedOperator.output_shape_desc" style="margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap;">
-              <div v-if="anatomyStore.selectedOperator.input_shape_desc" class="stat-card" style="--accent-color:var(--signal-blue);padding:8px 16px;min-width:120px;">
-                <div class="stat-label" style="font-size:11px;">输入形状</div>
-                <div class="stat-value" style="font-size:13px;font-family:var(--font-mono);">{{ anatomyStore.selectedOperator.input_shape_desc }}</div>
+            <div v-if="anatomyStore.selectedOperator.input_shape_desc || anatomyStore.selectedOperator.output_shape_desc" class="op-detail-shapes">
+              <div v-if="anatomyStore.selectedOperator.input_shape_desc" class="op-detail-shape-card input">
+                <div class="op-detail-shape-label">输入形状</div>
+                <div class="op-detail-shape-value">{{ anatomyStore.selectedOperator.input_shape_desc }}</div>
               </div>
-              <div v-if="anatomyStore.selectedOperator.output_shape_desc" class="stat-card" style="--accent-color:var(--signal-green);padding:8px 16px;min-width:120px;">
-                <div class="stat-label" style="font-size:11px;">输出形状</div>
-                <div class="stat-value" style="font-size:13px;font-family:var(--font-mono);">{{ anatomyStore.selectedOperator.output_shape_desc }}</div>
+              <div v-if="anatomyStore.selectedOperator.output_shape_desc" class="op-detail-shape-card output">
+                <div class="op-detail-shape-label">输出形状</div>
+                <div class="op-detail-shape-value">{{ anatomyStore.selectedOperator.output_shape_desc }}</div>
               </div>
             </div>
 
             <!-- Params schema table -->
-            <div v-if="anatomyStore.selectedOperator.params_schema?.properties && Object.keys(anatomyStore.selectedOperator.params_schema.properties).length > 0" style="margin-bottom:16px;">
+            <div v-if="anatomyStore.selectedOperator.params_schema?.properties && Object.keys(anatomyStore.selectedOperator.params_schema.properties).length > 0" class="field">
               <label class="form-label">参数</label>
-              <div style="background:var(--bg-secondary);border:1px solid var(--border-faint);border-radius:6px;overflow:hidden;">
-                <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                  <thead>
-                    <tr style="background:var(--bg-tertiary);">
-                      <th style="padding:6px 10px;text-align:left;color:var(--text-secondary);font-weight:500;border-bottom:1px solid var(--border-faint);">参数名</th>
-                      <th style="padding:6px 10px;text-align:left;color:var(--text-secondary);font-weight:500;border-bottom:1px solid var(--border-faint);">类型</th>
-                      <th style="padding:6px 10px;text-align:left;color:var(--text-secondary);font-weight:500;border-bottom:1px solid var(--border-faint);">默认值</th>
-                      <th style="padding:6px 10px;text-align:left;color:var(--text-secondary);font-weight:500;border-bottom:1px solid var(--border-faint);">说明</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(prop, pname) in anatomyStore.selectedOperator.params_schema.properties" :key="pname" style="border-bottom:1px solid var(--border-faint);">
-                      <td style="padding:6px 10px;font-family:var(--font-mono);">{{ pname }}</td>
-                      <td style="padding:6px 10px;color:var(--signal-cyan);">{{ prop.type || '-' }}</td>
-                      <td style="padding:6px 10px;color:var(--text-secondary);">{{ prop.default !== undefined ? prop.default : '-' }}</td>
-                      <td style="padding:6px 10px;color:var(--text-secondary);">{{ prop.description || '' }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <table class="op-params-table">
+                <thead>
+                  <tr>
+                    <th>参数名</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(prop, pname) in anatomyStore.selectedOperator.params_schema.properties" :key="pname">
+                    <td>{{ pname }}</td>
+                    <td style="color:var(--signal-cyan);">{{ prop.type || '-' }}</td>
+                    <td style="color:var(--text-secondary);">{{ prop.default !== undefined ? prop.default : '-' }}</td>
+                    <td style="color:var(--text-secondary);">{{ prop.description || '' }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
             <!-- Code refs -->
-            <div v-if="anatomyStore.selectedOperator.vllm_code_refs && anatomyStore.selectedOperator.vllm_code_refs.length > 0" style="margin-bottom:16px;">
+            <div v-if="anatomyStore.selectedOperator.vllm_code_refs && anatomyStore.selectedOperator.vllm_code_refs.length > 0" class="field">
               <label class="form-label">vLLM 代码引用</label>
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <div v-for="(ref, ri) in anatomyStore.selectedOperator.vllm_code_refs" :key="ri" style="background:var(--bg-secondary);border:1px solid var(--border-faint);border-radius:4px;padding:6px 10px;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);">{{ ref }}</div>
+              <div class="op-code-refs">
+                <div v-for="(ref, ri) in anatomyStore.selectedOperator.vllm_code_refs" :key="ri" class="op-code-ref">{{ ref }}</div>
               </div>
             </div>
 
             <!-- Tags -->
-            <div v-if="(anatomyStore.selectedOperator.tags || []).length > 0">
+            <div v-if="(anatomyStore.selectedOperator.tags || []).length > 0" class="field">
               <label class="form-label">标签</label>
-              <div style="display:flex;gap:4px;flex-wrap:wrap;">
+              <div class="op-detail-tags">
                 <span v-for="tag in anatomyStore.selectedOperator.tags" :key="tag" class="badge">{{ tag }}</span>
               </div>
             </div>
           </div>
           <div class="modal-footer">
-            <button class="btn" @click="anatomyStore.closeOperatorDetail()">关闭</button>
-            <button class="btn btn-ghost" @click="anatomyStore.deleteOperator(anatomyStore.selectedOperator)" style="color:var(--signal-red);">删除</button>
-            <button class="btn btn-primary" @click="anatomyStore.editFromDetail()">编辑</button>
+            <template v-if="anatomyStore.operatorDetailReadOnly">
+              <button class="btn" @click="anatomyStore.closeOperatorDetail()">关闭</button>
+            </template>
+            <template v-else>
+              <button class="btn btn-danger" @click="anatomyStore.deleteOperator(anatomyStore.selectedOperator)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                删除
+              </button>
+              <button class="btn" @click="anatomyStore.closeOperatorDetail()">关闭</button>
+              <button class="btn btn-primary" @click="anatomyStore.editFromDetail()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                编辑
+              </button>
+            </template>
           </div>
         </div>
       </div>
@@ -503,34 +521,36 @@ const modelIcons: Record<string, string> = {
         <div class="modal" @click.stop style="max-width:720px;width:90%;">
           <div class="modal-header">
             <h3>{{ anatomyStore.operatorEditorMode === 'create' ? '新建算子' : '编辑算子' }}</h3>
-            <button class="modal-close" @click="anatomyStore.closeOperatorEditor()">&times;</button>
+            <button class="modal-close" @click="anatomyStore.closeOperatorEditor()" title="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
-          <div class="modal-body">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-              <div><label class="form-label form-label-required">名称</label><input class="input" type="text" placeholder="如 RMSNorm" v-model="anatomyStore.operatorForm.name"></div>
-              <div><label class="form-label form-label-required">显示名称</label><input class="input" type="text" placeholder="如 RMS 归一化" v-model="anatomyStore.operatorForm.display_name"></div>
+          <div class="modal-body form-stack">
+            <div class="grid-2">
+              <div class="field"><label class="form-label form-label-required">名称</label><input class="input" type="text" placeholder="如 RMSNorm" v-model="anatomyStore.operatorForm.name"></div>
+              <div class="field"><label class="form-label form-label-required">显示名称</label><input class="input" type="text" placeholder="如 RMS 归一化" v-model="anatomyStore.operatorForm.display_name"></div>
             </div>
-            <div style="margin-top:12px;">
+            <div class="field">
               <label class="form-label">描述</label>
               <textarea class="textarea" placeholder="算子功能描述" v-model="anatomyStore.operatorForm.description" rows="2"></textarea>
             </div>
-            <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-              <div>
+            <div class="grid-3">
+              <div class="field">
                 <label class="form-label">分类</label>
                 <select class="select" v-model="anatomyStore.operatorForm.category">
                   <option v-for="cat in anatomyStore.operatorCategoryOptions" :key="cat.value" :value="cat.value">{{ cat.label }}</option>
                 </select>
               </div>
-              <div>
+              <div class="field">
                 <label class="form-label">责任人</label>
                 <select class="select" v-model="anatomyStore.operatorForm.user_id">
                   <option :value="null">无</option>
                   <option v-for="u in usersStore.users" :key="u.id" :value="u.id">{{ u.name }}</option>
                 </select>
               </div>
-              <div>
+              <div class="field">
                 <label class="form-label">标签</label>
-                <div style="display:flex;gap:2px;flex-wrap:wrap;margin-bottom:4px;">
+                <div class="tag-input-row">
                   <span v-for="tag in anatomyStore.operatorForm.tags" :key="tag" class="badge badge-removable" @click="anatomyStore.removeOperatorTag(tag)" role="button" tabindex="0">
                     {{ tag }} <span class="badge-remove-icon">&times;</span>
                   </span>
@@ -538,14 +558,14 @@ const modelIcons: Record<string, string> = {
                 <input class="input input-sm" type="text" placeholder="回车添加标签" v-model="anatomyStore.operatorTagInput" @keydown.enter.prevent="anatomyStore.addOperatorTag()">
               </div>
             </div>
-            <div style="margin-top:12px;">
+            <div class="field">
               <label class="form-label">参数 Schema（JSON）</label>
-              <textarea class="textarea textarea-mono" v-model="anatomyStore.operatorForm.params_schema" rows="10" style="width:100%;font-family:var(--font-mono);"></textarea>
-              <div v-if="!anatomyStore.operatorParamsSchemaValid" style="color:var(--signal-red);font-size:11px;margin-top:4px;">JSON 格式错误: {{ anatomyStore.operatorParamsSchemaError }}</div>
+              <textarea class="textarea textarea-mono" v-model="anatomyStore.operatorForm.params_schema" rows="10"></textarea>
+              <div v-if="!anatomyStore.operatorParamsSchemaValid" class="form-error">JSON 格式错误: {{ anatomyStore.operatorParamsSchemaError }}</div>
             </div>
-            <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-              <div><label class="form-label">输入形状</label><input class="input" type="text" placeholder="(batch, seq_len, hidden_size)" v-model="anatomyStore.operatorForm.input_shape_desc" style="width:100%;"></div>
-              <div><label class="form-label">输出形状</label><input class="input" type="text" placeholder="(batch, seq_len, hidden_size)" v-model="anatomyStore.operatorForm.output_shape_desc" style="width:100%;"></div>
+            <div class="grid-2">
+              <div class="field"><label class="form-label">输入形状</label><input class="input" type="text" placeholder="(batch, seq_len, hidden_size)" v-model="anatomyStore.operatorForm.input_shape_desc"></div>
+              <div class="field"><label class="form-label">输出形状</label><input class="input" type="text" placeholder="(batch, seq_len, hidden_size)" v-model="anatomyStore.operatorForm.output_shape_desc"></div>
             </div>
           </div>
           <div class="modal-footer">
@@ -562,24 +582,28 @@ const modelIcons: Record<string, string> = {
         <div class="modal" @click.stop style="max-width:600px;">
           <div class="modal-header">
             <h3>管理算子分类</h3>
-            <button class="modal-close" @click="anatomyStore.showCategoryManager = false">&times;</button>
+            <button class="modal-close" @click="anatomyStore.showCategoryManager = false" title="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
           <div class="modal-body">
             <!-- Add/Edit form -->
-            <div style="display:flex;gap:8px;margin-bottom:16px;align-items:flex-end;">
-              <div style="flex:1;"><label class="field-label-sm">标识</label><input class="input input-sm" type="text" placeholder="如 attention" v-model="anatomyStore.categoryForm.name"></div>
-              <div style="flex:1;"><label class="field-label-sm">显示名称</label><input class="input input-sm" type="text" placeholder="如 Attention" v-model="anatomyStore.categoryForm.display_name"></div>
-              <div style="flex:0 0 60px;"><label class="field-label-sm">排序</label><input class="input input-sm" type="number" v-model="anatomyStore.categoryForm.sort_order"></div>
-              <button class="btn btn-primary btn-sm" @click="anatomyStore.saveCategory()" :disabled="!anatomyStore.categoryForm.name.trim() || !anatomyStore.categoryForm.display_name.trim()">{{ anatomyStore.categoryFormMode === 'create' ? '添加' : '更新' }}</button>
+            <div class="form-row" style="margin-bottom:var(--space-5);align-items:flex-end;">
+              <div class="field" style="flex:1;"><label class="field-label-sm">标识</label><input class="input input-sm" type="text" placeholder="如 attention" v-model="anatomyStore.categoryForm.name"></div>
+              <div class="field" style="flex:1;"><label class="field-label-sm">显示名称</label><input class="input input-sm" type="text" placeholder="如 Attention" v-model="anatomyStore.categoryForm.display_name"></div>
+              <div class="field" style="flex:0 0 60px;"><label class="field-label-sm">排序</label><input class="input input-sm" type="number" v-model="anatomyStore.categoryForm.sort_order"></div>
+              <div class="field" style="flex:0 0 auto;justify-content:flex-end;">
+                <button class="btn btn-primary btn-sm" @click="anatomyStore.saveCategory()" :disabled="!anatomyStore.categoryForm.name.trim() || !anatomyStore.categoryForm.display_name.trim()">{{ anatomyStore.categoryFormMode === 'create' ? '添加' : '更新' }}</button>
+              </div>
             </div>
 
             <!-- Category list -->
-            <div v-if="anatomyStore.categoryManagerLoading" style="text-align:center;padding:24px;color:var(--text-tertiary);">加载中…</div>
-            <div v-if="!anatomyStore.categoryManagerLoading && anatomyStore.categoryList.length === 0" style="text-align:center;padding:24px;color:var(--text-tertiary);">暂无分类</div>
+            <div v-if="anatomyStore.categoryManagerLoading" class="detail-loading is-compact">加载中…</div>
+            <div v-if="!anatomyStore.categoryManagerLoading && anatomyStore.categoryList.length === 0" class="empty-state is-compact">暂无分类</div>
             <div v-if="!anatomyStore.categoryManagerLoading && anatomyStore.categoryList.length > 0" class="list">
               <div v-for="(cat, catIdx) in anatomyStore.categoryList" :key="cat.id" class="list-item">
                 <div class="item-main">
-                  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <div class="item-header">
                     <span class="item-title">{{ cat.display_name }}</span>
                     <span class="badge badge-info" style="font-family:var(--font-mono);font-size:10px;">{{ cat.name }}</span>
                   </div>
@@ -589,16 +613,16 @@ const modelIcons: Record<string, string> = {
                   </div>
                 </div>
                 <div class="item-side">
-                  <button class="btn btn-sm btn-ghost" @click="anatomyStore.moveCategory(cat, 'up')" title="上移" :disabled="catIdx === 0">
+                  <button class="card-action-btn" @click="anatomyStore.moveCategory(cat, 'up')" title="上移" :disabled="catIdx === 0">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
                   </button>
-                  <button class="btn btn-sm btn-ghost" @click="anatomyStore.moveCategory(cat, 'down')" title="下移" :disabled="catIdx === anatomyStore.categoryList.length - 1">
+                  <button class="card-action-btn" @click="anatomyStore.moveCategory(cat, 'down')" title="下移" :disabled="catIdx === anatomyStore.categoryList.length - 1">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                   </button>
-                  <button class="btn btn-sm btn-ghost" @click="anatomyStore.openEditCategory(cat)" title="编辑">
+                  <button class="card-action-btn" @click="anatomyStore.openEditCategory(cat)" title="编辑">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </button>
-                  <button class="btn btn-sm btn-ghost" @click="anatomyStore.deleteCategory(cat)" title="删除" style="color:var(--signal-red);">
+                  <button class="card-action-btn is-danger" @click="anatomyStore.deleteCategory(cat)" title="删除">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                   </button>
                 </div>

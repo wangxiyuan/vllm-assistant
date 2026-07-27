@@ -1,1 +1,9 @@
-@import './variables.css';
+/* vLLM Assistant - Industrial Mission Control stylesheet.
+   Split into focused modules under ./parts for maintainability. */
+
+@import './parts/01-tokens.css';
+@import './parts/02-base.css';
+@import './parts/03-layout.css';
+@import './parts/04-components.css';
+@import './parts/05-views.css';
+@import './parts/06-utilities.css';

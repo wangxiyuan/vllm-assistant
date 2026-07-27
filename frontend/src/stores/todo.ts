@@ -138,7 +138,7 @@ export const useTodoStore = defineStore('todo', () => {
     selectedTaskDetails.value = null
     taskDrawerLoading.value = false
     editingTask.value = false
-    dedupResult.value = task.dedup_check_result || null
+    dedupResult.value = (task as any).dedup_check_result || null
     subtasks.value = []
     showSubtaskForm.value = false
     loadTaskDetails(task.id)
@@ -424,6 +424,38 @@ export const useTodoStore = defineStore('todo', () => {
     }
   }
 
+  // Resolve ref
+  const resolveRefLoading = ref(false)
+
+  async function resolveRef(input: string): Promise<any | null> {
+    if (!input.trim()) return null
+    resolveRefLoading.value = true
+    try {
+      const result: any = await api('/api/personal-todo/resolve-ref', {
+        method: 'POST',
+        body: JSON.stringify({ input: input.trim() }),
+      })
+      return result
+    } catch (e: any) {
+      useAppStore().showToast('解析失败', e.message, 'error')
+      return null
+    } finally {
+      resolveRefLoading.value = false
+    }
+  }
+
+  function addRef(refs: any[], ref: any) {
+    if (refs.some(r => r.type === ref.type && r.number === ref.number)) {
+      useAppStore().showToast('已存在', '该引用已添加', 'info')
+      return
+    }
+    refs.push(ref)
+  }
+
+  function removeRef(refs: any[], idx: number) {
+    refs.splice(idx, 1)
+  }
+
   // Filters
   function switchStatusFilter(status: string) {
     filterStatus.value = status
@@ -483,6 +515,7 @@ export const useTodoStore = defineStore('todo', () => {
     runDedupCheck, openTaskInsight, generateInsightFromTask,
     loadSubtasks, createSubtask, toggleSubtaskDone, deleteSubtask,
     startEditSubtask, cancelEditSubtask, saveSubtask,
+    resolveRefLoading, resolveRef, addRef, removeRef,
     switchStatusFilter, switchPriorityFilter,
   }
 })

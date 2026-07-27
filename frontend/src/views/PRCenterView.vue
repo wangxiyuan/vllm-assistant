@@ -47,17 +47,17 @@ function onContributorChange() {
     <!-- Stats overview -->
     <div v-if="prStore.myStats" class="stats-row">
       <div class="stat-card">
-        <div class="stat-value">{{ prStore.myStats.totalPRs || 0 }}</div>
+        <div class="stat-value">{{ (prStore.myStats.summary?.open_prs || 0) + (prStore.myStats.summary?.merged_prs || 0) }}</div>
         <div class="stat-label">PRs</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">{{ prStore.myStats.totalIssues || 0 }}</div>
+        <div class="stat-value">{{ prStore.myStats.summary?.open_issues || 0 }}</div>
         <div class="stat-label">Issues</div>
       </div>
-      <div v-if="prStore.myStats.monthly" class="stat-card stat-chart">
+      <div v-if="prStore.myStats.monthly?.created" class="stat-card stat-chart">
         <div class="monthly-bars">
           <div v-for="(count, month) in prStore.myStats.monthly.created" :key="month" class="month-bar-wrap">
-            <div class="month-bar" :style="{ height: prStore.monthBarHeight(count, prStore.myStats.monthly.created) + '%' }"></div>
+            <div class="month-bar" :style="{ height: Math.round(count / Math.max(...Object.values(prStore.myStats.monthly.created), 1) * 100) + '%' }"></div>
             <div class="month-label">{{ prStore.formatMonthLabel(month) }}</div>
           </div>
         </div>
@@ -67,9 +67,9 @@ function onContributorChange() {
     <!-- Tabs -->
     <div class="tab-bar" style="margin-bottom:var(--space-5)">
       <button class="tab" :class="{ active: prStore.contributionTab === 'prs' }"
-              @click="prStore.switchContributionTab('prs')">PRs ({{ prStore.allPRCount }})</button>
+              @click="prStore.switchContributionTab('prs')">PRs ({{ prStore.openPRCount }})</button>
       <button class="tab" :class="{ active: prStore.contributionTab === 'issues' }"
-              @click="prStore.switchContributionTab('issues')">Issues ({{ prStore.allIssueCount }})</button>
+              @click="prStore.switchContributionTab('issues')">Issues ({{ prStore.openIssueCount }})</button>
     </div>
 
     <!-- PR list -->
@@ -158,42 +158,47 @@ function onContributorChange() {
               <h2>{{ prStore.selectedPR.title }}</h2>
             </div>
             <div class="drawer-actions">
-              <button class="btn btn-sm" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr') }"
+              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr') }"
                       @click.stop="watchlistStore.toggleWatch(prStore.selectedPR.pr_number, 'pr', prStore.selectedPR.title, 'https://github.com/vllm-project/vllm/pull/' + prStore.selectedPR.pr_number)"
                       :title="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr') ? '取消关注' : '添加到特别关注'">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               </button>
-              <a :href="'https://github.com/vllm-project/vllm/pull/' + prStore.selectedPR.pr_number" target="_blank" class="btn btn-sm">在 GitHub 打开</a>
-              <button class="btn btn-sm btn-ghost" @click="prStore.closePR()">&times;</button>
+              <a :href="'https://github.com/vllm-project/vllm/pull/' + prStore.selectedPR.pr_number" target="_blank" class="btn btn-sm">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                GitHub
+              </a>
+              <button class="drawer-close" @click="prStore.closePR()" title="关闭">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
             </div>
           </div>
           <!-- Tab bar -->
-          <div class="tab-bar" style="margin:var(--space-4) var(--space-7) 0">
+          <div class="tab-bar tab-bar-drawer">
             <button class="tab" :class="{ active: prStore.prDetailTab === 'details' }"
                     @click="prStore.prDetailTab = 'details'">详情</button>
             <button class="tab" :class="{ active: prStore.prDetailTab === 'summary' }"
                     @click="prStore.prDetailTab = 'summary'">
               AI 总结
-              <span v-if="prStore.aiSummaryLoading" class="badge" style="background:var(--amber-glow);color:var(--amber)">…</span>
-              <span v-else-if="prStore.aiSummary" class="badge">✓</span>
+              <span v-if="prStore.aiSummaryLoading" class="badge badge-loading">…</span>
+              <span v-else-if="prStore.aiSummary" class="badge badge-done">✓</span>
             </button>
             <button class="tab" :class="{ active: prStore.prDetailTab === 'review' }"
                     @click="prStore.prDetailTab = 'review'">
               AI Review
-              <span v-if="prStore.aiReviewLoading" class="badge" style="background:var(--amber-glow);color:var(--amber)">…</span>
-              <span v-else-if="prStore.aiReview" class="badge">✓</span>
+              <span v-if="prStore.aiReviewLoading" class="badge badge-loading">…</span>
+              <span v-else-if="prStore.aiReview" class="badge badge-done">✓</span>
             </button>
           </div>
           <div class="drawer-body">
             <!-- Details tab (with translate toggle) -->
             <template v-if="prStore.prDetailTab === 'details'">
               <div v-if="prStore.loadingDetails" class="detail-loading">加载中…</div>
-              <div v-else-if="prStore.prLoadError" class="detail-loading" style="color:var(--signal-red)">{{ prStore.prLoadError }}</div>
+              <div v-else-if="prStore.prLoadError" class="detail-loading is-error">{{ prStore.prLoadError }}</div>
               <div v-else-if="prStore.prDetails">
                 <!-- Translate toggle -->
-                <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4)">
+                <div class="drawer-toolbar">
                   <template v-if="prStore.prTranslatedBody">
                     <button class="btn btn-sm" :class="{ 'btn-active': !prStore.prShowChinese }"
                             @click="prStore.prShowChinese = false">EN</button>
@@ -209,11 +214,11 @@ function onContributorChange() {
                 </div>
                 <div v-if="prStore.prShowChinese && prStore.prTranslatedBody" class="pr-body" v-html="renderMarkdown(prStore.prTranslatedBody)"></div>
                 <div v-else-if="prStore.prDetails.pr?.body" class="pr-body" v-html="renderMarkdown(prStore.prDetails.pr.body)"></div>
-                <div v-else class="empty-state" style="padding:var(--space-5)"><p>无详细描述</p></div>
+                <div v-else class="empty-state is-compact"><p>无详细描述</p></div>
 
                 <!-- Changed files list -->
                 <template v-if="prStore.prDetails.files && prStore.prDetails.files.length > 0">
-                  <h4 class="text-mono" style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-tertiary);margin:var(--space-5) 0 var(--space-3);">
+                  <h4 class="section-heading">
                     变更文件 ({{ prStore.prDetails.files.length }})
                   </h4>
                   <ul class="file-list">
@@ -241,7 +246,7 @@ function onContributorChange() {
             <template v-if="prStore.prDetailTab === 'summary'">
               <div v-if="prStore.aiSummaryLoading" class="detail-loading">AI 总结生成中…</div>
               <div v-else-if="prStore.aiSummary" class="ai-section-body" v-html="renderSummary(prStore.aiSummary)"></div>
-              <div v-else class="empty-state" style="padding:var(--space-5)">
+              <div v-else class="empty-state is-compact">
                 <p>尚未生成 AI 总结</p>
                 <button class="btn btn-sm btn-primary" @click="prStore.generateSummary('pr')">生成 AI 总结</button>
               </div>
@@ -251,7 +256,7 @@ function onContributorChange() {
             <template v-if="prStore.prDetailTab === 'review'">
               <div v-if="prStore.aiReviewLoading" class="detail-loading">AI Review 生成中… ({{ prStore.aiReviewElapsed }}s)</div>
               <div v-else-if="prStore.aiReview" class="ai-section-body" v-html="renderReview(prStore.aiReview)"></div>
-              <div v-else class="empty-state" style="padding:var(--space-5)">
+              <div v-else class="empty-state is-compact">
                 <p>尚未生成 AI Review</p>
                 <button class="btn btn-sm btn-primary" @click="prStore.generateReview()">生成 AI Review</button>
               </div>
@@ -274,36 +279,41 @@ function onContributorChange() {
               <h2>{{ prStore.selectedIssue.title }}</h2>
             </div>
             <div class="drawer-actions">
-              <button class="btn btn-sm" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') }"
+              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') }"
                       @click.stop="watchlistStore.toggleWatch(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.title, 'https://github.com/vllm-project/vllm/issues/' + prStore.selectedIssue.number)"
                       :title="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') ? '取消关注' : '添加到特别关注'">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               </button>
-              <a :href="'https://github.com/vllm-project/vllm/issues/' + prStore.selectedIssue.number" target="_blank" class="btn btn-sm">在 GitHub 打开</a>
-              <button class="btn btn-sm btn-ghost" @click="prStore.closeIssue()">&times;</button>
+              <a :href="'https://github.com/vllm-project/vllm/issues/' + prStore.selectedIssue.number" target="_blank" class="btn btn-sm">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                GitHub
+              </a>
+              <button class="drawer-close" @click="prStore.closeIssue()" title="关闭">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
             </div>
           </div>
           <!-- Tab bar -->
-          <div class="tab-bar" style="margin:var(--space-4) var(--space-7) 0">
+          <div class="tab-bar tab-bar-drawer">
             <button class="tab" :class="{ active: prStore.issueDetailTab === 'details' }"
                     @click="prStore.issueDetailTab = 'details'">详情</button>
             <button class="tab" :class="{ active: prStore.issueDetailTab === 'summary' }"
                     @click="prStore.issueDetailTab = 'summary'">
               AI 总结
-              <span v-if="prStore.aiSummaryLoading" class="badge" style="background:var(--amber-glow);color:var(--amber)">…</span>
-              <span v-else-if="prStore.aiSummary" class="badge">✓</span>
+              <span v-if="prStore.aiSummaryLoading" class="badge badge-loading">…</span>
+              <span v-else-if="prStore.aiSummary" class="badge badge-done">✓</span>
             </button>
           </div>
           <div class="drawer-body">
             <!-- Details tab (with translate toggle) -->
             <template v-if="prStore.issueDetailTab === 'details'">
               <div v-if="prStore.loadingIssue" class="detail-loading">加载中…</div>
-              <div v-else-if="prStore.issueLoadError" class="detail-loading" style="color:var(--signal-red)">{{ prStore.issueLoadError }}</div>
+              <div v-else-if="prStore.issueLoadError" class="detail-loading is-error">{{ prStore.issueLoadError }}</div>
               <div v-else>
                 <!-- Translate toggle -->
-                <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4)">
+                <div class="drawer-toolbar">
                   <template v-if="prStore.issueTranslatedBody">
                     <button class="btn btn-sm" :class="{ 'btn-active': !prStore.issueShowChinese }"
                             @click="prStore.issueShowChinese = false">EN</button>
@@ -319,7 +329,7 @@ function onContributorChange() {
                 </div>
                 <div v-if="prStore.issueShowChinese && prStore.issueTranslatedBody" class="pr-body" v-html="renderMarkdown(prStore.issueTranslatedBody)"></div>
                 <div v-else-if="prStore.issueDetails?.body" class="pr-body" v-html="renderMarkdown(prStore.issueDetails.body)"></div>
-                <div v-else class="empty-state" style="padding:var(--space-5)"><p>无详细描述</p></div>
+                <div v-else class="empty-state is-compact"><p>无详细描述</p></div>
               </div>
             </template>
 
@@ -327,7 +337,7 @@ function onContributorChange() {
             <template v-if="prStore.issueDetailTab === 'summary'">
               <div v-if="prStore.aiSummaryLoading" class="detail-loading">AI 总结生成中…</div>
               <div v-else-if="prStore.aiSummary" class="ai-section-body" v-html="renderSummary(prStore.aiSummary)"></div>
-              <div v-else class="empty-state" style="padding:var(--space-5)">
+              <div v-else class="empty-state is-compact">
                 <p>尚未生成 AI 总结</p>
                 <button class="btn btn-sm btn-primary" @click="prStore.generateSummary('issue')">生成 AI 总结</button>
               </div>

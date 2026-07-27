@@ -25,7 +25,7 @@ const viewPlaceholders: Record<string, string> = {
   'anatomy': '搜索算子或模型…',
 }
 
-const currentTitle = viewTitles[route.name as string] || '任务控制台'
+const currentTitle = viewTitles[route.name as string] || ''
 const searchPlaceholder = viewPlaceholders[route.name as string] || '搜索…'
 </script>
 
@@ -50,13 +50,12 @@ const searchPlaceholder = viewPlaceholders[route.name as string] || '搜索…'
       </div>
     </div>
     <div class="header-actions">
-      <div class="sync-status" :class="appStore.syncStatusClass"
-           :title="'上次同步: ' + (appStore.lastSync ? new Date(appStore.lastSync).toLocaleString('zh-CN') : '从未')">
+      <div class="sync-status">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
         </svg>
         <span class="sync-text">{{ appStore.syncStatusText }}</span>
-        <span v-if="appStore.nextSyncCountdown" class="sync-countdown">下次: {{ appStore.nextSync }}</span>
+        <span v-if="appStore.nextSyncCountdown" class="sync-countdown">{{ appStore.nextSyncCountdown }}</span>
       </div>
       <button class="header-btn" @click="appStore.refreshAll()" title="手动同步 (R)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

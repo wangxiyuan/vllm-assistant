@@ -479,13 +479,13 @@ class MemoryService:
                 tags = [item.type, area] + (labels[:5] if labels else [])
 
                 title = item.title or ""
-                body_preview = (item.body or "")[:500]
+                body_preview = (item.body or "")
                 content = (
                     f"## {title}\n\n"
                     f"**类型**: {'PR' if item.type == 'pr' else 'Issue'} "
                     f"**状态**: {item.state} "
                     f"**标签**: {', '.join(labels) if labels else '无'}\n\n"
-                    f"**摘要**: {body_preview}\n"
+                    f"**正文**: {body_preview}\n"
                 )
                 source_ref = f"vllm-project/vllm#{item.number}"
                 # 用 items 表的 updated_at 作为 checksum 判断变化
@@ -532,7 +532,7 @@ class MemoryService:
                 source_ref = f"article#{article.id}"
                 content = (
                     f"## {article.title}\n\n"
-                    f"{article.content[:2000]}\n"
+                    f"{article.content}\n"
                 )
                 article_checksum = str(article.updated_at.timestamp()) if article.updated_at else ""
 
@@ -768,18 +768,14 @@ class MemoryService:
         if current_section.strip():
             sections.append(current_section.strip())
 
-        # 只保留前 5 个章节，每个截断到 500 字
+        # 只保留前 5 个章节
         result = []
         if title:
             result.append(f"# {title}\n")
         for section in sections[:5]:
-            if len(section) > 500:
-                section = section[:500] + "\n...（截断）"
             result.append(section)
 
         final = "\n\n".join(result)
-        if len(final) > 3000:
-            final = final[:3000] + "\n\n...（全文截断）"
         return final
 
     def _extract_code_structure(self, file_path: str, content: str) -> str:
@@ -832,7 +828,7 @@ class MemoryService:
         """转义 FTS5 查询字符串，避免特殊字符导致语法错误"""
         # FTS5 特殊字符: ^ * + - ~ ( ) { } [ ] " : . 和空格
         # 如果包含特殊字符，用双引号括起来
-        if any(c in query for c in '"^+~(){}[]:.'):
+        if any(c in query for c in '-"^+~(){}[]:.'):
             # 转义内部的引号
             escaped = query.replace('"', '""')
             return f'"{escaped}"'

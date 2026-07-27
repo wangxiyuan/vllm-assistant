@@ -17,6 +17,31 @@ logger = logging.getLogger(__name__)
 # 全局注册表
 _tools: Dict[str, dict] = {}
 
+# 工具类别映射：前端可按类别请求，后端展开成具体工具。
+# 新增工具时只需在 register_tool() 之后把名字加到对应类别即可。
+CATEGORY_TOOLS: Dict[str, List[str]] = {
+    "github": [
+        "search_issues",
+        "get_issue_detail",
+        "get_pr_diff",
+        "get_github_releases",
+    ],
+    "knowledge": [
+        "search_memory",
+        "search_by_tags",
+    ],
+    "code": [
+        "read_local_code",
+        "search_code",
+    ],
+    "doc": [
+        "search_docs",
+    ],
+    "academic": [
+        "search_arxiv",
+    ],
+}
+
 
 def register_tool(name: str, schema: dict, handler: Callable) -> None:
     """注册一个 tool。
@@ -45,7 +70,9 @@ def get_tool_schemas(names: Optional[List[str]] = None) -> List[dict]:
     """获取指定工具列表的 OpenAI function calling schema。
 
     Args:
-        names: 工具名称列表，None 则返回所有已注册工具
+        names: 工具或类别名称列表。None 返回全部。
+               类别名会自动展开为对应具体工具，类别+具体工具名可混传，
+               重复项会去重（按出现顺序）。
 
     Returns:
         OpenAI tools 参数格式的列表
@@ -53,8 +80,21 @@ def get_tool_schemas(names: Optional[List[str]] = None) -> List[dict]:
     if names is None:
         return [t["schema"] for t in _tools.values()]
 
-    schemas = []
+    # 先把类别名展开成具体工具名
+    expanded: List[str] = []
     for name in names:
+        if name in CATEGORY_TOOLS:
+            expanded.extend(CATEGORY_TOOLS[name])
+        else:
+            expanded.append(name)
+
+    # 去重 + 查表（保持出现顺序）
+    seen = set()
+    schemas: List[dict] = []
+    for name in expanded:
+        if name in seen:
+            continue
+        seen.add(name)
         tool = _tools.get(name)
         if tool:
             schemas.append(tool["schema"])
@@ -72,6 +112,14 @@ def list_tools() -> List[Dict[str, Any]]:
             "parameters": t["schema"].get("function", {}).get("parameters", {}),
         }
         for t in _tools.values()
+    ]
+
+
+def list_categories() -> List[Dict[str, Any]]:
+    """列出所有工具类别及其包含的工具名"""
+    return [
+        {"name": name, "tools": list(tool_names)}
+        for name, tool_names in CATEGORY_TOOLS.items()
     ]
 
 

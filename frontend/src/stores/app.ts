@@ -68,6 +68,14 @@ export const useAppStore = defineStore('app', () => {
         nextSync.value = times[0] || null
       }
     } catch (_) {}
+
+    // 每秒更新 nowTick，让 nextSyncCountdown 实时刷新
+    clearInterval((window as any).__syncTickInterval)
+    if (nextSync.value) {
+      ;(window as any).__syncTickInterval = setInterval(() => {
+        nowTick.value = Date.now()
+      }, 1000)
+    }
   }
 
   // Toast

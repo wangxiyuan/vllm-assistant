@@ -41,12 +41,17 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const watchlistEditNewTaskSource = ref('self')
   const watchlistEditNewTaskPriority = ref('P2')
 
+  const watchlistAssigneeFilter = ref<number | null>(null)
+
   const filteredWatchlist = computed(() => {
     const appStore = useAppStore()
     const q = (appStore.searchQuery || '').toLowerCase().trim()
     let list = watchlist.value
     if (watchlistTab.value !== 'all') {
       list = list.filter(w => w.item_type === watchlistTab.value)
+    }
+    if (watchlistAssigneeFilter.value !== null) {
+      list = list.filter(w => w.assignee_id === watchlistAssigneeFilter.value)
     }
     if (q) {
       list = list.filter(w =>
@@ -338,7 +343,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   }
 
   return {
-    watchlist, watchlistSet, watchlistTab, filteredWatchlist,
+    watchlist, watchlistSet, watchlistTab, watchlistAssigneeFilter, filteredWatchlist,
     showAddModal, manualAddType, manualAddNumber, manualAddLoading,
     manualAddNote, manualAddAssigneeId, manualAddLinkTaskMode,
     manualAddTaskSearchQuery, manualAddTaskSearchResults, manualAddTaskSearchLoading,

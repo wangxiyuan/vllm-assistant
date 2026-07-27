@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, onUnmounted, ref, nextTick, computed, watch } from 'vue'
 import { useArticlesStore } from '@/stores/articles'
 import { useAppStore } from '@/stores/app'
 import { timeAgo } from '@/utils/helpers'
@@ -7,13 +7,47 @@ import { timeAgo } from '@/utils/helpers'
 const articlesStore = useArticlesStore()
 const appStore = useAppStore()
 
+const activeHeadingId = ref<string | null>(null)
+
+let scrollEl: HTMLElement | null = null
+
+function updateActiveHeading() {
+  const headings = articlesStore.articleToc
+  if (!headings.length || !scrollEl) return
+  const scrollRect = scrollEl.getBoundingClientRect()
+  const threshold = scrollRect.top + 80
+  let active: string | null = null
+  for (const h of headings) {
+    const el = document.getElementById(h.id)
+    if (!el) continue
+    const top = el.getBoundingClientRect().top
+    if (top <= threshold) active = h.id
+    else break
+  }
+  activeHeadingId.value = active
+}
+
 onMounted(() => {
   articlesStore.loadArticles()
+  scrollEl = document.querySelector('.main')
+  scrollEl?.addEventListener('scroll', updateActiveHeading, { passive: true })
+})
+
+onUnmounted(() => {
+  scrollEl?.removeEventListener('scroll', updateActiveHeading)
 })
 
 const appliedAreas = computed(() => {
   return appStore.areas
 })
+
+// Recompute active heading whenever the article's HTML or TOC changes
+watch(
+  () => [articlesStore.articleRenderedHtml, articlesStore.articleToc],
+  () => {
+    nextTick(() => updateActiveHeading())
+  },
+)
 </script>
 
 <template>
@@ -23,8 +57,8 @@ const appliedAreas = computed(() => {
       <div class="view-header">
         <h2 class="view-title">技术Blog</h2>
         <div class="view-actions">
-          <span class="view-stats">{{ articlesStore.articleStatsText }}</span>
           <button class="btn btn-primary btn-sm" @click="articlesStore.openNewArticle()">+ 写文章</button>
+          <span class="view-stats">{{ articlesStore.articleStatsText }}</span>
         </div>
       </div>
 
@@ -50,13 +84,14 @@ const appliedAreas = computed(() => {
         <div v-for="article in articlesStore.articles" :key="article.id" class="article-card" @click="articlesStore.viewArticle(article)">
           <div class="article-card-header">
             <h3 class="article-title">{{ article.title }}</h3>
-            <div class="article-actions">
-              <button class="btn btn-sm" @click.stop="articlesStore.openEditArticle(article)">编辑</button>
-              <button class="btn btn-sm btn-ghost" @click.stop="articlesStore.validateArticle(article, false)" :disabled="articlesStore.validating" title="验证引用">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <div class="card-action-row article-actions">
+              <button class="card-action-btn" @click.stop="articlesStore.openEditArticle(article)" title="编辑文章">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                编辑
               </button>
-              <button class="btn btn-sm btn-ghost" @click.stop="articlesStore.deleteArticle(article)" :disabled="articlesStore.deletingArticle" style="color:var(--signal-red);">
+              <button class="card-action-btn is-danger" @click.stop="articlesStore.deleteArticle(article)" :disabled="articlesStore.deletingArticle" title="删除文章">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                删除
               </button>
             </div>
           </div>
@@ -78,15 +113,28 @@ const appliedAreas = computed(() => {
     <!-- Article editor -->
     <template v-if="articlesStore.editorOpen">
       <div class="editor-header">
-        <h2 class="view-title">{{ articlesStore.editorMode === 'create' ? '新建文章' : '编辑文章' }}</h2>
+        <div class="editor-header-left">
+          <h2 class="view-title">{{ articlesStore.editorMode === 'create' ? '新建文章' : '编辑文章' }}</h2>
+        </div>
         <div class="editor-actions">
           <button class="btn btn-sm" @click="articlesStore.openInsertRef()" title="插入代码引用">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
             插入代码引用
           </button>
-          <button class="btn btn-sm" @click="articlesStore.closeEditor()">取消</button>
-          <button class="btn btn-sm" @click="articlesStore.previewArticle()">预览 (Ctrl+P)</button>
-          <button class="btn btn-primary btn-sm" @click="articlesStore.saveArticle()">保存 (Ctrl+S)</button>
+          <span class="action-bar-divider"></span>
+          <button class="btn btn-sm btn-ghost" @click="articlesStore.closeEditor()">取消</button>
+          <button v-if="articlesStore.editorSubView === 'editor'" class="btn btn-sm" @click="articlesStore.previewArticle()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            预览 <span class="text-tertiary">(Ctrl+P)</span>
+          </button>
+          <button v-else class="btn btn-sm" @click="articlesStore.closePreview()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            返回编辑
+          </button>
+          <button class="btn btn-primary btn-sm" @click="articlesStore.saveArticle()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            保存 <span style="opacity:0.7">(Ctrl+S)</span>
+          </button>
         </div>
       </div>
       <div v-if="articlesStore.editorSubView === 'editor'" class="editor-body">
@@ -128,25 +176,52 @@ const appliedAreas = computed(() => {
     <Teleport to="body">
       <div v-if="articlesStore.showInsertRef" class="modal-backdrop" @click="articlesStore.closeInsertRef()">
         <div class="modal" @click.stop>
-          <h3 class="modal-title">插入代码引用</h3>
-          <div class="form-row">
-            <select class="select" v-model="articlesStore.insertRef.repo">
-              <option value="vllm">vllm</option>
-              <option value="vllm-ascend">vllm-ascend</option>
-            </select>
-            <input class="input" type="text" v-model="articlesStore.insertRef.file_path" placeholder="文件路径 (如 engine/core.py)" style="flex:1;" />
+          <div class="modal-header">
+            <h3>插入代码引用</h3>
+            <button class="modal-close" @click="articlesStore.closeInsertRef()" title="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
-          <div class="form-row">
-            <input class="input" type="number" v-model.number="articlesStore.insertRef.line_start" placeholder="起始行" style="width:100px;" />
-            <input class="input" type="number" v-model.number="articlesStore.insertRef.line_end" placeholder="结束行（可选）" style="width:100px;" />
-            <button class="btn btn-sm" @click="articlesStore.searchCacheFiles()">预览代码</button>
+          <div class="modal-body">
+            <div class="form-row" style="align-items:flex-end;">
+              <div class="field" style="flex:0 0 140px;">
+                <label class="form-label">仓库</label>
+                <select class="select" v-model="articlesStore.insertRef.repo" @change="articlesStore.loadCachedFiles()">
+                  <option value="vllm">vllm</option>
+                  <option value="vllm-ascend">vllm-ascend</option>
+                </select>
+              </div>
+              <div class="field" style="flex:1;">
+                <label class="form-label">文件路径</label>
+                <div style="display:flex;gap:4px;">
+                  <input class="input" type="text" v-model="articlesStore.insertRef.file_path" placeholder="搜索或输入文件路径" @input="articlesStore.loadCachedFiles()" style="flex:1;" list="cached-file-list" />
+                  <datalist id="cached-file-list">
+                    <option v-for="f in articlesStore.cacheFiles" :key="f" :value="f" />
+                  </datalist>
+                </div>
+              </div>
+            </div>
+            <div class="form-row" style="align-items:flex-end;">
+              <div class="field" style="flex:0 0 120px;">
+                <label class="form-label">起始行</label>
+                <input class="input" type="number" v-model.number="articlesStore.insertRef.line_start" placeholder="10" />
+              </div>
+              <div class="field" style="flex:0 0 120px;">
+                <label class="form-label">结束行</label>
+                <input class="input" type="number" v-model.number="articlesStore.insertRef.line_end" placeholder="20（可选）" />
+              </div>
+              <div class="field" style="flex:0 0 auto;">
+                <button class="btn btn-sm" @click="articlesStore.searchCacheFiles()">预览代码</button>
+              </div>
+            </div>
+            <div v-if="articlesStore.insertRefPreview" style="margin-top:var(--space-4);">
+              <label class="form-label">代码预览</label>
+              <pre class="code-preview" style="max-height:200px;">{{ articlesStore.insertRefPreview }}</pre>
+            </div>
           </div>
-          <div v-if="articlesStore.insertRefPreview" style="margin:var(--space-4) 0;padding:12px;background:var(--bg-secondary);border-radius:6px;">
-            <pre style="font-size:11px;max-height:200px;overflow:auto;">{{ articlesStore.insertRefPreview }}</pre>
-          </div>
-          <div class="modal-actions">
+          <div class="modal-footer">
             <button class="btn" @click="articlesStore.closeInsertRef()">取消</button>
-            <button class="btn btn-primary" @click="articlesStore.confirmInsertRef()">插入</button>
+            <button class="btn btn-primary" @click="articlesStore.confirmInsertRef()">插入引用</button>
           </div>
         </div>
       </div>
@@ -155,12 +230,27 @@ const appliedAreas = computed(() => {
     <!-- Article detail view -->
     <template v-if="articlesStore.articleViewOpen">
       <div class="detail-header">
-        <button class="btn btn-sm" @click="articlesStore.closeArticleView()">← 返回</button>
-        <div class="detail-actions">
-          <button class="btn btn-sm" @click="articlesStore.validateArticle(articlesStore.selectedArticle!, false)" :disabled="articlesStore.validating">验证引用</button>
-          <button class="btn btn-sm" @click="articlesStore.validateArticle(articlesStore.selectedArticle!, true)" :disabled="articlesStore.validating" title="深层验证（含内容哈希对比）">深层验证</button>
-          <button class="btn btn-sm" @click="articlesStore.openEditArticle(articlesStore.selectedArticle!)">编辑</button>
-          <button class="btn btn-sm btn-ghost" style="color:var(--signal-red);" @click="articlesStore.deleteArticle(articlesStore.selectedArticle!)" :disabled="articlesStore.deletingArticle">删除</button>
+        <button class="btn btn-sm" @click="articlesStore.closeArticleView()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          返回
+        </button>
+        <div class="detail-action-bar" style="margin-top:0;padding-top:0;border-top:none;">
+          <div class="action-bar-secondary">
+            <button class="btn btn-sm" @click="articlesStore.openEditArticle(articlesStore.selectedArticle!)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              编辑
+            </button>
+            <button class="btn btn-sm" @click="articlesStore.validateArticle(articlesStore.selectedArticle!, true)" :disabled="articlesStore.validating" title="校验代码引用是否有效（含内容哈希对比）">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              {{ articlesStore.validating ? '校验中…' : '代码引用校验' }}
+            </button>
+          </div>
+          <div class="action-bar-primary">
+            <button class="btn btn-sm btn-danger" @click="articlesStore.deleteArticle(articlesStore.selectedArticle!)" :disabled="articlesStore.deletingArticle">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              删除
+            </button>
+          </div>
         </div>
       </div>
 
@@ -168,34 +258,38 @@ const appliedAreas = computed(() => {
       <div v-if="articlesStore.validationResult" class="ai-result" style="margin-bottom:var(--space-4);">
         <div class="ai-result-header">
           <div class="ai-result-title">验证结果</div>
-          <button class="btn btn-sm btn-ghost" @click="articlesStore.closeValidation()">&times;</button>
+          <button class="btn btn-sm btn-ghost" @click="articlesStore.closeValidation()" title="关闭">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
         <div class="ai-result-body">
           <p>共 <strong>{{ articlesStore.validationResult.total_refs }}</strong> 个引用，
-          <span style="color:var(--signal-green);">{{ articlesStore.validationResult.valid_refs }} 有效</span>
-          <span v-if="articlesStore.validationResult.invalid_refs > 0" style="color:var(--signal-red);">，{{ articlesStore.validationResult.invalid_refs }} 无效</span>
+          <span class="text-success">{{ articlesStore.validationResult.valid_refs }} 有效</span>
+          <span v-if="articlesStore.validationResult.invalid_refs > 0" class="text-danger">，{{ articlesStore.validationResult.invalid_refs }} 无效</span>
           </p>
-          <div v-for="detail in (articlesStore.validationResult.details || [])" :key="detail.file_path + detail.line_start" class="dedup-item" style="font-size:12px;">
-            <div :style="'color:' + (detail.is_valid ? 'var(--signal-green)' : 'var(--signal-red)')">
+          <div v-for="detail in (articlesStore.validationResult.details || [])" :key="detail.file_path + detail.line_start" class="dedup-item">
+            <div :class="detail.is_valid ? 'text-success' : 'text-danger'">
               <span>{{ detail.repo + '/' + detail.file_path + ':' + detail.line_start + '-' + detail.line_end }}</span>
               <span>{{ detail.is_valid ? ' ✓' : ' ✗ ' + detail.reason }}</span>
             </div>
-            <div v-if="detail.message" style="color:var(--text-tertiary);">{{ detail.message }}</div>
+            <div v-if="detail.message" class="text-tertiary">{{ detail.message }}</div>
           </div>
         </div>
       </div>
 
       <div v-if="articlesStore.articleDetailLoading" class="detail-loading">加载中…</div>
-      <div v-else class="detail-content">
-        <div class="article-toc" v-if="articlesStore.articleToc.length > 0">
-          <h4>📖 目录</h4>
-          <ul>
-            <li v-for="item in articlesStore.articleToc" :key="item.id" class="toc-item" :class="'toc-h' + item.level">
-              <a :href="'#' + item.id" @click.prevent="articlesStore.scrollToHeading(item.id)">{{ item.text }}</a>
-            </li>
-          </ul>
-        </div>
-        <div class="article-rendered" v-html="articlesStore.articleRenderedHtml"></div>
+      <div v-else class="article-content-wrapper">
+        <aside v-if="articlesStore.articleToc.length > 0" class="article-toc-sidebar">
+          <div class="article-toc-title">目录</div>
+          <a v-for="item in articlesStore.articleToc" :key="item.id"
+             class="article-toc-item"
+             :class="['level-' + item.level, { active: activeHeadingId === item.id }]"
+             :href="'#' + item.id"
+             @click.prevent="articlesStore.scrollToHeading(item.id)">
+            {{ item.text }}
+          </a>
+        </aside>
+        <div class="article-content-body" v-html="articlesStore.articleRenderedHtml"></div>
       </div>
     </template>
   </div>

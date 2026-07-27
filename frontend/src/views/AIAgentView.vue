@@ -1,15 +1,175 @@
 <script setup lang="ts">
-import { onMounted, ref, nextTick, watchEffect } from 'vue'
-import { useAIAgentStore } from '@/stores/aiAgent'
+import { onMounted, onBeforeUnmount, ref, nextTick, watchEffect, computed } from 'vue'
+import { useAIAgentStore, KNOWLEDGE_TYPE_LABELS, KNOWLEDGE_TYPE_ORDER } from '@/stores/aiAgent'
 import { useAppStore } from '@/stores/app'
+import { renderMarkdown } from '@/composables/useMarkdown'
 
 const agentStore = useAIAgentStore()
 const appStore = useAppStore()
 const inputText = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
 
+// Sidebar tab: 'sessions' | 'knowledge'
+const sidebarTab = ref<'sessions' | 'knowledge'>('sessions')
+
+// Knowledge detail modal
+const showKbModal = ref(false)
+const modalType = ref('')
+const modalSearchInput = ref('')
+const modalLoading = ref(false)
+const modalEntries = ref<any[]>([])
+const modalTotal = ref(0)
+const modalOffset = ref(0)
+const modalHasMore = ref(false)
+const MODAL_PAGE_SIZE = 50
+
+// Export
+const exportMenuOpen = ref(false)
+const exportBtnRef = ref<HTMLElement | null>(null)
+const exportMenuStyle = ref<Record<string, string>>({})
+const cursorHtml = '<span class="cursor-blink">▊</span>'
+
+// 过程步骤展示：只显示最近 N 条，太长时折叠更早的，避免页面被刷屏
+const MAX_VISIBLE_STEPS = 12
+const visibleSteps = computed(() => {
+  const steps = agentStore.streamingSteps
+  if (steps.length <= MAX_VISIBLE_STEPS) return steps
+  return steps.slice(-MAX_VISIBLE_STEPS)
+})
+const hiddenStepCount = computed(() => {
+  const total = agentStore.streamingSteps.length
+  return Math.max(0, total - MAX_VISIBLE_STEPS)
+})
+const stepCountSummary = computed(() => {
+  const total = agentStore.streamingSteps.length
+  const tools = agentStore.streamingSteps.filter(s => s.type === 'tool_call').length
+  if (total === tools) return `${tools} 次工具调用`
+  return `${total} 步 / ${tools} 次工具`
+})
+// 当前 session 是不是正在被生成中那个：用于决定流式气泡 / 停止按钮 / 输入框禁用状态
+const isStreamingHere = computed(() =>
+  agentStore.streaming &&
+  agentStore.currentSessionId === agentStore.activeStreamingSessionId
+)
+
+function hasArgs(args: any): boolean {
+  return args && typeof args === 'object' && Object.keys(args).length > 0
+}
+
+function formatArgs(args: any): string {
+  if (!args || typeof args !== 'object') return ''
+  // 常见字段优先 + 截断长字符串
+  const PRIORITY = ['query', 'keyword', 'file_path', 'repo', 'file_pattern', 'q']
+  const parts: string[] = []
+  const used = new Set<string>()
+  for (const k of PRIORITY) {
+    if (k in args) {
+      parts.push(formatArgPair(k, args[k]))
+      used.add(k)
+    }
+  }
+  for (const [k, v] of Object.entries(args)) {
+    if (used.has(k)) continue
+    if (parts.length >= 3) break
+    parts.push(formatArgPair(k, v))
+  }
+  return parts.join(', ')
+}
+
+function formatArgPair(k: string, v: any): string {
+  let s = String(v ?? '')
+  if (s.length > 40) s = s.slice(0, 38) + '…'
+  return `${k}=${s}`
+}
+
+// Add knowledge modal
+const showAddModal = ref(false)
+const addForm = ref({ content: '', source_ref: '', tags: '' })
+const addSubmitting = ref(false)
+const addError = ref('')
+
+function openAddModal() {
+  addForm.value = { content: '', source_ref: '', tags: '' }
+  addError.value = ''
+  showAddModal.value = true
+}
+
+function closeAddModal() {
+  showAddModal.value = false
+}
+
+async function handleAddKnowledge() {
+  const content = addForm.value.content.trim()
+  if (!content) {
+    addError.value = '请输入知识内容'
+    return
+  }
+  addSubmitting.value = true
+  addError.value = ''
+  try {
+    const tags = addForm.value.tags
+      .split(/[,，]/)
+      .map(t => t.trim())
+      .filter(Boolean)
+    const res = await fetch('/api/ai-agent/memories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content,
+        source_type: 'manual',
+        source_ref: addForm.value.source_ref.trim() || undefined,
+        tags: tags.length ? tags : undefined,
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || '添加失败')
+    }
+    appStore.showToast('知识已添加', '', 'success')
+    showAddModal.value = false
+    agentStore.loadKbStats()
+  } catch (e: any) {
+    addError.value = e.message
+  } finally {
+    addSubmitting.value = false
+  }
+}
+
+function toggleExportMenu() {
+  if (exportMenuOpen.value) {
+    exportMenuOpen.value = false
+    return
+  }
+  if (exportBtnRef.value) {
+    const rect = exportBtnRef.value.getBoundingClientRect()
+    exportMenuStyle.value = {
+      position: 'fixed',
+      bottom: `${window.innerHeight - rect.top + 4}px`,
+      left: `${rect.right - 180}px`,
+    }
+  }
+  exportMenuOpen.value = true
+}
+
+function closeExportMenu() {
+  exportMenuOpen.value = false
+}
+
+function handleOutsideClick(e: MouseEvent) {
+  if (!exportMenuOpen.value) return
+  const target = e.target as HTMLElement
+  if (exportBtnRef.value?.contains(target)) return
+  if (target?.closest?.('.export-dropdown')) return
+  closeExportMenu()
+}
+
 onMounted(() => {
   agentStore.loadSessions()
+  document.addEventListener('click', handleOutsideClick)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleOutsideClick)
 })
 
 watchEffect(() => {
@@ -28,6 +188,148 @@ async function send() {
   inputText.value = ''
   await agentStore.sendMessage(text)
 }
+
+// Knowledge base
+async function openKbTab() {
+  sidebarTab.value = 'knowledge'
+  if (!agentStore.kbStats) {
+    await agentStore.loadKbStats()
+  }
+}
+
+// Knowledge detail modal
+async function openKbDetail(sourceType: string) {
+  modalType.value = sourceType
+  modalSearchInput.value = ''
+  modalEntries.value = []
+  modalOffset.value = 0
+  modalHasMore.value = false
+  modalTotal.value = 0
+  showKbModal.value = true
+  await loadModalEntries()
+}
+
+async function loadModalEntries(append: boolean = false) {
+  modalLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      list_by_type: modalType.value,
+      offset: String(append ? modalOffset.value : 0),
+      limit: String(MODAL_PAGE_SIZE),
+    })
+    const q = modalSearchInput.value.trim()
+    if (q) params.set('q', q)
+
+    const data: any = await fetch(`/api/ai-agent/memories?${params}`, {
+      headers: { 'Content-Type': 'application/json' },
+    }).then(r => r.json())
+
+    if (append) {
+      modalEntries.value.push(...(data.results || []))
+    } else {
+      modalEntries.value = data.results || []
+    }
+    modalEntries.value.forEach((e: any) => { e._expanded = false })
+    modalTotal.value = data.total || 0
+    modalOffset.value = append ? modalOffset.value + (data.results || []).length : (data.results || []).length
+    modalHasMore.value = data.has_more || false
+  } catch (e: any) {
+    appStore.showToast('加载失败', e.message, 'error')
+  } finally {
+    modalLoading.value = false
+  }
+}
+
+function onModalSearch() {
+  loadModalEntries(false)
+}
+
+function loadMoreModalEntries() {
+  if (modalHasMore.value && !modalLoading.value) {
+    loadModalEntries(true)
+  }
+}
+
+// Close modal
+function closeKbModal() {
+  showKbModal.value = false
+}
+
+// Copy knowledge entry content
+function copyEntryContent(content: string) {
+  navigator.clipboard.writeText(content).then(() => {
+    appStore.showToast('已复制', '', 'info')
+  }).catch(() => {
+    appStore.showToast('复制失败', '请手动选择复制', 'error')
+  })
+}
+
+async function deleteEntry(entry: any) {
+  const confirmed = await appStore.showConfirm({
+    title: '删除知识条目',
+    message: `确定删除这条知识吗？\n\n${entry.content.slice(0, 100)}...`,
+    confirmText: '删除',
+    danger: true,
+  })
+  if (!confirmed) return
+  try {
+    const res = await fetch(`/api/ai-agent/memories/${entry.id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error('删除失败')
+    appStore.showToast('已删除', '', 'info')
+    modalEntries.value = modalEntries.value.filter(e => e.id !== entry.id)
+    modalTotal.value = Math.max(0, modalTotal.value - 1)
+    agentStore.loadKbStats()
+  } catch (e: any) {
+    appStore.showToast('删除失败', e.message, 'error')
+  }
+}
+
+// Export session as markdown
+function doExportMarkdown() {
+  try {
+    const md = agentStore.exportSessionAsMarkdown()
+    if (!md) {
+      closeExportMenu()
+      appStore.showToast('没有可导出的消息', '', 'info')
+      return
+    }
+    const session = agentStore.sessions.find(s => s.id === agentStore.currentSessionId)
+    const title = session?.title?.replace(/[\\/:*?"<>|]/g, '_') || 'ai-agent-chat'
+    const filename = `${title}-${new Date().toISOString().slice(0, 10)}.md`
+    agentStore.downloadAsMarkdown(md, filename)
+    closeExportMenu()
+    appStore.showToast('已导出', filename, 'success')
+  } catch (e: any) {
+    closeExportMenu()
+    appStore.showToast('导出失败', e?.message || '未知错误', 'error')
+  }
+}
+
+function doCopyToClipboard() {
+  try {
+    const md = agentStore.exportSessionAsMarkdown()
+    if (!md) {
+      closeExportMenu()
+      appStore.showToast('没有可导出的消息', '', 'info')
+      return
+    }
+    navigator.clipboard.writeText(md)
+    closeExportMenu()
+    appStore.showToast('已复制到剪贴板', '', 'info')
+  } catch (e: any) {
+    closeExportMenu()
+    appStore.showToast('复制失败', e?.message || '未知错误', 'error')
+  }
+}
+
+// Sorted knowledge types
+const sortedKbTypes = computed(() => {
+  const stats = agentStore.kbStats?.by_type
+  if (!stats) return []
+  return KNOWLEDGE_TYPE_ORDER
+    .filter(t => t in stats)
+    .map(t => ({ key: t, label: KNOWLEDGE_TYPE_LABELS[t] || t, count: stats[t] }))
+})
 </script>
 
 <template>
@@ -35,24 +337,76 @@ async function send() {
     <div class="view-header">
       <h2 class="view-title">AI Agent</h2>
       <div class="view-actions">
-        <button class="btn btn-sm" @click="agentStore.createSession()">新对话</button>
       </div>
     </div>
 
     <div class="ai-agent-layout">
-      <!-- Session sidebar -->
+      <!-- Sidebar with tabs -->
       <div class="agent-sessions">
-        <h3 class="agent-sessions-title">会话历史</h3>
-        <div v-for="s in agentStore.sessions" :key="s.id"
-             class="agent-session-item"
-             :class="{ active: s.id === agentStore.currentSessionId }"
-             @click="agentStore.switchSession(s.id)">
-          <div class="agent-session-title">{{ s.title }}</div>
-          <div class="agent-session-meta">{{ s.message_count }} 条消息</div>
-          <button class="agent-session-delete" @click.stop="agentStore.deleteSession(s.id)" title="删除">&times;</button>
+        <div class="agent-sessions-tabs">
+          <button class="agent-tab" :class="{ active: sidebarTab === 'sessions' }" @click="sidebarTab = 'sessions'">会话历史</button>
+          <button class="agent-tab" :class="{ active: sidebarTab === 'knowledge' }" @click="openKbTab()">知识库</button>
         </div>
-        <div v-if="agentStore.sessions.length === 0" class="empty-state" style="padding:var(--space-5)">
-          暂无会话
+
+        <!-- Sessions tab -->
+        <div v-if="sidebarTab === 'sessions'" class="agent-tab-content">
+          <div class="agent-session-list">
+            <div v-for="s in agentStore.sessions" :key="s.id"
+                 class="agent-session-item"
+                 :class="{ active: s.id === agentStore.currentSessionId }"
+                 @click="agentStore.switchSession(s.id)">
+              <div class="agent-session-title">{{ s.title }}</div>
+              <div class="agent-session-meta">{{ s.message_count }} 条消息</div>
+              <button class="agent-session-delete" @click.stop="agentStore.deleteSession(s.id)" title="删除会话">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </div>
+            <div v-if="agentStore.sessions.length === 0" class="empty-state" style="padding:var(--space-5)">
+              暂无会话
+            </div>
+          </div>
+          <div class="agent-session-bottom">
+            <button class="agent-session-bottom-btn" @click="agentStore.createSession()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              新对话
+            </button>
+            <div class="agent-session-bottom-sep"></div>
+            <div class="tt-host" style="position:relative">
+              <button ref="exportBtnRef" class="agent-session-bottom-btn" @click.stop="toggleExportMenu">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                导出
+              </button>
+              <div v-if="exportMenuOpen" class="export-dropdown" :style="exportMenuStyle" @click.stop>
+                <div class="export-dropdown-item" @click="doExportMarkdown">
+                  下载为 .md 文件
+                </div>
+                <div class="export-dropdown-item" @click="doCopyToClipboard">
+                  复制到剪贴板
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Knowledge base tab -->
+        <div v-if="sidebarTab === 'knowledge'" class="agent-tab-content">
+          <div v-if="agentStore.kbLoading" class="empty-state" style="padding:var(--space-5)">加载中...</div>
+          <div v-else-if="!agentStore.kbStats" class="empty-state" style="padding:var(--space-5)">暂无知识库数据</div>
+          <div v-else class="kb-type-list">
+            <div class="kb-stats-header">
+              <span class="kb-stats-total">共 {{ agentStore.kbStats.total }} 条</span>
+              <button class="btn btn-sm" @click="openAddModal()">+ 添加知识</button>
+            </div>
+            <div v-for="t in sortedKbTypes" :key="t.key"
+                 class="kb-type-item"
+                 @click="openKbDetail(t.key)">
+              <div class="kb-type-label">{{ t.label }}</div>
+              <div class="kb-type-count">{{ t.count }}</div>
+            </div>
+            <div v-if="sortedKbTypes.length === 0" class="empty-state" style="padding:var(--space-5)">
+              暂无知识分类
+            </div>
+          </div>
         </div>
       </div>
 
@@ -62,13 +416,51 @@ async function send() {
           <div v-for="(msg, i) in agentStore.messages" :key="i"
                class="chat-message" :class="'msg-' + msg.role">
             <div class="msg-avatar">{{ msg.role === 'user' ? 'U' : 'AI' }}</div>
-            <div class="msg-content">{{ msg.content }}</div>
+            <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
           </div>
 
-          <!-- Streaming message -->
-          <div v-if="agentStore.streaming" class="chat-message msg-assistant">
+          <!-- Streaming message: 思考过程 + 最终回答 -->
+          <!-- 只在「当前 session 就是正在生成的那个」时显示，避免串台到别的 session -->
+          <div v-if="isStreamingHere" class="chat-message msg-assistant msg-streaming">
             <div class="msg-avatar">AI</div>
-            <div class="msg-content">{{ agentStore.streamingContent }}<span class="cursor-blink">▊</span></div>
+            <div class="msg-content">
+              <details v-if="agentStore.streamingSteps.length" class="agent-process" open>
+                <summary class="agent-process-summary">
+                  <span class="agent-process-icon">⚙</span>
+                  <span>处理过程 ({{ stepCountSummary }})</span>
+                </summary>
+                <div class="agent-process-body">
+                  <div v-for="(step, i) in visibleSteps" :key="i" class="agent-step" :class="'step-' + step.type">
+                    <div v-if="step.type === 'thinking'" class="step-thinking">
+                      <span class="step-icon">💭</span>
+                      <span class="step-text" v-html="renderMarkdown(step.thinking)"></span>
+                    </div>
+                    <div v-else-if="step.type === 'tool_call'" class="step-tool-call">
+                      <span class="step-icon">🔧</span>
+                      <span class="step-text">
+                        调用工具 <code>{{ step.tool.name }}</code>
+                        <span v-if="step.tool.args && hasArgs(step.tool.args)" class="step-tool-args">({{ formatArgs(step.tool.args) }})</span>
+                        <span v-if="step.tool.result !== undefined" class="step-tool-done"> ✓</span>
+                        <span v-else-if="agentStore.streaming" class="step-tool-pending"> ⏳</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div v-if="hiddenStepCount > 0" class="agent-step step-hidden">
+                    <span class="step-text step-hidden-hint">
+                      ⋯ 之前还有 {{ hiddenStepCount }} 步（向上滚动查看）
+                    </span>
+                  </div>
+                </div>
+              </details>
+
+              <div class="agent-final">
+                <div v-if="agentStore.streamingFinal" class="agent-final-text" v-html="renderMarkdown(agentStore.streamingFinal) + cursorHtml"></div>
+                <div v-else class="agent-thinking-indicator">
+                  <span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+                  <span>AI 思考中</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Error -->
@@ -78,7 +470,7 @@ async function send() {
 
           <div v-if="agentStore.messages.length === 0 && !agentStore.streaming" class="empty-state" style="padding:var(--space-9);text-align:center;color:var(--text-tertiary);">
             <p>开始与 AI Agent 对话</p>
-            <p style="font-size:var(--text-sm);">支持 GitHub 查询、代码分析、知识库检索等</p>
+            <p class="empty-desc">支持 GitHub 查询、代码分析、知识库检索等</p>
           </div>
         </div>
 
@@ -87,13 +479,112 @@ async function send() {
                  v-model="inputText"
                  placeholder="输入消息…"
                  @keydown.enter.prevent="send()"
-                 :disabled="agentStore.streaming" />
-          <button class="btn btn-primary" @click="send()" :disabled="agentStore.streaming || !inputText.trim()">
-            {{ agentStore.streaming ? '发送中…' : '发送' }}
+                 :disabled="isStreamingHere" />
+          <button v-if="!isStreamingHere" class="btn btn-primary" @click="send()" :disabled="!inputText.trim()">
+            发送
+          </button>
+          <button v-else class="btn btn-stop" @click="agentStore.stopGenerating()" title="停止生成">
+            <span class="stop-icon">■</span>
+            停止
           </button>
         </div>
       </div>
     </div>
+
+    <!-- Knowledge detail modal -->
+    <Teleport to="body">
+      <div v-if="showKbModal" class="modal-backdrop" @click="closeKbModal()">
+        <div class="modal modal-wide" @click.stop>
+          <div class="modal-header">
+            <h3>
+              {{ KNOWLEDGE_TYPE_LABELS[modalType] || modalType }}
+              <span class="count">{{ modalTotal }} 条</span>
+            </h3>
+            <div class="drawer-actions" style="margin-left:auto;">
+              <input type="text" class="input input-sm" placeholder="搜索知识…"
+                     v-model="modalSearchInput"
+                     @keydown.enter.prevent="onModalSearch()" style="width:200px;" />
+              <button class="btn btn-sm" @click="onModalSearch()">搜索</button>
+              <button class="modal-close" @click="closeKbModal()" title="关闭">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="modal-body">
+            <div v-if="modalLoading && !modalEntries.length" class="empty-state is-compact">加载中...</div>
+            <div v-else-if="!modalEntries.length" class="empty-state is-compact">暂无数据</div>
+            <div v-else class="kb-entry-list">
+              <div v-for="entry in modalEntries" :key="entry.id" class="kb-entry-card">
+                <div class="kb-entry-header">
+                  <span class="badge" :class="'kb-source-' + entry.source_type">{{ KNOWLEDGE_TYPE_LABELS[entry.source_type] || entry.source_type }}</span>
+                  <span v-if="entry.tags?.length" class="kb-entry-tags">
+                    <span v-for="tag in entry.tags.slice(0, 5)" :key="tag" class="badge badge-tag">{{ tag }}</span>
+                  </span>
+                  <button class="btn btn-xs btn-ghost" style="margin-left:auto;flex-shrink:0" @click="copyEntryContent(entry.content)" title="复制内容">复制</button>
+                  <button class="btn btn-xs btn-ghost" style="flex-shrink:0;color:var(--signal-red);" @click="deleteEntry(entry)" title="删除">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
+                </div>
+                <div class="kb-entry-body">
+                  <div class="kb-entry-body-text">{{ entry.content.slice(0, entry._expanded ? undefined : 500) }}</div>
+                  <button v-if="entry.content.length > 500" class="btn btn-xs btn-ghost" style="margin-top:var(--space-2);" @click="entry._expanded = !entry._expanded">
+                    {{ entry._expanded ? '收起' : '展开全部 (' + entry.content.length + ' 字)' }}
+                  </button>
+                </div>
+                <div class="kb-entry-footer">
+                  <span v-if="entry.source_ref" class="kb-entry-ref">{{ entry.source_ref }}</span>
+                  <span v-if="entry.updated_at" class="kb-entry-date">{{ entry.updated_at?.slice(0, 10) }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="modalHasMore" class="load-more-wrap">
+              <button class="btn btn-sm" :disabled="modalLoading" @click="loadMoreModalEntries()">
+                {{ modalLoading ? '加载中…' : '加载更多' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Add knowledge modal -->
+    <Teleport to="body">
+      <div v-if="showAddModal" class="modal-backdrop" @click="closeAddModal()">
+        <div class="modal" @click.stop>
+          <div class="modal-header">
+            <h3>添加知识</h3>
+            <button class="modal-close" @click="closeAddModal()" title="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label">内容 <span class="text-danger">*</span></label>
+              <textarea class="textarea" v-model="addForm.content"
+                        placeholder="支持 Markdown 格式…"
+                        style="min-height:180px;font-family:var(--font-mono);font-size:var(--text-sm);"></textarea>
+            </div>
+            <div class="form-group" style="margin-top:var(--space-4);">
+              <label class="form-label">来源引用</label>
+              <input class="input" type="text" v-model="addForm.source_ref" placeholder="如 vllm-project/vllm#1234（可选）" />
+            </div>
+            <div class="form-group" style="margin-top:var(--space-4);">
+              <label class="form-label">标签</label>
+              <input class="input" type="text" v-model="addForm.tags" placeholder="逗号分隔，如 attention, kernel（可选）" />
+            </div>
+            <div v-if="addError" class="form-error" style="margin-top:var(--space-3);color:var(--signal-red);font-size:var(--text-sm);">
+              {{ addError }}
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn" @click="closeAddModal()" :disabled="addSubmitting">取消</button>
+            <button class="btn btn-primary" @click="handleAddKnowledge()" :disabled="addSubmitting">
+              {{ addSubmitting ? '提交中…' : '提交' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -109,19 +600,65 @@ async function send() {
   gap: var(--space-5);
   overflow: hidden;
 }
+
+/* ── Sidebar ── */
 .agent-sessions {
-  width: 240px;
+  width: 260px;
   flex-shrink: 0;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   border-right: 1px solid var(--border-faint);
   padding-right: var(--space-4);
+  overflow: hidden;
+  height: calc(100vh - 180px);
 }
-.agent-sessions-title {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--text-tertiary);
+
+/* Sidebar tabs */
+.agent-sessions-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: var(--space-4);
+  background: var(--bg-elev-2);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  border: 1px solid var(--border-faint);
+  flex-shrink: 0;
+}
+.agent-tab {
+  flex: 1;
+  padding: 5px 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--t-base);
+  text-align: center;
+}
+.agent-tab:hover {
+  color: var(--text-primary);
+}
+.agent-tab.active {
+  background: var(--bg-elev-3);
+  color: var(--amber-bright);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Tab content area */
+.agent-tab-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Session list */
+.agent-session-list {
+  flex: 1;
+  overflow-y: auto;
   margin-bottom: var(--space-3);
 }
 .agent-session-item {
@@ -133,7 +670,7 @@ async function send() {
 }
 .agent-session-item:hover { background: var(--bg-elev-2); }
 .agent-session-item.active { background: var(--bg-elev-3); border-left: 2px solid var(--amber); }
-.agent-session-title { font-size: var(--text-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-session-title { font-size: var(--text-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 20px; }
 .agent-session-meta { font-size: var(--text-xs); color: var(--text-tertiary); }
 .agent-session-delete {
   position: absolute; top: 4px; right: 4px;
@@ -142,16 +679,191 @@ async function send() {
 }
 .agent-session-item:hover .agent-session-delete { display: block; }
 
+/* ── Session sidebar bottom bar ── */
+.agent-session-bottom {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-top: var(--space-3);
+}
+.agent-session-bottom-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--t-base);
+  white-space: nowrap;
+  position: relative;
+}
+.agent-session-bottom-btn:hover {
+  background: var(--bg-elev-3);
+  color: var(--text-primary);
+}
+.agent-session-bottom-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.agent-session-bottom-btn:disabled:hover {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.agent-session-bottom-btn svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.agent-session-bottom-btn:hover svg {
+  opacity: 1;
+}
+.agent-session-bottom-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border-faint);
+  flex-shrink: 0;
+}
+
+/* ── Knowledge base type list ── */
+.kb-type-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.kb-stats-header {
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.kb-stats-total {
+  font-weight: 600;
+}
+.kb-type-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background var(--t-base);
+}
+.kb-type-item:hover {
+  background: var(--bg-elev-2);
+}
+.kb-type-label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.kb-type-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--amber);
+  font-weight: 600;
+  background: var(--amber-glow-soft);
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  min-width: 28px;
+  text-align: center;
+}
+
+/* ── Knowledge entry list in modal ── */
+.kb-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.kb-entry-card {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color var(--t-base);
+}
+.kb-entry-card:hover {
+  border-color: var(--border);
+}
+.kb-entry-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elev-3);
+  border-bottom: 1px solid var(--border-faint);
+  flex-wrap: wrap;
+}
+.kb-entry-tags {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+.kb-entry-body {
+  padding: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.kb-entry-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.kb-entry-ref {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+.kb-entry-date {
+  flex-shrink: 0;
+}
+
+.load-more-wrap {
+  padding: var(--space-5);
+  text-align: center;
+}
+
+/* ── Chat area ── */
 .agent-chat {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  height: calc(100vh - 180px);
+  align-self: flex-start;
+  position: sticky;
+  top: 0;
 }
 .chat-messages {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-5) 0;
+  min-height: 0;
 }
 .chat-message {
   display: flex;
@@ -174,6 +886,45 @@ async function send() {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* Markdown 渲染后的内联元素 */
+.msg-content :deep(code) {
+  background: var(--bg-elev-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+  font-family: var(--font-mono, monospace);
+}
+.msg-content :deep(pre) {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  overflow-x: auto;
+  margin: var(--space-2) 0;
+}
+.msg-content :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+.msg-content :deep(strong) { font-weight: 600; color: var(--text-primary); }
+.msg-content :deep(em) { font-style: italic; }
+.msg-content :deep(a) {
+  color: var(--signal-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.msg-content :deep(ul),
+.msg-content :deep(ol) { padding-left: var(--space-5); margin: var(--space-2) 0; }
+.msg-content :deep(li) { margin: 2px 0; }
+.msg-content :deep(h1),
+.msg-content :deep(h2),
+.msg-content :deep(h3) { margin: var(--space-3) 0 var(--space-2); font-weight: 600; }
+.msg-content :deep(blockquote) {
+  border-left: 3px solid var(--border);
+  padding-left: var(--space-3);
+  color: var(--text-secondary);
+  margin: var(--space-2) 0;
+}
 .msg-error .msg-content { color: var(--signal-red); }
 
 .cursor-blink {
@@ -184,6 +935,100 @@ async function send() {
   50% { opacity: 0; }
 }
 
+/* ── Agent 过程步骤 + 思考中指示器 ── */
+.msg-streaming .msg-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.agent-process {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  overflow: hidden;
+}
+.agent-process-summary {
+  cursor: pointer;
+  user-select: none;
+  padding: 6px 10px;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+}
+.agent-process-summary::-webkit-details-marker { display: none; }
+.agent-process-summary:hover { color: var(--text-secondary); }
+.agent-process-icon { opacity: 0.7; }
+.agent-process-body {
+  padding: 4px 10px 8px;
+  border-top: 1px solid var(--border-faint);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.agent-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.step-icon { flex-shrink: 0; opacity: 0.85; }
+.step-text { flex: 1; word-break: break-word; }
+.step-thinking { color: var(--text-tertiary); font-style: italic; }
+.step-tool-call code {
+  background: var(--bg-elev-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+  font-family: var(--font-mono, monospace);
+}
+.step-tool-args {
+  color: var(--text-tertiary);
+  font-size: 0.85em;
+  font-family: var(--font-mono, monospace);
+  margin-left: 4px;
+}
+.step-tool-done { color: var(--signal-green); }
+.step-tool-pending { color: var(--text-tertiary); }
+.step-hidden-hint {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-style: italic;
+}
+
+.agent-thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  font-style: italic;
+}
+.thinking-dots span {
+  display: inline-block;
+  animation: thinking-bounce 1.4s infinite ease-in-out;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes thinking-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+
+/* ── Knowledge source badge colors ── */
+.kb-source-docs { background: var(--signal-blue-glow); color: var(--signal-blue); border-color: rgba(132,203,255,0.3); }
+.kb-source-code_structure { background: var(--signal-purple-glow); color: var(--signal-purple); border-color: rgba(218,178,255,0.3); }
+.kb-source-issue { background: var(--signal-green-glow); color: var(--signal-green); border-color: rgba(142,236,151,0.3); }
+.kb-source-pr { background: var(--signal-cyan-glow); color: var(--signal-cyan); border-color: rgba(106,216,223,0.3); }
+.kb-source-article { background: var(--signal-yellow-glow); color: var(--signal-yellow); border-color: rgba(242,204,96,0.3); }
+.kb-source-manual { background: var(--amber-glow); color: var(--amber); border-color: rgba(255,180,84,0.3); }
+.kb-source-conversation { background: var(--bg-elev-3); color: var(--text-secondary); border-color: var(--border); }
+
 .chat-input-bar {
   display: flex;
   gap: var(--space-3);
@@ -191,4 +1036,43 @@ async function send() {
   border-top: 1px solid var(--border-faint);
 }
 .chat-input { flex: 1; }
+.btn-stop {
+  background: var(--signal-red-glow, rgba(255,107,107,0.15));
+  color: var(--signal-red, #ff6b6b);
+  border: 1px solid var(--signal-red, #ff6b6b);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-stop:hover {
+  background: var(--signal-red, #ff6b6b);
+  color: white;
+}
+.stop-icon {
+  font-size: 0.7em;
+  line-height: 1;
+}
+
+/* ── Export dropdown ── */
+.export-dropdown {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-top);
+  min-width: 180px;
+  overflow: hidden;
+}
+.export-dropdown-item {
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  transition: background var(--t-fast);
+  white-space: nowrap;
+}
+.export-dropdown-item:hover {
+  background: var(--bg-elev-3);
+  color: var(--text-primary);
+}
 </style>

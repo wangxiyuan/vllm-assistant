@@ -313,10 +313,22 @@ export const useArticlesStore = defineStore('articles', () => {
     insertRef.value = { repo: 'vllm', file_path: '', line_start: 1, line_end: 10 }
     insertRefPreview.value = ''
     cacheFiles.value = []
+    loadCachedFiles()
   }
 
   function closeInsertRef() {
     showInsertRef.value = false
+  }
+
+  async function loadCachedFiles() {
+    const repo = insertRef.value.repo
+    const q = insertRef.value.file_path || ''
+    try {
+      const data: any = await api(`/api/sync/code/files?repo=${repo}&q=${encodeURIComponent(q)}&limit=50`)
+      cacheFiles.value = data.files || []
+    } catch (_) {
+      // Silent fail, file list is optional UX
+    }
   }
 
   async function searchCacheFiles() {
@@ -370,7 +382,7 @@ export const useArticlesStore = defineStore('articles', () => {
     previewArticle, closePreview,
     viewArticle, closeArticleView, scrollToHeading,
     validateArticle, closeValidation,
-    openInsertRef, closeInsertRef, searchCacheFiles, confirmInsertRef,
+    openInsertRef, closeInsertRef, loadCachedFiles, searchCacheFiles, confirmInsertRef,
     refStatusText, refStatusClass,
   }
 })

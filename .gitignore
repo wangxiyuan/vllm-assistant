@@ -55,8 +55,6 @@ Thumbs.db
 .codegraph
 .claude
 # Node.js
-package.json
-package-lock.json
 node_modules/
 
 # Frontend build output

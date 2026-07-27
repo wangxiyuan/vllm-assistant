@@ -8,7 +8,7 @@ import logging
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.config import Config
@@ -66,7 +66,7 @@ class MemoryCreateRequest(BaseModel):
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, fastapi_request: Request):
     """AI Agent 对话（streaming SSE）
 
     请求体示例：
@@ -80,38 +80,60 @@ async def chat(request: ChatRequest):
     ```
 
     `session_id` 指定会话 ID，用于持久化对话历史。
+    客户端断开 / 主动 abort 时，后端会在下一次 yield 时检测到并退出 agent 循环。
     """
     _require_api_key()
-
-    runner = AgentRunner()
-
-    # 如果传了 session_id，先存 user 消息
-    if request.session_id:
-        _save_user_message(request.session_id, request.messages)
 
     from fastapi.responses import StreamingResponse
 
     async def event_stream():
-        assistant_content = None
-        async for event in runner.chat(
-            messages=[m.dict() if hasattr(m, 'dict') else m for m in request.messages],
-            tools=request.tools,
-            stream=request.stream,
-            system_prompt=request.system_prompt,
-        ):
-            # 记录最终 assistant 回复
-            if event["type"] == "token":
-                if assistant_content is None:
-                    assistant_content = event["data"]
-                else:
-                    assistant_content += event["data"]
+        try:
+            runner = AgentRunner()
+        except Exception as e:
+            logger.exception("Failed to create AgentRunner")
+            yield f"data: {json.dumps({'type': 'error', 'data': f'AI 服务初始化失败: {e}'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'data': None}, ensure_ascii=False)}\n\n"
+            return
 
-            # 在 done 事件发出前保存 assistant 回复并更新会话标题，
-            # 避免前端 loadSessions() 与后端保存操作产生竞态条件
-            if event["type"] == "done" and request.session_id and assistant_content:
-                _save_assistant_message(request.session_id, assistant_content)
+        # 如果传了 session_id，先存 user 消息
+        if request.session_id:
+            _save_user_message(request.session_id, request.messages)
 
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        try:
+            assistant_content = None
+            chat_iter = runner.chat(
+                messages=[m.dict() if hasattr(m, 'dict') else m for m in request.messages],
+                tools=request.tools,
+                stream=request.stream,
+                system_prompt=request.system_prompt,
+            )
+            async for event in chat_iter:
+                # 客户端断开检测：用户删对话 / 关页面 / 点停止按钮都会触发
+                if await fastapi_request.is_disconnected():
+                    logger.info("Agent chat aborted: client disconnected (session=%s)", request.session_id)
+                    # 显式关闭 agent 迭代器，触发 CancelledError 中断 tool execution
+                    await chat_iter.aclose()
+                    break
+
+                # 记录最终 assistant 回复
+                if event["type"] == "token":
+                    if assistant_content is None:
+                        assistant_content = event["data"]
+                    else:
+                        assistant_content += event["data"]
+
+                # 在 done 事件发出前保存 assistant 回复并更新会话标题，
+                # 避免前端 loadSessions() 与后端保存操作产生竞态条件
+                if event["type"] == "done" and request.session_id and assistant_content:
+                    _save_assistant_message(request.session_id, assistant_content)
+
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.exception("Error during AI chat streaming")
+            yield f"data: {json.dumps({'type': 'error', 'data': f'AI 响应异常: {e}'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'data': None}, ensure_ascii=False)}\n\n"
+        finally:
+            await runner.close()
 
     return StreamingResponse(
         event_stream(),
@@ -393,11 +415,12 @@ async def memory_stats():
 
 @router.get("/tools")
 async def list_tools():
-    """列出所有已注册工具"""
+    """列出所有已注册工具 + 工具类别"""
     from app.services.tools import registry as tool_registry
 
     tools = tool_registry.list_tools()
-    return {"tools": tools, "total": len(tools)}
+    categories = tool_registry.list_categories()
+    return {"tools": tools, "categories": categories, "total": len(tools)}
 
 
 # ======================================================================

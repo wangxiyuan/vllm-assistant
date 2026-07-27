@@ -8,11 +8,15 @@ const appStore = useAppStore()
   <Teleport to="body">
     <div v-if="appStore.confirmDialog.show" class="modal-backdrop" @click="appStore.confirmCancel()">
       <div class="modal confirm-modal" @click.stop>
-        <h3 class="modal-title">{{ appStore.confirmDialog.title }}</h3>
-        <p class="modal-desc">{{ appStore.confirmDialog.message }}</p>
-        <div class="modal-actions">
+        <div class="modal-header">
+          <h3>{{ appStore.confirmDialog.title }}</h3>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc" style="padding:0;">{{ appStore.confirmDialog.message }}</p>
+        </div>
+        <div class="modal-footer">
           <button class="btn" @click="appStore.confirmCancel()">{{ appStore.confirmDialog.cancelText }}</button>
-          <button class="btn" :class="{ 'btn-danger': appStore.confirmDialog.danger }"
+          <button class="btn" :class="appStore.confirmDialog.danger ? 'btn-danger' : 'btn-primary'"
                   @click="appStore.confirmOk()">{{ appStore.confirmDialog.confirmText }}</button>
         </div>
       </div>

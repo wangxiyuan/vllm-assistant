@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useTodoStore } from '@/stores/todo'
 import { useAppStore } from '@/stores/app'
 import { timeAgo } from '@/utils/helpers'
@@ -13,6 +13,48 @@ const appStore = useAppStore()
 const usersStore = useUsersStore()
 const intelStore = useIntelStore()
 const router = useRouter()
+
+// Edit form ref input
+const editRefInput = ref('')
+const resolveRefLoading = ref(false)
+
+async function addEditRef() {
+  if (!editRefInput.value.trim()) return
+  resolveRefLoading.value = true
+  try {
+    const r = await todoStore.resolveRef(editRefInput.value)
+    if (r) {
+      if (!todoStore.editTaskForm.related_refs) {
+        todoStore.editTaskForm.related_refs = []
+      }
+      todoStore.addRef(todoStore.editTaskForm.related_refs, r)
+      editRefInput.value = ''
+    }
+  } finally {
+    resolveRefLoading.value = false
+  }
+}
+
+// Subtask edit ref input
+const editSubtaskRefInput = ref('')
+const subtaskRefLoading = ref(false)
+
+async function addEditSubtaskRef() {
+  if (!editSubtaskRefInput.value.trim()) return
+  subtaskRefLoading.value = true
+  try {
+    const r = await todoStore.resolveRef(editSubtaskRefInput.value)
+    if (r) {
+      if (!todoStore.editSubtaskForm.related_refs) {
+        todoStore.editSubtaskForm.related_refs = []
+      }
+      todoStore.addRef(todoStore.editSubtaskForm.related_refs, r)
+      editSubtaskRefInput.value = ''
+    }
+  } finally {
+    subtaskRefLoading.value = false
+  }
+}
 
 onMounted(() => {
   todoStore.loadTasks()
@@ -49,9 +91,6 @@ async function generateInsight(task: any) {
     <div class="view-header">
       <h2 class="view-title">任务面板</h2>
       <div class="view-actions">
-        <label class="toggle-label">
-          <input type="checkbox" v-model="todoStore.useKanban" /> 卡片视图
-        </label>
         <button class="btn btn-primary btn-sm" @click="todoStore.showAddModal = true">+ 新建任务</button>
       </div>
     </div>
@@ -113,14 +152,16 @@ async function generateInsight(task: any) {
             <div class="kanban-card-badges" v-if="task.has_dedup_check || task.has_ai_insight">
               <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="badge badge-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
               <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="badge badge-success">无重复</span>
-              <span v-if="task.has_ai_insight" class="badge badge-info" style="cursor:pointer;" @click.stop="openInsight(task)" title="查看洞察报告">有洞察</span>
+              <button v-if="task.has_ai_insight" class="badge badge-info insight-badge" @click.stop="openInsight(task)" title="查看洞察报告">有洞察</button>
             </div>
             <div class="kanban-card-actions">
-              <button class="btn btn-sm btn-ghost" @click.stop="generateInsight(task)" title="生成洞察报告" :disabled="todoStore.insightGenLoading">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              </button>
-              <button class="btn btn-sm btn-ghost" @click.stop="todoStore.toggleTaskDone(task)" :title="task.status === 'done' ? '恢复未完成' : '标记完成'" v-if="task.status !== 'cancelled'">
+              <button class="card-action-btn is-primary" @click.stop="todoStore.toggleTaskDone(task)" :title="task.status === 'done' ? '恢复未完成' : '标记完成'" v-if="task.status !== 'cancelled'">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                {{ task.status === 'done' ? '恢复' : '完成' }}
+              </button>
+              <button class="card-action-btn is-primary" @click.stop="generateInsight(task)" title="生成洞察报告" :disabled="todoStore.insightGenLoading">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                洞察
               </button>
             </div>
           </div>
@@ -154,7 +195,7 @@ async function generateInsight(task: any) {
           </div>
           <div class="item-side">
             <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="badge badge-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
-            <span v-if="task.has_ai_insight" class="badge badge-info" style="cursor:pointer;" @click.stop="openInsight(task)">有洞察</span>
+            <button v-if="task.has_ai_insight" class="badge badge-info insight-badge" @click.stop="openInsight(task)" title="查看洞察报告">有洞察</button>
           </div>
         </div>
       </div>
@@ -164,39 +205,80 @@ async function generateInsight(task: any) {
     <Teleport to="body">
       <div v-if="todoStore.showAddModal" class="modal-backdrop" @click="todoStore.showAddModal = false">
         <div class="modal" @click.stop>
-          <h3 class="modal-title">新建任务</h3>
-          <div class="form-group">
-            <input type="text" class="input input-lg" v-model="todoStore.newTask.title" placeholder="任务标题" />
+          <div class="modal-header">
+            <h3>新建任务</h3>
+            <button class="modal-close" @click="todoStore.showAddModal = false" title="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
-          <div class="form-group">
-            <textarea class="textarea" v-model="todoStore.newTask.description" placeholder="描述（可选）" rows="3"></textarea>
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label form-label-required">标题</label>
+              <input type="text" class="input input-lg" v-model="todoStore.newTask.title" placeholder="任务标题" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">描述</label>
+              <textarea class="textarea" v-model="todoStore.newTask.description" placeholder="描述（可选）" rows="3"></textarea>
+            </div>
+            <div class="form-row" style="align-items:flex-end;">
+              <div class="field">
+                <label class="form-label">优先级</label>
+                <select class="select" v-model="todoStore.newTask.priority">
+                  <option v-for="p in ['P0','P1','P2','P3']" :key="p" :value="p">{{ p }}</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="form-label">来源</label>
+                <select class="select" v-model="todoStore.newTask.source">
+                  <option v-for="s in sources" :key="s.value" :value="s.value">{{ s.label }}</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="form-label">责任人</label>
+                <select class="select" v-model="todoStore.newTask.assignee_id">
+                  <option :value="null">无</option>
+                  <option v-for="u in usersStore.users" :key="u.id" :value="u.id">{{ u.name }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row" style="align-items:flex-end;">
+              <div class="field">
+                <label class="form-label">领域</label>
+                <input class="input" type="text" placeholder="如 engine" v-model="todoStore.newTask.area" />
+              </div>
+              <div class="field">
+                <label class="form-label">截止日期</label>
+                <input class="input" type="date" v-model="todoStore.newTask.due_date" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">关联 PR/Issue</label>
+              <div class="ref-input-row">
+                <input class="input input-sm" type="text" v-model="todoStore.newTask.refInput"
+                       placeholder="如 vllm#123 或纯数字" @keyup.enter="async () => { const r = await todoStore.resolveRef(todoStore.newTask.refInput); if (r) { todoStore.addRef(todoStore.newTask.related_refs, r); todoStore.newTask.refInput = '' } }" />
+                <button class="btn btn-sm" @click="async () => { const r = await todoStore.resolveRef(todoStore.newTask.refInput); if (r) { todoStore.addRef(todoStore.newTask.related_refs, r); todoStore.newTask.refInput = '' } }" :disabled="todoStore.resolveRefLoading || !todoStore.newTask.refInput.trim()">
+                  {{ todoStore.resolveRefLoading ? '解析中…' : '添加' }}
+                </button>
+              </div>
+              <div v-if="todoStore.newTask.related_refs.length > 0" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:var(--space-1);">
+                <span v-for="(ref, idx) in todoStore.newTask.related_refs" :key="idx" class="ref-badge" :title="ref.title">
+                  <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
+                  <span>{{ ref.repo }}#{{ ref.number }}</span>
+                  <span class="ref-remove" @click="todoStore.removeRef(todoStore.newTask.related_refs, idx)" style="cursor:pointer;margin-left:3px;opacity:0.6;">&times;</span>
+                </span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="toggle-label">
+                <input type="checkbox" v-model="todoStore.newTask.trigger_dedup_check" />
+                添加后自动去重检查
+              </label>
+            </div>
           </div>
-          <div class="form-row">
-            <select class="select" v-model="todoStore.newTask.priority">
-              <option v-for="p in ['P0','P1','P2','P3']" :key="p" :value="p">{{ p }}</option>
-            </select>
-            <select class="select" v-model="todoStore.newTask.source">
-              <option v-for="s in sources" :key="s.value" :value="s.value">{{ s.label }}</option>
-            </select>
-            <select class="select" v-model="todoStore.newTask.assignee_id">
-              <option :value="null">责任人…</option>
-              <option v-for="u in usersStore.users" :key="u.id" :value="u.id">{{ u.name }}</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <input class="input" type="text" placeholder="领域 (如 engine)" v-model="todoStore.newTask.area" />
-            <input class="input" type="date" v-model="todoStore.newTask.due_date" title="截止日期" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">
-              <input type="checkbox" v-model="todoStore.newTask.trigger_dedup_check" style="margin-right:6px;" />
-              添加后自动去重检查
-            </label>
-          </div>
-          <div class="modal-actions">
+          <div class="modal-footer">
             <button class="btn" @click="todoStore.showAddModal = false">取消</button>
             <button class="btn btn-primary" :disabled="todoStore.newTaskLoading"
-                    @click="todoStore.createTask()">{{ todoStore.newTaskLoading ? '创建中…' : '创建' }}</button>
+                    @click="todoStore.createTask()">{{ todoStore.newTaskLoading ? '创建中…' : '创建任务' }}</button>
           </div>
         </div>
       </div>
@@ -214,11 +296,13 @@ async function generateInsight(task: any) {
               </div>
               <h2>{{ todoStore.selectedTask.title }}</h2>
             </div>
-            <button class="btn btn-sm btn-ghost" @click="todoStore.closeTask()">&times;</button>
+            <button class="drawer-close" @click="todoStore.closeTask()" title="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
           <div class="drawer-body">
             <!-- Meta section -->
-            <div class="detail-section" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:var(--space-4);">
+            <div class="detail-section item-meta" style="margin-bottom:var(--space-4);">
               <span class="priority-badge" :class="priorityClass(todoStore.selectedTask.priority)">{{ todoStore.selectedTask.priority }}</span>
               <span class="status-badge" :class="statusClass(todoStore.selectedTask.status)">{{ statusLabel(todoStore.selectedTask.status) }}</span>
               <span class="badge badge-source" :class="'source-' + todoStore.selectedTask.source">{{ sourceLabel(todoStore.selectedTask.source) }}</span>
@@ -228,7 +312,9 @@ async function generateInsight(task: any) {
             </div>
 
             <!-- Description -->
-            <p v-if="todoStore.selectedTask.description" class="detail-desc" style="margin-bottom:var(--space-4);padding:12px;background:var(--bg-secondary);border-radius:6px;line-height:1.6;">{{ todoStore.selectedTask.description }}</p>
+            <div v-if="todoStore.selectedTask.description" class="detail-desc">
+              {{ todoStore.selectedTask.description }}
+            </div>
 
             <!-- Related refs -->
             <div v-if="todoStore.selectedTask.related_refs && todoStore.selectedTask.related_refs.length > 0" style="margin-bottom:var(--space-4);">
@@ -247,9 +333,9 @@ async function generateInsight(task: any) {
               <div v-if="todoStore.dedupResult.matches && todoStore.dedupResult.matches.length > 0" class="ai-result">
                 <div class="ai-result-body">
                   <p>发现 <strong>{{ todoStore.dedupResult.matches.length }}</strong> 个可能重复的项：</p>
-                  <div v-for="m in todoStore.dedupResult.matches" :key="m.id || m.number" class="dedup-item" style="font-size:12px;padding:4px 0;">
-                    <a :href="m.url" target="_blank" style="color:var(--text-primary);">{{ m.title }}</a>
-                    <span v-if="m.repo" class="badge" style="margin-left:4px;">{{ m.repo }}#{{ m.number }}</span>
+                  <div v-for="m in todoStore.dedupResult.matches" :key="m.id || m.number" class="dedup-item">
+                    <a :href="m.url" target="_blank" class="dedup-item-link">{{ m.title }}</a>
+                    <span v-if="m.repo" class="badge">{{ m.repo }}#{{ m.number }}</span>
                   </div>
                 </div>
               </div>
@@ -261,32 +347,253 @@ async function generateInsight(task: any) {
             <!-- AI Insight -->
             <div v-if="(todoStore.selectedTask as any).latest_insight_report_id" style="margin-bottom:var(--space-4);">
               <label class="form-label">AI 洞察</label>
-              <span class="badge badge-info" style="cursor:pointer;" @click="openInsight(todoStore.selectedTask!)">查看洞察报告</span>
+              <button class="btn btn-sm btn-subtle" @click="openInsight(todoStore.selectedTask!)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                查看洞察报告
+              </button>
             </div>
 
             <!-- Subtasks -->
             <div v-if="todoStore.subtasks.length > 0" style="margin-bottom:var(--space-4);">
               <label class="form-label">子任务 ({{ todoStore.subtaskProgressText }})</label>
-              <div v-for="st in todoStore.subtasks" :key="st.id" class="subtask-item" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg-secondary);border-radius:4px;margin-bottom:4px;">
-                <input type="checkbox" :checked="st.status === 'done'" @change="todoStore.toggleSubtaskDone(st)" />
-                <span :class="{ 'task-done': st.status === 'done' }" style="flex:1;">{{ st.title }}</span>
-                <span class="badge" :class="priorityClass(st.priority)">{{ st.priority }}</span>
-                <button class="btn btn-sm btn-ghost" @click.stop="todoStore.deleteSubtask(st)" style="color:var(--signal-red);padding:2px;">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
+              <div class="subtask-list">
+                <div v-for="st in todoStore.subtasks" :key="st.id" class="subtask-item">
+                  <!-- Editing mode -->
+                  <template v-if="todoStore.editingSubtaskId === st.id">
+                    <div class="subtask-edit-form" style="flex:1;display:flex;flex-direction:column;gap:var(--space-1);">
+                      <input class="input input-sm" type="text" v-model="todoStore.editSubtaskForm.title" placeholder="子任务标题" @keyup.enter="todoStore.saveSubtask()" />
+                      <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;">
+                        <select class="select select-sm" style="width:80px;" v-model="todoStore.editSubtaskForm.priority">
+                          <option v-for="p in ['P0','P1','P2','P3']" :key="p" :value="p">{{ p }}</option>
+                        </select>
+                        <select class="select select-sm" style="flex:1;min-width:80px;" v-model.number="todoStore.editSubtaskForm.assignee_id">
+                          <option :value="null">无责任人</option>
+                          <option v-for="u in usersStore.users" :key="u.id" :value="u.id">{{ u.name }}</option>
+                        </select>
+                        <select class="select select-sm" style="width:90px;" v-model="todoStore.editSubtaskForm.status">
+                          <option value="todo">待处理</option>
+                          <option value="in_progress">进行中</option>
+                          <option value="done">已完成</option>
+                          <option value="cancelled">已取消</option>
+                        </select>
+                        <button class="card-action-btn" @click.stop="todoStore.saveSubtask()" title="保存">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                        </button>
+                        <button class="card-action-btn" @click.stop="todoStore.cancelEditSubtask()" title="取消">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                      </div>
+                      <div v-if="todoStore.editingSubtaskId === st.id" style="margin-top:var(--space-1);">
+                        <div class="ref-input-row">
+                          <input class="input input-sm" type="text" v-model="editSubtaskRefInput"
+                                 placeholder="关联 PR/Issue，如 vllm#123" @keyup.enter="addEditSubtaskRef()" />
+                          <button class="btn btn-sm" @click="addEditSubtaskRef()" :disabled="subtaskRefLoading || !editSubtaskRefInput.trim()">
+                            {{ subtaskRefLoading ? '解析中…' : '添加' }}
+                          </button>
+                        </div>
+                        <div v-if="todoStore.editSubtaskForm.related_refs && todoStore.editSubtaskForm.related_refs.length > 0" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:var(--space-1);">
+                          <span v-for="(ref, idx) in todoStore.editSubtaskForm.related_refs" :key="idx" class="ref-badge" :title="ref.title">
+                            <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
+                            <span>{{ ref.repo }}#{{ ref.number }}</span>
+                            <span class="ref-remove" @click="todoStore.editSubtaskForm.related_refs.splice(idx, 1)" style="cursor:pointer;margin-left:3px;opacity:0.6;">&times;</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <!-- Display mode -->
+                  <template v-else>
+                    <label class="subtask-checkbox">
+                      <input type="checkbox" :checked="st.status === 'done'" @change="todoStore.toggleSubtaskDone(st)" />
+                    </label>
+                    <div class="subtask-content">
+                      <span class="subtask-title" :class="{ 'task-done': st.status === 'done' }">{{ st.title }}</span>
+                      <div class="subtask-meta">
+                        <span class="priority-badge" :class="priorityClass(st.priority)">{{ st.priority }}</span>
+                        <span v-if="st.related_refs && st.related_refs.length > 0" style="display:inline-flex;gap:3px;flex-wrap:wrap;margin-left:4px;">
+                          <span v-for="(ref, idx) in st.related_refs.slice(0, 3)" :key="idx" class="ref-badge clickable" @click.stop="openUrl(ref.url)" :title="ref.title || (ref.repo + '#' + ref.number)" style="font-size:10px;padding:1px 4px;">
+                            <span class="ref-type" :class="'ref-type-' + ref.type" style="font-size:9px;">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
+                            <span>{{ ref.repo }}#{{ ref.number }}</span>
+                          </span>
+                          <span v-if="st.related_refs.length > 3" class="badge badge-subtask" style="font-size:10px;">+{{ st.related_refs.length - 3 }}</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="subtask-actions">
+                      <button class="card-action-btn" @click.stop="todoStore.startEditSubtask(st)" title="编辑子任务">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      </button>
+                      <button class="card-action-btn is-danger" @click.stop="todoStore.deleteSubtask(st)" title="删除子任务">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                      </button>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- Add Subtask Form -->
+            <div v-if="todoStore.showSubtaskForm" style="margin-bottom:var(--space-4);padding:var(--space-3);background:var(--surface-faint);border-radius:var(--radius-md);">
+              <label class="form-label">新建子任务</label>
+              <div class="form-group" style="margin-bottom:var(--space-2);">
+                <input class="input input-sm" type="text" v-model="todoStore.newSubtask.title" placeholder="子任务标题" @keyup.enter="todoStore.createSubtask()" />
+              </div>
+              <div class="form-row" style="gap:var(--space-2);">
+                <div class="field" style="flex:0 0 100px;">
+                  <select class="select select-sm" v-model="todoStore.newSubtask.priority">
+                    <option v-for="p in ['P0','P1','P2','P3']" :key="p" :value="p">{{ p }}</option>
+                  </select>
+                </div>
+                <div class="field" style="flex:1;">
+                  <select class="select select-sm" v-model="todoStore.newSubtask.assignee_id">
+                    <option :value="null">无责任人</option>
+                    <option v-for="u in usersStore.users" :key="u.id" :value="u.id">{{ u.name }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group" style="margin-top:var(--space-2);">
+                <div class="ref-input-row">
+                  <input class="input input-sm" type="text" v-model="todoStore.newSubtask.refInput"
+                         placeholder="关联 PR/Issue，如 vllm#123" @keyup.enter="async () => { const r = await todoStore.resolveRef(todoStore.newSubtask.refInput); if (r) { todoStore.addRef(todoStore.newSubtask.related_refs, r); todoStore.newSubtask.refInput = '' } }" />
+                  <button class="btn btn-sm" @click="async () => { const r = await todoStore.resolveRef(todoStore.newSubtask.refInput); if (r) { todoStore.addRef(todoStore.newSubtask.related_refs, r); todoStore.newSubtask.refInput = '' } }" :disabled="todoStore.resolveRefLoading || !todoStore.newSubtask.refInput.trim()">
+                    {{ todoStore.resolveRefLoading ? '解析中…' : '添加' }}
+                  </button>
+                </div>
+                <div v-if="todoStore.newSubtask.related_refs.length > 0" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:var(--space-1);">
+                  <span v-for="(ref, idx) in todoStore.newSubtask.related_refs" :key="idx" class="ref-badge" :title="ref.title">
+                    <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
+                    <span>{{ ref.repo }}#{{ ref.number }}</span>
+                    <span class="ref-remove" @click="todoStore.newSubtask.related_refs.splice(idx, 1)" style="cursor:pointer;margin-left:3px;opacity:0.6;">&times;</span>
+                  </span>
+                </div>
+              </div>
+              <div style="display:flex;gap:var(--space-2);margin-top:var(--space-2);">
+                <button class="btn btn-sm btn-primary" @click="todoStore.createSubtask()" :disabled="!todoStore.newSubtask.title.trim()">添加</button>
+                <button class="btn btn-sm" @click="todoStore.showSubtaskForm = false; todoStore.newSubtask = { title: '', priority: 'P2', assignee_id: null, related_refs: [], refInput: '' }">取消</button>
               </div>
             </div>
 
             <!-- Actions -->
-            <div class="detail-actions" style="display:flex;gap:6px;flex-wrap:wrap;">
-              <button class="btn btn-sm" @click="todoStore.toggleTaskDone(todoStore.selectedTask!)">
-                {{ todoStore.selectedTask.status === 'done' ? '恢复' : '完成' }}
-              </button>
-              <button class="btn btn-sm" @click="todoStore.startEditTask()">编辑</button>
-              <button class="btn btn-sm" @click="todoStore.runDedupCheck(todoStore.selectedTask!)">去重检查</button>
-              <button class="btn btn-sm" @click="generateInsight(todoStore.selectedTask!)">生成洞察</button>
-              <button class="btn btn-sm btn-ghost" @click="todoStore.deleteTask(todoStore.selectedTask!)">删除</button>
+            <template v-if="todoStore.editingTask">
+              <div class="detail-action-bar" style="border-top:1px solid var(--border-faint);padding-top:var(--space-4);">
+                <div class="edit-form-grid">
+                  <!-- Left column: main fields -->
+                  <div class="edit-form-main">
+                    <div class="form-group" style="margin-bottom:var(--space-3);">
+                      <label class="field-label-sm">标题</label>
+                      <input class="input" type="text" v-model="todoStore.editTaskForm.title" placeholder="任务标题" />
+                    </div>
+                    <div class="form-group" style="margin-bottom:var(--space-3);">
+                      <label class="field-label-sm">描述</label>
+                      <textarea class="textarea" rows="2" v-model="todoStore.editTaskForm.description" placeholder="描述（可选）"></textarea>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-2);margin-bottom:var(--space-3);">
+                      <div class="field">
+                        <label class="field-label-sm">优先级</label>
+                        <select class="select" v-model="todoStore.editTaskForm.priority">
+                          <option v-for="p in ['P0','P1','P2','P3']" :key="p" :value="p">{{ p }}</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label class="field-label-sm">状态</label>
+                        <select class="select" v-model="todoStore.editTaskForm.status">
+                          <option value="todo">待处理</option>
+                          <option value="in_progress">进行中</option>
+                          <option value="done">已完成</option>
+                          <option value="cancelled">已取消</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label class="field-label-sm">责任人</label>
+                        <select class="select" v-model.number="todoStore.editTaskForm.assignee_id">
+                          <option :value="null">无</option>
+                          <option v-for="u in usersStore.users" :key="u.id" :value="u.id">{{ u.name }}</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label class="field-label-sm">领域</label>
+                        <input class="input" type="text" v-model="todoStore.editTaskForm.area" placeholder="如 engine" />
+                      </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);margin-bottom:var(--space-3);">
+                      <div class="field">
+                        <label class="field-label-sm">截止日期</label>
+                        <input class="input" type="date" v-model="todoStore.editTaskForm.due_date" />
+                      </div>
+                      <div class="field">
+                        <label class="field-label-sm">来源</label>
+                        <select class="select" v-model="todoStore.editTaskForm.source">
+                          <option v-for="s in sources" :key="s.value" :value="s.value">{{ s.label }}</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Right column: related refs -->
+                  <div class="edit-form-refs">
+                    <label class="field-label-sm">关联 PR/Issue</label>
+                    <div class="ref-input-row" style="margin-bottom:var(--space-2);">
+                      <input class="input" type="text" v-model="editRefInput"
+                             placeholder="如 vllm#123 或纯数字" @keyup.enter="addEditRef()" />
+                      <button class="btn" @click="addEditRef()" :disabled="resolveRefLoading || !editRefInput.trim()">
+                        {{ resolveRefLoading ? '解析中…' : '添加' }}
+                      </button>
+                    </div>
+                    <div v-if="todoStore.editTaskForm.related_refs && todoStore.editTaskForm.related_refs.length > 0" style="display:flex;flex-direction:column;gap:4px;">
+                      <span v-for="(ref, idx) in todoStore.editTaskForm.related_refs" :key="idx" class="ref-badge" :title="ref.title" style="display:inline-flex;align-items:center;justify-content:space-between;">
+                        <span>
+                          <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
+                          <span>{{ ref.repo }}#{{ ref.number }}</span>
+                        </span>
+                        <span class="ref-remove" @click="todoStore.editTaskForm.related_refs.splice(idx, 1)" style="margin-left:6px;">&times;</span>
+                      </span>
+                    </div>
+                    <div v-else style="color:var(--text-tertiary);font-size:var(--text-xs);padding:var(--space-3);text-align:center;border:1px dashed var(--border-faint);border-radius:var(--radius-sm);">
+                      暂无关联引用，在上方输入 vllm#编号 添加
+                    </div>
+                  </div>
+                </div>
+                <div class="action-bar-secondary" style="margin-top:var(--space-3);display:flex;gap:var(--space-2);justify-content:flex-end;border-top:1px solid var(--border-faint);padding-top:var(--space-3);">
+                  <button class="btn" @click="todoStore.cancelEditTask()">取消</button>
+                  <button class="btn btn-primary" @click="todoStore.saveTask()" :disabled="!todoStore.editTaskForm.title?.trim()">
+                    {{ todoStore.taskSaving ? '保存中…' : '保存修改' }}
+                  </button>
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <div class="detail-action-bar">
+              <div class="action-bar-secondary">
+                <button class="btn btn-sm" @click="todoStore.startEditTask()">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  编辑
+                </button>
+                <button class="btn btn-sm" @click="todoStore.runDedupCheck(todoStore.selectedTask!)" :disabled="todoStore.dedupLoading">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                  {{ todoStore.dedupLoading ? '检查中…' : '去重检查' }}
+                </button>
+                <button class="btn btn-sm" @click="generateInsight(todoStore.selectedTask!)" :disabled="todoStore.insightGenLoading">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+                  {{ todoStore.insightGenLoading ? '生成中…' : '生成洞察' }}
+                </button>
+                <button class="btn btn-sm" @click="todoStore.showSubtaskForm = !todoStore.showSubtaskForm" :disabled="!todoStore.selectedTask">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  {{ todoStore.showSubtaskForm ? '收起' : '添加子任务' }}
+                </button>
+              </div>
+              <div class="action-bar-primary">
+                <button class="btn btn-sm btn-success" :class="{ 'is-done': todoStore.selectedTask.status === 'done' }" @click="todoStore.toggleTaskDone(todoStore.selectedTask!)">
+                  <svg v-if="todoStore.selectedTask.status !== 'done'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                  {{ todoStore.selectedTask.status === 'done' ? '恢复未完成' : '标记完成' }}
+                </button>
+                <span class="action-bar-divider"></span>
+                <button class="btn btn-sm btn-danger" @click="todoStore.deleteTask(todoStore.selectedTask!)">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  删除
+                </button>
+              </div>
             </div>
+            </template>
           </div>
         </div>
       </div>
