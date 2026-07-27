@@ -1,0 +1,136 @@
+/* =====================================================================
+   DESIGN TOKENS
+   Amber phosphor on deep blue-black. The contributor's terminal.
+   ===================================================================== */
+
+/* ── Fonts ── */
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap');
+
+:root {
+    /* ── Surfaces ── */
+    --bg-base: #0a0e14;
+    --bg-elev-1: #0f141d;
+    --bg-elev-2: #161d28;
+    --bg-elev-3: #1d2632;
+    --bg-elev-4: #242e3c;
+    --bg-overlay: rgba(5, 8, 12, 0.78);
+
+    /* ── Borders ── */
+    --border-faint: #1a2230;
+    --border: #2e3848;
+    --border-bright: #4d5a72;
+
+    /* ── Text ── */
+    --text-primary: #e6edf3;
+    --text-secondary: #9aa4b6;
+    --text-tertiary: #7a85a0;
+    --text-disabled: #646e80;
+    --text-on-accent: #1a1206;
+
+    /* ── Brand: Amber phosphor ── */
+    --amber: #ffb454;
+    --amber-bright: #ffc878;
+    --amber-deep: #e8964a;
+    --amber-dim: #c98a3a;
+    --amber-faint: #8a6028;
+    --amber-glow: rgba(255, 180, 84, 0.15);
+    --amber-glow-soft: rgba(255, 180, 84, 0.08);
+    --amber-glow-strong: rgba(255, 180, 84, 0.28);
+
+    /* ── Signals (brightness tuned for AA contrast on dark surfaces) ── */
+    --signal-green: #8eec97;
+    --signal-green-glow: rgba(142, 236, 151, 0.14);
+    --signal-red: #ff8e85;
+    --signal-red-glow: rgba(255, 142, 133, 0.14);
+    --signal-yellow: #f2cc60;
+    --signal-yellow-glow: rgba(242, 204, 96, 0.14);
+    --signal-blue: #84cbff;
+    --signal-blue-glow: rgba(132, 203, 255, 0.14);
+    --signal-purple: #dab2ff;
+    --signal-purple-glow: rgba(218, 178, 255, 0.14);
+    --signal-cyan: #6ad8df;
+    --signal-cyan-glow: rgba(106, 216, 223, 0.14);
+
+    /* ── Semantic colors ── */
+    --color-success: var(--signal-green);
+    --color-warning: var(--amber);
+    --color-danger: var(--signal-red);
+    --color-info: var(--signal-blue);
+
+    /* ── Shadows ── */
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.35);
+    --shadow-xl: 0 24px 56px rgba(0, 0, 0, 0.6), 0 8px 16px rgba(0, 0, 0, 0.4);
+    --shadow-amber: 0 0 0 1px var(--amber-glow), 0 4px 16px rgba(255, 180, 84, 0.08);
+    --shadow-inset-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+    /* ── Typography ── */
+    --font-ui: 'Sora', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', Consolas, monospace;
+    --font-display: 'Fraunces', Georgia, serif;
+
+    /* ── Type scale (modular, restrained) ── */
+    --text-xs: 11px;
+    --text-sm: 12.5px;
+    --text-base: 14px;
+    --text-md: 15px;
+    --text-lg: 16px;
+    --text-xl: 18px;
+    --text-2xl: 21px;
+    --text-3xl: 26px;
+    --text-4xl: 32px;
+
+    /* ── Spacing scale (4-pt grid) ── */
+    --space-0: 0;
+    --space-1: 4px;
+    --space-2: 6px;
+    --space-3: 8px;
+    --space-4: 12px;
+    --space-5: 16px;
+    --space-6: 20px;
+    --space-7: 24px;
+    --space-8: 32px;
+    --space-9: 40px;
+    --space-10: 48px;
+    --space-12: 64px;
+
+    /* ── Radius ── */
+    --radius-xs: 3px;
+    --radius-sm: 5px;
+    --radius: 7px;
+    --radius-md: 9px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --radius-pill: 999px;
+
+    /* ── Layout dimensions ── */
+    --sidebar-w: 248px;
+    --header-h: 56px;
+    --btn-h-xs: 22px;
+    --btn-h-sm: 28px;
+    --btn-h-md: 34px;
+    --btn-h-lg: 42px;
+    --input-h-sm: 28px;
+    --input-h-md: 34px;
+    --input-h-lg: 42px;
+
+    /* ── Motion ── */
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --t-fast: 0.12s;
+    --t-base: 0.18s;
+    --t-slow: 0.32s;
+
+    /* ── Z-index scale ── */
+    --z-base: 0;
+    --z-sticky: 10;
+    --z-fixed: 50;
+    --z-drawer: 90;
+    --z-modal: 100;
+    --z-toast: 200;
+    --z-tooltip: 300;
+    --z-top: 9999;
+}
