@@ -169,8 +169,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        # 放行 API 路由、SPA 静态资源、FastAPI 静态文件、健康检查
-        if path.startswith("/api/") or path.startswith("/assets/") or path.startswith("/static/") or path in ("/health", "/"):
+        # 放行 SPA 静态资源、FastAPI 静态文件、健康检查
+        # 注意：/api/* 不在此白名单，API 请求需 Bearer Token 认证
+        if path.startswith("/assets/") or path.startswith("/static/") or path in ("/health", "/"):
             return await call_next(request)
 
         auth = request.headers.get("Authorization", "")
