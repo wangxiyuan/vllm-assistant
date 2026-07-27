@@ -37,7 +37,7 @@ services:
 
     # 健康检查（与 Dockerfile 中的 HEALTHCHECK 配合）
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:$${PORT:-8000}/health')\""]
+      test: ["CMD-SHELL", "python -c \"import os, urllib.request; port = os.environ.get('PORT', '8000'); urllib.request.urlopen(f'http://localhost:{port}/health')\""]
       interval: 30s
       timeout: 10s
       retries: 3

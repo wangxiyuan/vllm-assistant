@@ -15,6 +15,8 @@
 #   ./deploy.sh stop    停止容器
 #   ./deploy.sh restart 重启容器
 #   ./deploy.sh logs    查看日志
+#   ./deploy.sh reset   重置数据库和缓存后重新部署
+#   ./deploy.sh clean   仅清除数据（不部署）
 # ============================================================================
 #
 # 反复部署说明：
@@ -91,31 +93,88 @@ fi
 case "$ACTION" in
     stop)
         print_step "停止服务"
-        $DOCKER_COMPOSE_CMD down --remove-orphans
+        $DOCKER_COMPOSE_CMD down --remove-orphans 2>/dev/null || print_info "没有运行中的容器"
         print_success "服务已停止"
         exit 0
         ;;
     restart)
         print_step "重启服务"
-        $DOCKER_COMPOSE_CMD restart
-        print_success "服务已重启"
+        if docker ps --format '{{.Names}}' | grep -q "^vllm-assistant$"; then
+            $DOCKER_COMPOSE_CMD restart
+            print_success "服务已重启"
+        else
+            print_info "容器未运行，执行启动..."
+            $DOCKER_COMPOSE_CMD up -d
+            print_success "服务已启动"
+        fi
         exit 0
         ;;
     logs)
         print_step "查看日志"
-        $DOCKER_COMPOSE_CMD logs -f
+        if docker ps -a --format '{{.Names}}' | grep -q "^vllm-assistant$"; then
+            $DOCKER_COMPOSE_CMD logs -f
+        else
+            print_error "容器 vllm-assistant 未运行，请先执行 ./deploy.sh 部署"
+            exit 1
+        fi
         exit $?
         ;;
-    deploy)
-        # 继续执行部署流程
+    deploy|reset)
+        # deploy: 继续执行部署流程
+        # reset: 部署流程开始前会清除数据卷
         ;;
+
+    clean)
+        print_step "清除数据"
+        # 停止容器
+        print_info "停止容器..."
+        $DOCKER_COMPOSE_CMD down --remove-orphans 2>/dev/null || true
+        print_success "容器已停止"
+
+        # 删除数据卷
+        print_info "删除数据卷..."
+        docker volume rm vllm-assistant-data vllm-assistant-repos-cache 2>/dev/null && \
+            print_success "数据卷已删除" || \
+            print_info "数据卷不存在或已被删除"
+        print_success "数据清除完成"
+        exit 0
+        ;;
+
     *)
         print_error "未知命令: $ACTION"
-        echo "用法: ./deploy.sh [stop|restart|logs|deploy]"
+        echo "用法: ./deploy.sh [stop|restart|logs|deploy|reset|clean]"
         echo "  无参数 = deploy"
+        echo "  reset = 重置数据库和缓存后重新部署"
+        echo "  clean = 仅清除数据（不部署）"
         exit 1
         ;;
 esac
+
+# ============================================================================
+# 如果 ACTION=reset，先清除数据卷
+# ============================================================================
+if [ "$ACTION" = "reset" ]; then
+    print_step "重置数据"
+
+    # 停止容器
+    if docker ps -a --format '{{.Names}}' | grep -q "^vllm-assistant$"; then
+        print_info "停止容器..."
+        $DOCKER_COMPOSE_CMD down --remove-orphans 2>/dev/null || true
+        print_success "容器已停止"
+    fi
+
+    # 删除数据卷
+    print_info "删除数据卷..."
+    VOLUMES_DELETED=false
+    docker volume rm vllm-assistant-data 2>/dev/null && VOLUMES_DELETED=true
+    docker volume rm vllm-assistant-repos-cache 2>/dev/null && VOLUMES_DELETED=true
+    if [ "$VOLUMES_DELETED" = true ]; then
+        print_success "数据卷已删除（数据库 + 代码仓库缓存已重置）"
+    else
+        print_info "数据卷不存在或已被删除"
+    fi
+    print_success "数据重置完成，开始重新部署"
+fi
 
 # ============================================================================
 # .env 配置检查与引导
@@ -247,14 +306,24 @@ BUILD_CACHE_FILE=".deploy_build_hash"
 
 # 计算当前代码的哈希值（检测 app/ frontend/ requirements.txt Dockerfile 的变更）
 compute_code_hash() {
-    # 如果 git 可用，用 git 的 HEAD 哈希
     if git rev-parse --git-dir > /dev/null 2>&1; then
-        git log -1 --format=%H -- app/ frontend/ requirements.txt Dockerfile docker-compose.yml 2>/dev/null || \
+        # 用 git hash-object 计算关键路径的文件树哈希，比 git log 更准确
+        # 当没有 commit 触及这些路径时，git log 会返回空，导致误判为"代码变更"
+        git hash-object \
+            $(git ls-tree -r HEAD --name-only -- app/ frontend/ requirements.txt Dockerfile docker-compose.yml 2>/dev/null) \
+            2>/dev/null | git hash-object --stdin 2>/dev/null || \
         git rev-parse HEAD 2>/dev/null
     else
         # 否则用文件内容的 md5
-        find app/ frontend/ -type f \( -name "*.py" -o -name "*.html" -o -name "*.js" -o -name "*.css" -o -name "*.ts" -o -name "*.vue" \) 2>/dev/null | \
-            sort | xargs md5 -r 2>/dev/null | md5 -r | awk '{print $1}'
+        if command -v md5sum &>/dev/null; then
+            find app/ frontend/ -type f \( -name "*.py" -o -name "*.html" -o -name "*.js" -o -name "*.css" -o -name "*.ts" -o -name "*.vue" \) 2>/dev/null | \
+                sort | xargs md5sum 2>/dev/null | md5sum | awk '{print $1}'
+        elif command -v md5 &>/dev/null; then
+            find app/ frontend/ -type f \( -name "*.py" -o -name "*.html" -o -name "*.js" -o -name "*.css" -o -name "*.ts" -o -name "*.vue" \) 2>/dev/null | \
+                sort | xargs md5 -r 2>/dev/null | md5 -r | awk '{print $1}'
+        else
+            echo "unknown"
+        fi
     fi
 }
 
@@ -264,7 +333,10 @@ if [ "$CONTAINER_EXISTS" = true ]; then
     PREVIOUS_HASH=""
     [ -f "$BUILD_CACHE_FILE" ] && PREVIOUS_HASH=$(cat "$BUILD_CACHE_FILE")
 
-    if [ "$CURRENT_HASH" != "$PREVIOUS_HASH" ]; then
+    if [ -z "$CURRENT_HASH" ] || [ -z "$PREVIOUS_HASH" ]; then
+        print_warning "无法计算代码哈希，将执行重建以确保一致性"
+        NEED_REBUILD=true
+    elif [ "$CURRENT_HASH" != "$PREVIOUS_HASH" ]; then
         print_warning "检测到代码变更，需要重新构建镜像"
         NEED_REBUILD=true
     else
@@ -327,16 +399,28 @@ print_step "部署完成"
 echo ""
 print_info "等待服务就绪..."
 
+# 检查 curl 是否可用，不可用时用 python 替代
+if command -v curl &>/dev/null; then
+    HEALTH_CHECK_CMD="curl -sf http://localhost:${PORT:-8000}/health"
+else
+    print_warning "未找到 curl，使用 python 进行健康检查"
+    HEALTH_CHECK_CMD="python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-8000}/health')\""
+fi
+
 MAX_RETRIES=30
 RETRY_COUNT=0
 SERVICE_READY=false
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if curl -sf http://localhost:${PORT:-8000}/health > /dev/null 2>&1; then
+    if eval "$HEALTH_CHECK_CMD" > /dev/null 2>&1; then
         SERVICE_READY=true
         break
     fi
     RETRY_COUNT=$((RETRY_COUNT + 1))
+    # 每 5 次打印一次进度
+    if [ $((RETRY_COUNT % 5)) -eq 0 ]; then
+        print_info "  等待中... ($((RETRY_COUNT * 2))s / ${MAX_RETRIES}s)"
+    fi
     sleep 2
 done
 

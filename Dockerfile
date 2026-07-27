@@ -47,10 +47,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=python-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=python-builder /usr/local/bin /usr/local/bin
 
-# 从前端构建阶段复制前端产物
-COPY --from=frontend-builder /build/static/dist/ ./static/dist/
+# 复制应用源代码
+COPY app/ ./app/
+COPY static/ ./static/
 
-# 环境变量
+# 从前端构建阶段复制前端产物（覆盖 static/dist/）
+COPY --from=frontend-builder /build/static/dist/ ./static/dist/
 
 # 预编译 .pyc 加速启动
 RUN python -m compileall -q app/
@@ -65,6 +67,6 @@ RUN mkdir -p /app/data/repos && \
 USER app
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-8000}/health')" || exit 1
+    CMD python -c "import os, urllib.request; port = os.environ.get('PORT', '8000'); urllib.request.urlopen(f'http://localhost:{port}/health')" || exit 1
 
 CMD ["sh", "-c", "exec uvicorn app.main:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers 1 --log-level ${LOG_LEVEL:-info} --no-access-log --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-30}"]
