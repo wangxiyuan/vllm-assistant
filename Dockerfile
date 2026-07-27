@@ -49,9 +49,8 @@ COPY --from=python-builder /usr/local/bin /usr/local/bin
 
 # 复制应用源代码
 COPY app/ ./app/
-COPY static/ ./static/
 
-# 从前端构建阶段复制前端产物（覆盖 static/dist/）
+# 从前端构建阶段复制前端产物到 static/dist/
 COPY --from=frontend-builder /build/static/dist/ ./static/dist/
 
 # 预编译 .pyc 加速启动
