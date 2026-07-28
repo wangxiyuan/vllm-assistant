@@ -41,7 +41,7 @@ export const useTodoStore = defineStore('todo', () => {
   const subtasks = ref<TodoTask[]>([])
   const subtasksLoading = ref(false)
   const showSubtaskForm = ref(false)
-  const newSubtask = ref({ title: '', priority: 'P2', assignee_id: null, related_refs: [] as any[], refInput: '' })
+  const newSubtask = ref({ title: '', description: '', priority: 'P2', assignee_id: null, related_refs: [] as any[], refInput: '' })
   const editingSubtaskId = ref<number | null>(null)
   const editSubtaskForm = ref<any>({})
 
@@ -333,6 +333,7 @@ export const useTodoStore = defineStore('todo', () => {
         method: 'POST',
         body: JSON.stringify({
           title: newSubtask.value.title.trim(),
+          description: newSubtask.value.description.trim(),
           priority: newSubtask.value.priority,
           assignee_id: newSubtask.value.assignee_id,
           related_refs: newSubtask.value.related_refs || [],
@@ -341,7 +342,7 @@ export const useTodoStore = defineStore('todo', () => {
         }),
       })
       subtasks.value.push(result)
-      newSubtask.value = { title: '', priority: 'P2', assignee_id: null, related_refs: [], refInput: '' }
+      newSubtask.value = { title: '', description: '', priority: 'P2', assignee_id: null, related_refs: [], refInput: '' }
       showSubtaskForm.value = false
       loadTasks()
       useAppStore().showToast('子任务已创建', result.title, 'success')
@@ -410,7 +411,7 @@ export const useTodoStore = defineStore('todo', () => {
     }
     try {
       const updates: Record<string, any> = {}
-      const fields = ['title', 'priority', 'source', 'assignee_id', 'status', 'related_refs', 'area']
+      const fields = ['title', 'description', 'priority', 'source', 'assignee_id', 'status', 'related_refs', 'area']
       for (const f of fields) {
         let oldVal = (subtask as any)[f]
         let newVal = editSubtaskForm.value[f]

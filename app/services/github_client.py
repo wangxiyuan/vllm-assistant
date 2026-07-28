@@ -296,11 +296,18 @@ class GitHubClient:
 
     def get_pull_diff(self, number: int) -> Optional[str]:
         """获取PR的diff文本"""
-        result = self._make_request("GET", f"/pulls/{number}", headers={"Accept": "application/vnd.github.v3.diff"})
-        # diff返回的是纯文本，不是JSON
-        if isinstance(result, str):
-            return result
-        return None
+        url = f"{self.base_url}/pulls/{number}"
+        headers = {"Accept": "application/vnd.github.v3.diff"}
+        try:
+            response = self.session.get(url, headers=headers)
+            if response.status_code == 406:
+                logger.warning(f"PR #{number} diff too large, GitHub returned 406")
+                return None
+            response.raise_for_status()
+            return response.text
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"GitHub API Error: {e} - URL: {url}")
+            return None
 
     # ==================== Checks API ====================
 

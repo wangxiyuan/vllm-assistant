@@ -905,29 +905,32 @@ const sortedKbTypes = computed(() => {
 .msg-assistant .msg-avatar { background: var(--signal-blue-glow); color: var(--signal-blue); }
 .msg-content {
   flex: 1;
+  font-size: var(--text-base);
   line-height: 1.7;
-  white-space: pre-wrap;
+  color: var(--text-primary);
   word-break: break-word;
 }
 /* Markdown 渲染后的内联元素 */
 .msg-content :deep(code) {
-  background: var(--bg-elev-2);
-  padding: 1px 5px;
-  border-radius: 3px;
+  font-family: var(--font-mono);
   font-size: 0.9em;
-  font-family: var(--font-mono, monospace);
+  background: var(--bg-elev-2);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  color: var(--amber-bright);
 }
 .msg-content :deep(pre) {
-  background: var(--bg-elev-1);
+  background: var(--bg-elev-2);
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-sm);
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   overflow-x: auto;
-  margin: var(--space-2) 0;
+  margin: 0 0 var(--space-4);
 }
 .msg-content :deep(pre code) {
   background: transparent;
   padding: 0;
+  color: inherit;
 }
 .msg-content :deep(strong) { font-weight: 600; color: var(--text-primary); }
 .msg-content :deep(em) { font-style: italic; }
@@ -936,12 +939,50 @@ const sortedKbTypes = computed(() => {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.msg-content :deep(h1), .msg-content :deep(h2), .msg-content :deep(h3),
+.msg-content :deep(h4), .msg-content :deep(h5), .msg-content :deep(h6) {
+  margin: var(--space-5) 0 var(--space-3);
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.msg-content :deep(h1) { font-size: var(--text-2xl); border-bottom: 1px solid var(--border-faint); padding-bottom: var(--space-2); }
+.msg-content :deep(h2) { font-size: var(--text-xl); }
+.msg-content :deep(h3) { font-size: var(--text-lg); }
+.msg-content :deep(h4) { font-size: var(--text-base); }
 .msg-content :deep(ul),
-.msg-content :deep(ol) { padding-left: var(--space-5); margin: var(--space-1) 0; }
-.msg-content :deep(li) { margin: 1px 0; }
-.msg-content :deep(p) { margin: var(--space-2) 0; }
-.msg-content :deep(p:first-child) { margin-top: 0; }
+.msg-content :deep(ol) { margin: 0 0 var(--space-4); padding-left: var(--space-6); }
+.msg-content :deep(li) { margin-bottom: var(--space-1); }
+.msg-content :deep(p) { margin: 0 0 var(--space-3); }
 .msg-content :deep(p:last-child) { margin-bottom: 0; }
+.msg-content :deep(blockquote) {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-left: 4px solid var(--border);
+  color: var(--text-secondary);
+  background: var(--bg-elev-1);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.msg-content :deep(hr) {
+  margin: var(--space-5) 0;
+  border: none;
+  border-top: 1px solid var(--border-faint);
+}
+.msg-content :deep(table) {
+  width: 100%;
+  margin: 0 0 var(--space-4);
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.msg-content :deep(th), .msg-content :deep(td) {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-faint);
+  text-align: left;
+}
+.msg-content :deep(th) {
+  background: var(--bg-elev-2);
+  font-weight: 600;
+}
 .msg-content :deep(h1),
 .msg-content :deep(h2),
 .msg-content :deep(h3),

@@ -210,8 +210,12 @@ def get_pr_diff(pr_number: int, db: Session = Depends(get_db)):
     """获取 PR 的 diff 内容（实时）"""
     try:
         diff = _get_github_client().get_pull_diff(pr_number)
-        if not diff:
-            raise HTTPException(status_code=404, detail="Diff not available")
+        if diff is None:
+            # 可能 diff 太大或 PR 不存在
+            raise HTTPException(
+                status_code=404,
+                detail="Diff not available. This PR may be too large for GitHub's diff API, or the PR no longer exists."
+            )
         return {"diff": diff}
     except HTTPException:
         raise

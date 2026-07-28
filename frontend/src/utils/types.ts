@@ -135,6 +135,7 @@ export interface Article {
   area?: string
   tags?: string[]
   user_id?: number | null
+  user_name?: string | null
   status: 'draft' | 'published'
   created_at: string
   updated_at: string

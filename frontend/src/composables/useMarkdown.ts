@@ -3,7 +3,6 @@ import hljs from 'highlight.js'
 import { esc } from '@/utils/helpers'
 
 marked.setOptions({
-  breaks: true,
   gfm: true,
   highlight(code: string, lang: string): string {
     if (lang && hljs.getLanguage(lang)) {

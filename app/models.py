@@ -428,6 +428,18 @@ class Article(Base):
                         cascade="all, delete-orphan")
 
     def to_dict(self) -> Dict[str, Any]:
+        # 解析作者名
+        user_name = None
+        if self.user_id is not None:
+            try:
+                from app.database import SessionLocal
+                db = SessionLocal()
+                user = db.query(User).filter(User.id == self.user_id).first()
+                if user:
+                    user_name = user.name
+                db.close()
+            except Exception:
+                pass
         return {
             "id": self.id,
             "title": self.title,
@@ -435,6 +447,7 @@ class Article(Base):
             "area": self.area,
             "tags": json.loads(self.tags) if self.tags else [],
             "user_id": self.user_id,
+            "user_name": user_name,
             "status": self.status,
             "code_refs_count": self.code_refs_count or 0,
             "valid_refs_count": self.valid_refs_count or 0,

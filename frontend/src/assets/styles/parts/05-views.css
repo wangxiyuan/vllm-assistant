@@ -910,6 +910,18 @@
 }
 
 /* Subtask list in drawer */
+.subtask-module {
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) 0 0;
+    border-top: 2px solid var(--border);
+    margin-top: var(--space-5);
+}
+.subtask-module-label {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin-bottom: var(--space-3);
+    display: block;
+}
 .subtask-list {
     display: flex;
     flex-direction: column;
@@ -918,9 +930,9 @@
 }
 .subtask-item {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-3);
     border-radius: var(--radius);
     background: var(--bg-elev-1);
     border: 1px solid var(--border-faint);
@@ -936,6 +948,12 @@
 .subtask-item.completed .subtask-title {
     text-decoration: line-through;
     color: var(--text-disabled);
+}
+.subtask-content-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-2);
 }
 .subtask-checkbox {
     position: relative;
@@ -955,13 +973,28 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-2);
 }
 .subtask-title {
     font-size: var(--text-sm);
     font-weight: 500;
     color: var(--text-primary);
     word-break: break-word;
+}
+.subtask-desc {
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    line-height: 1.6;
+    word-break: break-word;
+}
+.subtask-desc p {
+    margin-bottom: var(--space-2);
+}
+.subtask-desc p:last-child {
+    margin-bottom: 0;
+}
+.subtask-desc.task-done {
+    opacity: 0.6;
 }
 .subtask-meta {
     display: flex;
@@ -1589,10 +1622,15 @@ pre code.embedded-code.outdated {
 /* Article TOC */
 .article-content-wrapper {
     position: relative;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--space-6);
     min-height: 50vh;
 }
 .article-content-body {
-    margin-left: 280px;
+    flex: 1;
+    min-width: 0;
     max-width: 860px;
     font-size: var(--text-md);
     line-height: 1.75;
@@ -1604,11 +1642,11 @@ pre code.embedded-code.outdated {
     margin-bottom: var(--space-2);
 }
 .article-toc-sidebar {
-    position: fixed;
-    top: calc(var(--header-h) + var(--space-4) + 44px);
-    left: calc(var(--sidebar-w) + var(--space-8));
-    width: 240px;
-    max-height: calc(100vh - var(--header-h) - var(--space-8) - 44px);
+    position: sticky;
+    top: 0;
+    flex-shrink: 0;
+    width: 220px;
+    max-height: calc(100vh - var(--header-h) - var(--space-10));
     overflow-y: auto;
     padding: var(--space-4);
     background: var(--bg-elev-1);
@@ -1765,6 +1803,25 @@ pre code.embedded-code.outdated {
     font-size: var(--text-xs);
     color: var(--text-tertiary);
 }
+.article-author {
+    font-family: var(--font-ui);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.article-detail-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) 0 var(--space-5);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    border-bottom: 1px solid var(--border-faint);
+    margin-bottom: var(--space-5);
+}
 .article-tags {
     display: flex;
     flex-wrap: wrap;
@@ -1785,19 +1842,9 @@ pre code.embedded-code.outdated {
 
 .editor-header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: var(--space-5);
+    flex-direction: column;
     gap: var(--space-3);
-    flex-wrap: wrap;
-}
-.editor-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
     margin-bottom: var(--space-5);
-    gap: var(--space-3);
-    flex-wrap: wrap;
 }
 .editor-body {
     display: flex;
@@ -1816,6 +1863,14 @@ pre code.embedded-code.outdated {
     display: flex;
     gap: var(--space-3);
     flex-wrap: wrap;
+}
+.editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) 0;
+    border-top: 1px solid var(--border-faint);
+    border-bottom: 1px solid var(--border-faint);
 }
 .editor-preview {
     border: 1px solid var(--border-faint);

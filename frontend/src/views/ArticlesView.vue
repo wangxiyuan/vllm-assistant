@@ -2,10 +2,12 @@
 import { onMounted, onUnmounted, ref, nextTick, computed, watch } from 'vue'
 import { useArticlesStore } from '@/stores/articles'
 import { useAppStore } from '@/stores/app'
+import { useUsersStore } from '@/stores/users'
 import { timeAgo } from '@/utils/helpers'
 
 const articlesStore = useArticlesStore()
 const appStore = useAppStore()
+const usersStore = useUsersStore()
 
 const activeHeadingId = ref<string | null>(null)
 
@@ -29,6 +31,7 @@ function updateActiveHeading() {
 
 onMounted(() => {
   articlesStore.loadArticles()
+  usersStore.loadUsers()
   scrollEl = document.querySelector('.main')
   scrollEl?.addEventListener('scroll', updateActiveHeading, { passive: true })
 })
@@ -100,6 +103,7 @@ watch(
               {{ article.status === 'published' ? '已发布' : article.status === ('archived' as string) ? '已归档' : '草稿' }}
             </span>
             <span v-if="article.area" class="article-area">{{ appStore.areaName(article.area) }}</span>
+            <span v-if="article.user_name" class="article-author">✍️ {{ article.user_name }}</span>
             <span>{{ timeAgo(article.updated_at) }}</span>
             <span :class="articlesStore.refStatusClass(article)">{{ articlesStore.refStatusText(article) }}</span>
           </div>
@@ -117,12 +121,7 @@ watch(
           <h2 class="view-title">{{ articlesStore.editorMode === 'create' ? '新建文章' : '编辑文章' }}</h2>
         </div>
         <div class="editor-actions">
-          <button class="btn btn-sm" @click="articlesStore.openInsertRef()" title="插入代码引用">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-            插入代码引用
-          </button>
-          <span class="action-bar-divider"></span>
-          <button class="btn btn-sm btn-ghost" @click="articlesStore.closeEditor()">取消</button>
+          <button class="btn btn-sm" @click="articlesStore.closeEditor()">取消</button>
           <button v-if="articlesStore.editorSubView === 'editor'" class="btn btn-sm" @click="articlesStore.previewArticle()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             预览 <span class="text-tertiary">(Ctrl+P)</span>
@@ -151,6 +150,10 @@ watch(
             <option value="published">已发布</option>
             <option value="archived">已归档</option>
           </select>
+          <select class="select" v-model.number="articlesStore.form.user_id">
+            <option :value="null">选择作者</option>
+            <option v-for="u in usersStore.users" :key="u.id" :value="u.id">{{ u.name }}</option>
+          </select>
           <div class="tag-input">
             <input type="text" class="input" v-model="articlesStore.editorTagInput"
                    placeholder="标签" @keydown.enter.prevent="articlesStore.addEditorTag()" />
@@ -158,6 +161,12 @@ watch(
               {{ tag }} <button class="tag-remove" @click="articlesStore.removeEditorTag(tag)">&times;</button>
             </span>
           </div>
+        </div>
+        <div class="editor-toolbar">
+          <button class="btn btn-sm" @click="articlesStore.openInsertRef()" title="插入代码引用">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            插入代码引用
+          </button>
         </div>
         <div class="form-group" style="flex:1;">
           <textarea class="textarea editor-textarea" v-model="articlesStore.form.content"
@@ -278,8 +287,14 @@ watch(
       </div>
 
       <div v-if="articlesStore.articleDetailLoading" class="detail-loading">加载中…</div>
-      <div v-else class="article-content-wrapper">
-        <aside v-if="articlesStore.articleToc.length > 0" class="article-toc-sidebar">
+      <div v-else>
+        <div class="article-detail-meta">
+          <span v-if="articlesStore.selectedArticle?.user_name" class="article-author">✍️ {{ articlesStore.selectedArticle?.user_name }}</span>
+          <span v-if="articlesStore.selectedArticle?.area" class="article-area">{{ appStore.areaName(articlesStore.selectedArticle?.area) }}</span>
+          <span class="article-date">{{ timeAgo(articlesStore.selectedArticle?.updated_at) }}</span>
+        </div>
+        <div class="article-content-wrapper">
+          <aside v-if="articlesStore.articleToc.length > 0" class="article-toc-sidebar">
           <div class="article-toc-title">目录</div>
           <a v-for="item in articlesStore.articleToc" :key="item.id"
              class="article-toc-item"
@@ -290,6 +305,7 @@ watch(
           </a>
         </aside>
         <div class="article-content-body" v-html="articlesStore.articleRenderedHtml"></div>
+        </div>
       </div>
     </template>
   </div>
