@@ -275,7 +275,7 @@ async function generateInsight(task: any) {
               <label class="form-label">描述</label>
               <textarea class="textarea" v-model="todoStore.newTask.description" placeholder="描述（可选）" rows="3"></textarea>
             </div>
-            <div class="form-row" style="align-items:flex-start;">
+            <div class="form-row" style="align-items:flex-end;">
               <div class="field">
                 <label class="form-label">优先级</label>
                 <select class="select" v-model="todoStore.newTask.priority">
@@ -296,7 +296,7 @@ async function generateInsight(task: any) {
                 </select>
               </div>
             </div>
-            <div class="form-row" style="align-items:flex-start;margin-top:var(--space-4);">
+            <div class="form-row" style="align-items:flex-end;margin-top:var(--space-4);">
               <div class="field">
                 <label class="form-label">领域</label>
                 <input class="input" type="text" placeholder="如 engine" v-model="todoStore.newTask.area" />
@@ -494,12 +494,12 @@ async function generateInsight(task: any) {
                 <input class="input input-sm" type="text" v-model="todoStore.newSubtask.title" placeholder="子任务标题" @keyup.enter="todoStore.createSubtask()" />
               </div>
               <div class="form-row" style="gap:var(--space-2);">
-                <div class="field" style="flex:0 0 100px;">
+                <div class="field" style="flex:1;margin-top:0;">
                   <select class="select select-sm" v-model="todoStore.newSubtask.priority">
                     <option v-for="p in ['P0','P1','P2','P3']" :key="p" :value="p">{{ p }}</option>
                   </select>
                 </div>
-                <div class="field" style="flex:1;">
+                <div class="field" style="flex:1;margin-top:0;">
                   <select class="select select-sm" v-model="todoStore.newSubtask.assignee_id">
                     <option :value="null">无责任人</option>
                     <option v-for="u in usersStore.users" :key="u.id" :value="u.id">{{ u.name }}</option>
@@ -543,13 +543,13 @@ async function generateInsight(task: any) {
                       <textarea class="textarea" rows="2" v-model="todoStore.editTaskForm.description" placeholder="描述（可选）"></textarea>
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-3);margin-bottom:var(--space-3);">
-                      <div class="field">
+                      <div class="field" style="margin-top:0;">
                         <label class="field-label-sm">优先级</label>
                         <select class="select" v-model="todoStore.editTaskForm.priority">
                           <option v-for="p in ['P0','P1','P2','P3']" :key="p" :value="p">{{ p }}</option>
                         </select>
                       </div>
-                      <div class="field">
+                      <div class="field" style="margin-top:0;">
                         <label class="field-label-sm">状态</label>
                         <select class="select" v-model="todoStore.editTaskForm.status">
                           <option value="todo">待处理</option>
@@ -558,24 +558,24 @@ async function generateInsight(task: any) {
                           <option value="cancelled">已取消</option>
                         </select>
                       </div>
-                      <div class="field">
+                      <div class="field" style="margin-top:0;">
                         <label class="field-label-sm">责任人</label>
                         <select class="select" v-model.number="todoStore.editTaskForm.assignee_id">
                           <option :value="null">无</option>
                           <option v-for="u in usersStore.users" :key="u.id" :value="u.id">{{ u.name }}</option>
                         </select>
                       </div>
-                      <div class="field">
+                      <div class="field" style="margin-top:0;">
                         <label class="field-label-sm">领域</label>
                         <input class="input" type="text" v-model="todoStore.editTaskForm.area" placeholder="如 engine" />
                       </div>
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);margin-bottom:var(--space-3);">
-                      <div class="field">
+                      <div class="field" style="margin-top:0;">
                         <label class="field-label-sm">截止日期</label>
                         <input class="input" type="date" v-model="todoStore.editTaskForm.due_date" />
                       </div>
-                      <div class="field">
+                      <div class="field" style="margin-top:0;">
                         <label class="field-label-sm">来源</label>
                         <select class="select" v-model="todoStore.editTaskForm.source">
                           <option v-for="s in sources" :key="s.value" :value="s.value">{{ s.label }}</option>

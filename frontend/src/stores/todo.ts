@@ -224,7 +224,14 @@ export const useTodoStore = defineStore('todo', () => {
 
   // Delete
   async function deleteTask(task: TodoTask) {
-    if (!confirm(`确认删除任务 #${task.id} "${task.title}"？`)) return
+    const confirmed = await useAppStore().showConfirm({
+      title: '确认删除',
+      message: `确认删除任务 #${task.id} "${task.title}"？`,
+      confirmText: '删除',
+      cancelText: '取消',
+      danger: true,
+    })
+    if (!confirmed) return
     const backup = { ...task }
     try {
       await api(`/api/personal-todo/tasks/${task.id}`, { method: 'DELETE' })
@@ -361,7 +368,14 @@ export const useTodoStore = defineStore('todo', () => {
   }
 
   async function deleteSubtask(subtask: TodoTask) {
-    if (!confirm(`确认删除子任务「${subtask.title}」？`)) return
+    const confirmed = await useAppStore().showConfirm({
+      title: '确认删除',
+      message: `确认删除子任务「${subtask.title}」？`,
+      confirmText: '删除',
+      cancelText: '取消',
+      danger: true,
+    })
+    if (!confirmed) return
     try {
       await api(`/api/personal-todo/tasks/${subtask.id}`, { method: 'DELETE' })
       subtasks.value = subtasks.value.filter(s => s.id !== subtask.id)

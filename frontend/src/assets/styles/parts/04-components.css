@@ -776,7 +776,7 @@ a.item-title:hover { color: var(--amber-bright); }
     padding: 1px 6px;
     border-radius: var(--radius-xs);
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: var(--text-xs);
     line-height: 1.5;
     border: 1px solid var(--border-faint);
     background: var(--bg-elev-2);

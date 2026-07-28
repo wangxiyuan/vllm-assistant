@@ -1135,7 +1135,7 @@
     gap: var(--space-2);
 }
 .kanban-card-title {
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     font-weight: 500;
     color: var(--text-primary);
     margin: 0 0 var(--space-1);
@@ -1148,7 +1148,7 @@
 }
 .kanban-card-source {
     font-family: var(--font-mono);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     color: var(--text-tertiary);
     white-space: nowrap;
 }
@@ -1162,7 +1162,7 @@
     display: inline-flex;
     align-items: center;
     font-family: var(--font-mono);
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     color: var(--text-tertiary);
     background: var(--bg-elev-1);
     padding: 0 5px;
@@ -1183,12 +1183,12 @@
     color: var(--signal-blue);
 }
 .kanban-card-footer .badge-assignee {
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     padding: 0 5px;
     line-height: 1.6;
 }
 .kanban-card-footer .ref-badge-sm {
-    font-size: var(--text-2xs);
+    font-size: var(--text-xs);
     line-height: 1.6;
     padding: 0 4px;
     gap: 2px;
