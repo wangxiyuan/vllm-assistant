@@ -5,15 +5,10 @@ AI Assistant - OpenAI API 集成
 import json
 import logging
 import re
-import time
 from typing import List, Dict, Any, Optional
 
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
-
 from app.config import Config
+from app.services.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -21,109 +16,15 @@ logger = logging.getLogger(__name__)
 class AIAssistant:
     """AI 助手，基于 OpenAI API 提供智能建议"""
 
-    # 统一超时（秒），所有 AI 调用都用
-    # Review 需要处理 diff，耗时较长；summarize 较短
-    DEFAULT_TIMEOUT = 120.0
-
     def __init__(self):
-        if not OpenAI:
-            raise ImportError("openai package is required")
-
-        # 忽略环境变量中的代理（httpx 不支持 socks 协议），
-        # 通过显式创建 httpx 客户端来避免代理冲突
-        import httpx
-        http_client = httpx.Client(proxy=None, timeout=self.DEFAULT_TIMEOUT, trust_env=False)
-        self.client = OpenAI(
-            api_key=Config.OPENAI_API_KEY,
-            base_url=Config.OPENAI_BASE_URL,
-            http_client=http_client,
-        )
+        self.llm = LLMClient()
         self.model = Config.OPENAI_MODEL
-
-    def _chat(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        """统一的 chat 调用 + 重试 + 错误处理
-
-        退避策略：优先用 Retry-After 头，否则指数退避（1s→max 10s），最多 10 次。
-        """
-        last_exc: Optional[Exception] = None
-        for attempt in range(10):
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    timeout=self.DEFAULT_TIMEOUT,
-                )
-                content = response.choices[0].message.content
-                if not content:
-                    logger.warning("AI returned empty content")
-                return content or ""
-            except Exception as e:
-                last_exc = e
-                if attempt < 9:
-                    retry_after = self._parse_retry_after(e)
-                    wait = min(retry_after if retry_after > 0 else (2 ** attempt), 10.0)
-                    logger.warning(
-                        "AI chat failed (attempt %d/10, retry in %.1fs): %s",
-                        attempt + 1, wait, e
-                    )
-                    time.sleep(wait)
-                else:
-                    logger.exception("AI chat failed after 10 attempts")
-        raise last_exc  # type: ignore[misc]
-
-    @staticmethod
-    def _parse_retry_after(e: Exception) -> float:
-        """从 OpenAI API 异常中解析 Retry-After 时间。"""
-        try:
-            resp = getattr(e, "response", None)
-            if resp is not None and hasattr(resp, "headers"):
-                ra = resp.headers.get("retry-after") or resp.headers.get("Retry-After")
-                if ra:
-                    return min(float(ra), 10.0)
-                reset = resp.headers.get("x-ratelimit-reset") or resp.headers.get("X-RateLimit-Reset")
-                if reset:
-                    wait = float(reset) - time.time()
-                    if wait > 0:
-                        return min(wait, 10.0)
-            msg = str(e).lower()
-            m = re.search(r"(?:retry after|try again in)\s*([\d.]+)\s*s", msg)
-            if m:
-                return min(float(m.group(1)), 10.0)
-        except (ValueError, TypeError, AttributeError):
-            pass
-        return 0.0
-
-    def _safe_json(self, content: str, default: Any) -> Any:
-        """解析 AI 返回的 JSON，失败时尝试自动修复常见格式错误"""
-        if not content:
-            return default
-        # 尝试直接解析
-        try:
-            return json.loads(content)
-        except (json.JSONDecodeError, TypeError):
-            pass
-        # 尝试修复常见问题：字段名缺少引号、值缺少引号、末尾逗号
-        import re
-        try:
-            # 1. 去掉 markdown 代码块标记
-            cleaned = re.sub(r'^```(?:json)?\s*\n?', '', content.strip())
-            cleaned = re.sub(r'\n```\s*$', '', cleaned)
-            # 2. 修复键名缺少引号：{key:  -> {"key":
-            cleaned = re.sub(r'(?<=[{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'"\1":', cleaned)
-            # 3. 修复值中未引用的字符串（在 : 之后、, 或 } 之前）
-            #   先处理数组和对象嵌套，跳过
-            # 4. 尝试再次解析
-            return json.loads(cleaned)
-        except (json.JSONDecodeError, TypeError, re.error):
-            return default
 
     def generate_review(
         self, pr_title: str, pr_diff: str, pr_number: int
-    ) -> Dict[str, Any]:
+    ) -> str:
         """
-        基于PR diff生成结构化review意见
+        基于PR diff生成 markdown 格式的 review 意见
 
         Args:
             pr_title: PR标题
@@ -131,13 +32,7 @@ class AIAssistant:
             pr_number: PR编号
 
         Returns:
-            {
-                "summary": str,
-                "code_quality": [...],
-                "performance": [...],
-                "tests": [...],
-                "docs": [...],
-            }
+            markdown 格式的 review 字符串
         """
         prompt = f"""你是一位资深 vLLM 贡献者，正在 review 一个 PR。
 
@@ -148,46 +43,41 @@ PR Diff:
 {pr_diff[:8000]}
 ```
 
-请用中文给出结构化的 review 意见。**严格**返回以下 JSON 格式，不要 markdown 代码块，不要多余文字：
+请用中文写一份 markdown 格式的 review 意见。包含以下部分（用 markdown 标题分隔），每个部分用无序列表列出问题：
 
-{{
-  "summary": "一句话总体评价",
-  "code_quality": [
-    {{"severity": "critical", "title": "问题标题", "description": "详细说明"}}
-  ],
-  "performance": [
-    {{"severity": "important", "title": "问题标题", "description": "详细说明"}}
-  ],
-  "tests": [
-    {{"severity": "important", "title": "问题标题", "description": "详细说明"}}
-  ],
-  "docs": [
-    {{"severity": "minor", "title": "问题标题", "description": "详细说明"}}
-  ]
-}}
+1. **总体评价** — 一句话总体评价
+2. **代码质量** — 列出代码质量问题，每条注明严重程度（critical/important/minor）
+3. **性能** — 列出性能相关问题，每条注明严重程度
+4. **测试** — 列出测试相关问题，每条注明严重程度
+5. **文档** — 列出文档相关问题，每条注明严重程度
 
-规则：
-- 所有字段必须是上述类型：summary 是字符串，其余 4 个字段都是数组
-- 数组中每项必须是对象，含 severity（critical/important/minor）、title（简短标题）、description（详细说明）
-- 如果某个方面没有问题，返回空数组 []
-- 所有文字用中文，severity 值用英文"""
+格式示例：
+### 总体评价
+这个 PR 整体质量不错，但有一些关键问题需要解决。
+
+### 代码质量
+- **[critical]** 问题标题：详细说明
+- **[important]** 问题标题：详细说明
+
+### 性能
+- **[important]** 问题标题：详细说明
+
+如果某个方面没有问题，写"无"即可。
+
+输出纯 markdown，不要用代码块包裹整个内容。"""
 
         try:
-            content = self._chat(prompt, max_tokens=4096, temperature=0.7)
+            content = self.llm.chat_sync(prompt, max_tokens=4096, temperature=0.7)
         except Exception as e:
-            return {"error": str(e)}
+            return f"**Review 生成失败**：{e}"
 
-        parsed = self._safe_json(content, None)
-        if parsed is not None and isinstance(parsed, dict):
-            return parsed
-        # JSON 解析失败时，返回空结构化数据 + raw_response 兜底
-        return {
-            "summary": "AI 返回了内容但格式无法解析",
-            "code_quality": [],
-            "performance": [],
-            "tests": [],
-            "docs": [],
-        }
+        if content and content.strip():
+            content = content.strip()
+            if content.startswith("```"):
+                content = re.sub(r"^```(?:markdown)?\n?", "", content)
+                content = re.sub(r"\n?```$", "", content)
+            return content.strip()
+        return "*暂无 Review 内容*"
 
     def analyze_impact(self, changed_files: List[str]) -> Dict[str, Any]:
         """
@@ -224,11 +114,11 @@ Consider vLLM's architecture:
 Return valid JSON only."""
 
         try:
-            content = self._chat(prompt, max_tokens=2048, temperature=0.5)
+            content = self.llm.chat_sync(prompt, max_tokens=2048, temperature=0.5)
         except Exception as e:
             return {"error": str(e)}
 
-        parsed = self._safe_json(content, None)
+        parsed = self.llm.safe_json(content, None)
         if parsed is not None:
             return parsed
         return {"error": "Failed to parse response", "raw_response": content}
@@ -262,20 +152,20 @@ Return JSON with:
 Return valid JSON only."""
 
         try:
-            content = self._chat(prompt, max_tokens=1024, temperature=0.5)
+            content = self.llm.chat_sync(prompt, max_tokens=1024, temperature=0.5)
         except Exception as e:
             logger.warning(f"suggest_labels failed: {e}")
             return []
 
-        parsed = self._safe_json(content, None)
+        parsed = self.llm.safe_json(content, None)
         if isinstance(parsed, dict):
             return parsed.get("labels", []) or []
         return []
 
-    def summarize(self, title: str, body: str, item_type: str) -> Dict[str, Any]:
-        """为 issue 或 PR 生成结构化的中文摘要
+    def summarize(self, title: str, body: str, item_type: str) -> str:
+        """为 issue 或 PR 生成 markdown 格式的中文摘要
 
-        返回 dict，前端解析后渲染。仅本地展示，不做任何 GitHub 写操作。
+        返回 markdown 字符串，前端用 marked 渲染。仅本地展示，不做任何 GitHub 写操作。
 
         Args:
             title: 标题
@@ -283,74 +173,56 @@ Return valid JSON only."""
             item_type: 'issue' or 'pr'
 
         Returns:
-            dict，格式：
-            {
-                "core_problem": "核心问题/目标",
-                "key_points": ["要点1", "要点2"],
-                "impact": "影响范围/价值",
-                "risk": "潜在风险或注意事项"
-            }
+            markdown 格式的摘要字符串
         """
         if not body:
             body = "(无正文)"
         kind = "Issue" if item_type == "issue" else "Pull Request"
 
         if item_type == "issue":
-            prompt = f"""分析以下 vLLM Issue，给出结构化摘要。**严格**返回以下 JSON 格式，不要 markdown 代码块：
+            prompt = f"""分析以下 vLLM Issue，用中文写一段 markdown 格式的摘要。
 
-{{
-  "core_problem": "这个 issue 报告了什么问题或提出了什么需求（1-2句）",
-  "key_points": ["关键信息点1（如复现条件、环境、错误信息等）", "关键信息点2"],
-  "impact": "对用户/项目的影响程度和范围",
-  "risk": "如果不解决可能带来的风险，或处理时需要注意的点"
-}}
+要求包含以下几部分（用 markdown 标题分隔）：
+- **核心问题**：这个 issue 报告了什么问题或提出了什么需求（1-2句）
+- **关键要点**：用无序列表列出 2-4 个最有价值的信息点（如复现条件、环境、错误信息等）
+- **影响范围**：对用户/项目的影响程度和范围
+- **注意事项**：如果不解决可能带来的风险，或处理时需要注意的点。如果无明显风险，写"暂无"
 
 标题：{title}
 
 正文：
 {body[:4000]}
 
-要求：
-- 中文输出
-- core_problem 要具体，不要泛泛而谈
-- key_points 提取 2-4 个最有价值的信息点
-- impact 说明影响哪些用户群体或功能
-- risk 如果无明显风险写"暂无"
-- 不要客套话"""
+输出纯 markdown，不要用代码块包裹整个内容。"""
         else:
-            prompt = f"""分析以下 vLLM Pull Request，给出结构化摘要。**严格**返回以下 JSON 格式，不要 markdown 代码块：
+            prompt = f"""分析以下 vLLM Pull Request，用中文写一段 markdown 格式的摘要。
 
-{{
-  "core_problem": "这个 PR 解决了什么问题或实现了什么功能（1-2句）",
-  "key_points": ["实现要点1（如关键设计决策、算法选择等）", "实现要点2"],
-  "impact": "对项目的影响：性能提升幅度、功能变化、兼容性等",
-  "risk": "潜在风险：如边界条件未处理、性能回归风险、兼容性等"
-}}
+要求包含以下几部分（用 markdown 标题分隔）：
+- **核心问题**：这个 PR 解决了什么问题或实现了什么功能（1-2句）
+- **关键要点**：用无序列表列出 2-4 个关键技术实现要点
+- **影响范围**：对项目的影响（性能提升幅度、功能变化、兼容性等）
+- **注意事项**：潜在风险（边界条件未处理、性能回归风险、兼容性等）。如果无明显风险，写"暂无"
 
 标题：{title}
 
 正文：
 {body[:4000]}
 
-要求：
-- 中文输出
-- core_problem 要具体说明解决了什么问题
-- key_points 提取 2-4 个关键技术实现要点
-- impact 说明对 vLLM 的实际影响
-- risk 如果无明显风险写"暂无"
-- 不要客套话"""
+输出纯 markdown，不要用代码块包裹整个内容。"""
 
         try:
-            content = self._chat(prompt, max_tokens=512, temperature=0.3)
+            content = self.llm.chat_sync(prompt, max_tokens=1024, temperature=0.3)
         except Exception as e:
-            # fallback：返回简单文本格式
-            return {"core_problem": f"[摘要生成失败: {e}]", "key_points": [], "impact": "", "risk": "暂无"}
+            return f"**摘要生成失败**：{e}"
 
-        parsed = self._safe_json(content, None)
-        if parsed is not None:
-            return parsed
-        # fallback：返回原始文本
-        return {"core_problem": (content.strip()[:200] if content else "[无摘要]"), "key_points": [], "impact": "", "risk": "暂无"}
+        if content and content.strip():
+            # 清理可能多余的代码块包裹
+            content = content.strip()
+            if content.startswith("```"):
+                content = re.sub(r"^```(?:markdown)?\n?", "", content)
+                content = re.sub(r"\n?```$", "", content)
+            return content.strip()
+        return "*暂无摘要*"
 
     def translate(self, text: str, item_type: str) -> str:
         """将 Issue/PR 正文翻译为中文"""
@@ -392,7 +264,7 @@ Return valid JSON only."""
 翻译："""
 
         try:
-            content = self._chat(prompt, max_tokens=65536, temperature=0.1)
+            content = self.llm.chat_sync(prompt, max_tokens=65536, temperature=0.1)
             return content.strip() if content else text
         except Exception:
             logger.exception("translate failed")

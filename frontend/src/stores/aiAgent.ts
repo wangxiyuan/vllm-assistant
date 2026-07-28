@@ -54,12 +54,13 @@ export const KNOWLEDGE_TYPE_LABELS: Record<string, string> = {
   issue: 'Issue',
   pr: 'PR',
   article: '文章',
+  report: '洞察报告',
   manual: '手动添加',
   conversation: '对话',
 }
 
 export const KNOWLEDGE_TYPE_ORDER = [
-  'docs', 'code_structure', 'issue', 'pr', 'article', 'manual', 'conversation',
+  'docs', 'code_structure', 'issue', 'pr', 'article', 'report', 'manual', 'conversation',
 ]
 
 export const useAIAgentStore = defineStore('aiAgent', () => {

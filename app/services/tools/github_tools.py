@@ -75,11 +75,16 @@ async def handle_search_issues(args: dict) -> dict:
     if keywords:
         query_parts.append(keywords)
 
+    # 搜索条数上限（AI 有轮次限制，返回太多会导致选择困难）
+    SEARCH_LIMIT = 20
+
     query = " ".join(query_parts)
-    items = client._search_issues(query) or []
+    result = client._search_issues_with_count(query)
+    items = result.get("items") or []
+    total_count = result.get("total_count", len(items))
 
     results = []
-    for item in items[:15]:
+    for item in items[:SEARCH_LIMIT]:
         if not isinstance(item, dict):
             continue
         html_url = item.get("html_url", "")
@@ -89,13 +94,20 @@ async def handle_search_issues(args: dict) -> dict:
             "title": item.get("title", ""),
             "state": item.get("state", "unknown"),
             "type": item_type,
+            "merged": item.get("merged", False),
             "created_at": item.get("created_at"),
             "comments": item.get("comments", 0),
             "url": html_url,
             "labels": [l.get("name") for l in item.get("labels", []) if isinstance(l, dict)][:5],
         })
 
-    return {"results": results, "total": len(items), "query": query}
+    return {
+        "results": results,
+        "total": min(total_count, SEARCH_LIMIT),
+        "total_count": total_count,
+        "query": query,
+        "truncated": total_count > SEARCH_LIMIT,
+    }
 
 
 # ======================================================================

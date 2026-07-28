@@ -10,15 +10,12 @@ AI 输出会缓存到本地 SQLite（ai_cache 表），刷新页面后仍可查�
 """
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.config import Config
-from app.database import SessionLocal
-from app.models import AICache
 from app.services.ai_assistant import AIAssistant
+from app.services.ai_cache import ai_cache as cache_service
 from app.services._shared import get_github_client as _get_github_client
 from app.schemas import (
     AIReviewRequest,
@@ -35,63 +32,6 @@ def _require_api_key() -> None:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
 
 
-def _load_ai_cache(item_type: str, number: int, action: str) -> Optional[dict]:
-    """读取 AI 缓存。返回 dict 或 None。"""
-    db = SessionLocal()
-    try:
-        row = (
-            db.query(AICache)
-            .filter(
-                AICache.item_type == item_type,
-                AICache.number == number,
-                AICache.action == action,
-            )
-            .first()
-        )
-        if row and row.result:
-            try:
-                return json.loads(row.result)
-            except (json.JSONDecodeError, TypeError):
-                return None
-        return None
-    finally:
-        db.close()
-
-
-def _save_ai_cache(item_type: str, number: int, action: str, result: dict) -> None:
-    """写入 AI 缓存（覆盖已有记录）。失败不抛异常，只记日志。"""
-    db = SessionLocal()
-    try:
-        row = (
-            db.query(AICache)
-            .filter(
-                AICache.item_type == item_type,
-                AICache.number == number,
-                AICache.action == action,
-            )
-            .first()
-        )
-        payload = json.dumps(result, ensure_ascii=False)
-        if row:
-            row.result = payload
-            row.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        else:
-            db.add(
-                AICache(
-                    item_type=item_type,
-                    number=number,
-                    action=action,
-                    result=payload,
-                )
-            )
-        db.commit()
-    except Exception:
-        logger.exception("Failed to save AI cache")
-        db.rollback()
-    finally:
-        db.close()
-
-
 @router.post("/generate-review")
 def generate_review(request: AIReviewRequest):
     """基于 PR diff 生成结构化 review 意见（结果缓存到本地 ai_cache 表）
@@ -105,11 +45,11 @@ def generate_review(request: AIReviewRequest):
     try:
         _require_api_key()
 
-        # 先读缓存
-        cached = _load_ai_cache("pr", request.pr_number, "review")
+        # 先读缓存（回溯兼容：旧缓存为 dict，新缓存为字符串）
+        cached = cache_service.get("pr", request.pr_number, "review")
         if cached:
-            logger.info(f"[generate_review] CACHE HIT PR#{request.pr_number} ({time.time()-t0:.1f}s)")
-            cached["_cached"] = True
+            if isinstance(cached, dict):
+                return _legacy_review_to_markdown(cached)
             return cached
 
         pr = _get_github_client().get_pull(request.pr_number)
@@ -128,9 +68,8 @@ def generate_review(request: AIReviewRequest):
             pr_number=request.pr_number,
         )
         logger.info(f"[generate_review] DONE PR#{request.pr_number} ({time.time()-t0:.1f}s)")
-        # 缓存成功结果（error 字段存在表示部分失败，也缓存以免重复调用）
-        if isinstance(result, dict):
-            _save_ai_cache("pr", request.pr_number, "review", result)
+        # 缓存结果
+        cache_service.set("pr", request.pr_number, "review", result)
         return result
     except HTTPException:
         raise
@@ -187,10 +126,11 @@ def summarize(request: SummarizeRequest):
     try:
         _require_api_key()
 
-        # 先读缓存
-        cached = _load_ai_cache(request.item_type, request.number, "summary")
+        # 先读缓存（回溯兼容：旧缓存为 dict，新缓存为字符串）
+        cached = cache_service.get(request.item_type, request.number, "summary")
         if cached:
-            cached["_cached"] = True
+            if isinstance(cached, dict):
+                return _legacy_summary_to_markdown(cached)
             return cached
 
         ai = AIAssistant()
@@ -199,7 +139,7 @@ def summarize(request: SummarizeRequest):
             body=request.body,
             item_type=request.item_type,
         )
-        _save_ai_cache(request.item_type, request.number, "summary", result)
+        cache_service.set(request.item_type, request.number, "summary", result)
         return result
     except HTTPException:
         raise
@@ -217,36 +157,72 @@ class CacheDeleteRequest(BaseModel):
 @router.post("/get-cache")
 async def get_ai_cache(request: CacheDeleteRequest):
     """读取 AI 缓存（不触发 AI 调用，仅返回本地缓存结果）"""
-    cached = _load_ai_cache(request.item_type, request.number, request.action)
+    cached = cache_service.get(request.item_type, request.number, request.action)
     if cached is None:
         return {"empty": True}
+    # 回溯兼容：旧缓存为 dict（结构化格式），转为 markdown 字符串
+    if isinstance(cached, dict):
+        if request.action == "review":
+            cached = _legacy_review_to_markdown(cached)
+        else:
+            cached = _legacy_summary_to_markdown(cached)
     return cached
+
+
+def _legacy_summary_to_markdown(d: dict) -> str:
+    """将旧格式的 summarize dict 转为 markdown"""
+    parts = []
+    if d.get("core_problem"):
+        parts.append(f"**核心问题**：{d['core_problem']}")
+    if d.get("key_points"):
+        parts.append("**关键要点**：")
+        for p in d["key_points"]:
+            parts.append(f"- {p}")
+    if d.get("impact"):
+        parts.append(f"**影响范围**：{d['impact']}")
+    if d.get("risk"):
+        parts.append(f"**注意事项**：{d['risk']}")
+    return "\n\n".join(parts) if parts else str(d)
+
+
+def _legacy_review_to_markdown(d: dict) -> str:
+    """将旧格式的 review dict 转为 markdown"""
+    parts = []
+    if d.get("summary"):
+        parts.append(f"### 总体评价\n{d['summary']}")
+    sections = [
+        ("代码质量", "code_quality"),
+        ("性能", "performance"),
+        ("测试", "tests"),
+        ("文档", "docs"),
+    ]
+    for title, key in sections:
+        items = d.get(key, [])
+        if not items:
+            continue
+        lines = [f"### {title}"]
+        for item in items:
+            sev = item.get("severity", "")
+            sev_tag = f"[{sev}] " if sev else ""
+            t = item.get("title", "")
+            desc = item.get("description", "")
+            if t and desc:
+                lines.append(f"- {sev_tag}**{t}**：{desc}")
+            elif t:
+                lines.append(f"- {sev_tag}**{t}**")
+            else:
+                lines.append(f"- {sev_tag}{desc}")
+        parts.append("\n".join(lines))
+    if d.get("error"):
+        parts.append(f"**错误**：{d['error']}")
+    return "\n\n".join(parts) if parts else str(d)
 
 
 @router.post("/clear-cache")
 async def clear_ai_cache(request: CacheDeleteRequest):
     """清除指定条目的 AI 缓存（用于"重新生成"场景）"""
-    db = SessionLocal()
-    try:
-        row = (
-            db.query(AICache)
-            .filter(
-                AICache.item_type == request.item_type,
-                AICache.number == request.number,
-                AICache.action == request.action,
-            )
-            .first()
-        )
-        if row:
-            db.delete(row)
-            db.commit()
-        return {"ok": True}
-    except Exception:
-        logger.exception("Error in clear-ai-cache")
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        db.close()
+    cache_service.clear(request.item_type, request.number, request.action)
+    return {"ok": True}
 
 class TranslateRequest(BaseModel):
     """翻译请求"""
@@ -266,14 +242,14 @@ def translate(request: TranslateRequest):
     try:
         _require_api_key()
         # 先读缓存
-        cached = _load_ai_cache(request.item_type, request.number, "translate")
+        cached = cache_service.get(request.item_type, request.number, "translate")
         if cached and cached.get("translated"):
             return cached
         ai = AIAssistant()
         translated = ai.translate(request.text, request.item_type)
         result = {"translated": translated}
         # 缓存到 ai_cache 表
-        _save_ai_cache(request.item_type, request.number, "translate", result)
+        cache_service.set(request.item_type, request.number, "translate", result)
         return result
     except HTTPException:
         raise

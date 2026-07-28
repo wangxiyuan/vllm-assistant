@@ -424,6 +424,162 @@ async def list_tools():
 
 
 # ======================================================================
+# 洞察报告 API（迁移自 /api/intelligence/generate）
+# ======================================================================
+
+
+@router.post("/reports/generate")
+async def generate_report(request: Request):
+    """触发生成洞察报告（异步）
+
+    立即创建 status=generating 的报告记录，后台线程执行生成。
+    """
+    _require_api_key()
+
+    from app.database import SessionLocal
+    from app.models import IntelligenceReport, PersonalTask
+    from app.schemas import IntelligenceGenerateRequest
+    from datetime import datetime, timezone
+
+    body = await request.json()
+    req = IntelligenceGenerateRequest(**body)
+
+    db = SessionLocal()
+    try:
+        # 校验任务存在
+        task = db.query(PersonalTask).filter(PersonalTask.id == req.task_id).first()
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        title = req.title or f"{task.title} 相关动态洞察"
+
+        # 重新生成：更新已有报告，而非新建
+        if req.report_id:
+            report = db.query(IntelligenceReport).filter(IntelligenceReport.id == req.report_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Report not found")
+            report.title = title
+            report.content = ""
+            report.sources = json.dumps(req.sources, ensure_ascii=False)
+            report.excluded_sources = json.dumps(req.excluded_sources, ensure_ascii=False) if req.excluded_sources else None
+            report.extra_prompt = req.extra_prompt or None
+            report.status = "generating"
+            report.error_message = None
+            report.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            db.commit()
+            db.refresh(report)
+        else:
+            report = IntelligenceReport(
+                title=title,
+                content="",
+                task_id=req.task_id,
+                user_id=req.user_id,
+                sources=json.dumps(req.sources, ensure_ascii=False),
+                excluded_sources=json.dumps(req.excluded_sources, ensure_ascii=False) if req.excluded_sources else None,
+                extra_prompt=req.extra_prompt or None,
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                status="generating",
+            )
+            db.add(report)
+            db.commit()
+            db.refresh(report)
+
+        # 后台线程生成
+        import threading
+        thread = threading.Thread(
+            target=_generate_report_background,
+            args=(report.id, task.title, task.description or "", req.sources, req.excluded_sources, req.extra_prompt),
+            daemon=True,
+        )
+        thread.start()
+
+        return {
+            "report_id": report.id,
+            "task_id": req.task_id,
+            "title": title,
+            "status": "generating",
+            "message": "洞察报告正在生成中，AI 将多轮搜索 GitHub 并分析，预计需要 2-5 分钟",
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to generate report")
+        raise HTTPException(status_code=500, detail="Failed to generate report")
+    finally:
+        db.close()
+
+
+def _generate_report_background(
+    report_id: int,
+    task_title: str,
+    task_description: str,
+    sources: list,
+    excluded_sources: list,
+    extra_prompt: str,
+):
+    """后台线程执行报告生成"""
+    from app.services.intelligence_report import IntelligenceReportGenerator
+    from app.services.memory_service import MemoryService
+    from app.database import SessionLocal
+    from app.models import IntelligenceReport
+
+    db = SessionLocal()
+    try:
+        generator = IntelligenceReportGenerator()
+        result = generator.generate_report(
+            task_title=task_title,
+            task_description=task_description,
+            sources=sources,
+            excluded_sources=excluded_sources if excluded_sources else None,
+            extra_prompt=extra_prompt or "",
+        )
+
+        report = db.query(IntelligenceReport).filter(IntelligenceReport.id == report_id).first()
+        if not report:
+            logger.error(f"report {report_id} not found after generation")
+            return
+
+        report.content = result["content"]
+        report.status = "completed"
+        report.error_message = None
+        db.commit()
+        logger.info(f"intelligence report {report_id} generated successfully")
+
+        # 将洞察报告同步到 AI 知识库，让 AI Agent 在对话中可以引用
+        try:
+            mem = MemoryService()
+            content = (
+                f"# 洞察报告: {report.title}\n\n"
+                f"{result['content']}\n\n"
+                f"---\n"
+                f"**关联任务**: {task_title}\n"
+                f"**来源范围**: {', '.join(sources) if sources else '全部'}\n"
+                f"**报告 ID**: {report_id}\n"
+            )
+            mem.remember(
+                content=content,
+                source_type="report",
+                source_ref=f"intelligence_report#{report_id}",
+                tags=["report", "intelligence"] + [f"source:{s}" for s in sources],
+            )
+            logger.info(f"intelligence report {report_id} saved to knowledge base")
+        except Exception:
+            logger.exception(f"failed to save report {report_id} to knowledge base")
+    except Exception as e:
+        logger.exception(f"intelligence report {report_id} generation failed")
+        try:
+            report = db.query(IntelligenceReport).filter(IntelligenceReport.id == report_id).first()
+            if report:
+                report.status = "failed"
+                report.error_message = str(e)[:500]
+                db.commit()
+        except Exception:
+            logger.exception("failed to mark report as failed")
+    finally:
+        db.close()
+
+
+# ======================================================================
 # 会话管理 API
 # ======================================================================
 

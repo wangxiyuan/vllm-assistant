@@ -262,13 +262,33 @@ class GitHubClient:
         return enriched
 
     def _search_issues(self, query: str) -> List[Dict[str, Any]]:
-        """统一的 GitHub Search API 调用（30/min 限额，同样走退避重试）"""
+        """统一的 GitHub Search API 调用（30/min 限额，同样走退避重试）
+
+        Returns:
+            items 列表
+        """
         url = "https://api.github.com/search/issues"
         params = {"q": query, "per_page": 100, "sort": "created", "order": "desc"}
         result = self._request_with_retry("GET", url, params=params)
         if isinstance(result, dict):
             return result.get("items") or []
         return []
+
+    def _search_issues_with_count(self, query: str) -> dict:
+        """同 _search_issues，但返回包含 total_count 的 dict 结构
+
+        Returns:
+            {"items": [...], "total_count": int}
+        """
+        url = "https://api.github.com/search/issues"
+        params = {"q": query, "per_page": 100, "sort": "created", "order": "desc"}
+        result = self._request_with_retry("GET", url, params=params)
+        if isinstance(result, dict):
+            return {
+                "items": result.get("items") or [],
+                "total_count": result.get("total_count", 0),
+            }
+        return {"items": [], "total_count": 0}
 
     def get_pull_files(self, number: int) -> List[Dict[str, Any]]:
         """获取PR的文件变更"""

@@ -7,7 +7,7 @@ Agent 执行引擎
 
 流程：
 1. 从 MemoryService 检索相关记忆，注入 system prompt
-2. 调 OpenAI SDK streaming chat API
+2. 调 LLMClient streaming chat API
 3. 流式返回 token 事件
 4. 遇到 tool_calls -> 查 tools/registry 获取 handler -> 执行
 5. 工具结果返回给模型继续推理
@@ -20,20 +20,11 @@ import re
 import uuid
 from typing import AsyncIterator, List, Dict, Optional, Any
 
-from openai import AsyncOpenAI
-
 from app.config import Config
+from app.services.llm import LLMClient, EVENT_TOKEN, EVENT_THINKING, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_DONE, EVENT_ERROR
 from app.services.tools import registry as tool_registry
 
 logger = logging.getLogger(__name__)
-
-# SSE 事件类型
-EVENT_TOKEN = "token"
-EVENT_THINKING = "thinking"
-EVENT_TOOL_CALL = "tool_call"
-EVENT_TOOL_RESULT = "tool_result"
-EVENT_DONE = "done"
-EVENT_ERROR = "error"
 
 
 class AgentRunner:
@@ -45,37 +36,16 @@ class AgentRunner:
     WRAP_UP_REMAINING_ROUNDS = 5
     # 单次 tool 执行超时（秒）
     TOOL_TIMEOUT = 30.0
-    # 全局超时（秒）
-    CHAT_TIMEOUT = 600.0
 
     def __init__(self):
-        import httpx
-        self._http_client = httpx.AsyncClient(
-            proxy=None,
-            timeout=httpx.Timeout(
-                self.CHAT_TIMEOUT,       # total timeout
-                connect=15.0,            # connection timeout — fail fast if unreachable
-                read=self.CHAT_TIMEOUT,  # read timeout
-                write=30.0,              # write timeout
-                pool=None,
-            ),
-            trust_env=False,
-        )
-        self.client = AsyncOpenAI(
-            api_key=Config.OPENAI_API_KEY,
-            base_url=Config.OPENAI_BASE_URL,
-            http_client=self._http_client,
-        )
-        self.model = Config.OPENAI_MODEL
+        self.llm = LLMClient()
         self._memory_service = None
         # 工具调用缓存：同 (tool_name, args) 不重复执行，节省时间和 token
         self._tool_cache: Dict[str, dict] = {}
 
     async def close(self):
         """显式关闭 HTTP 客户端，避免资源泄漏"""
-        if self._http_client:
-            await self._http_client.aclose()
-            self._http_client = None
+        await self.llm.aclose()
 
     async def __aenter__(self):
         return self
@@ -137,44 +107,26 @@ class AgentRunner:
         # 4. Tool 循环
         logger.info(
             "Agent chat start: model=%s, tool_count=%d, history_len=%d",
-            self.model, len(tool_schemas), len(full_messages),
+            self.llm.model, len(tool_schemas), len(full_messages),
         )
         for round_num in range(self.MAX_TOOL_ROUNDS):
             logger.info("Agent round %d begin", round_num + 1)
             kwargs = {
-                "model": self.model,
                 "messages": full_messages,
-                "max_tokens": 4096,
-                "temperature": 0.7,
-                "timeout": self.CHAT_TIMEOUT,
             }
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
 
-            # 带重试的 API 调用（429/500 等错误最多重试 10 次）
-            # 退避策略：优先用 Retry-After 头，否则指数退避（1s→max 10s）
-            for attempt in range(10):
-                try:
-                    if stream:
-                        response = await self.client.chat.completions.create(**kwargs, stream=True)
-                        assistant_message, text_content = await self._handle_streaming_response(response)
-                    else:
-                        response = await self.client.chat.completions.create(**kwargs, stream=False)
-                        assistant_message, text_content = await self._handle_non_streaming_response(response)
-                    break
-                except Exception as e:
-                    if attempt < 9:
-                        retry_after = self._parse_openai_retry_after(e)
-                        wait = min(retry_after if retry_after > 0 else (2 ** attempt), 10.0)
-                        logger.warning(
-                            "AI chat failed (attempt %d/10, retry in %.1fs): %s",
-                            attempt + 1, wait, e
-                        )
-                        await asyncio.sleep(wait)
-                    else:
-                        logger.exception("AI chat failed after 10 attempts")
-                        yield {"type": EVENT_ERROR, "data": str(e)}
-                        return
+            # 用 LLMClient.chat_stream 调用（含重试 + streaming 解析）
+            try:
+                if stream:
+                    assistant_message, text_content = await self.llm.chat_stream(**kwargs)
+                else:
+                    assistant_message, text_content = await self.llm.chat_async(**kwargs)
+            except Exception as e:
+                logger.exception("AI chat failed after 10 attempts")
+                yield {"type": EVENT_ERROR, "data": str(e)}
+                return
 
             # 文本回落：模型可能不支持 function calling，把工具调用意图以 JSON 形式写在文本里
             # 如果没有拿到 tool_calls 字段但文本里能解析出 JSON 工具调用，照样识别
@@ -207,14 +159,14 @@ class AgentRunner:
                         "type": EVENT_TOOL_CALL,
                         "data": {
                             "name": tc["function"]["name"],
-                            "args": self._safe_json_loads(tc["function"]["arguments"]),
+                            "args": self.llm.safe_json_loads(tc["function"]["arguments"]),
                         },
                     }
 
                 # 执行所有 tool_calls（带去重缓存 + 收尾提醒）
                 for tc in assistant_message["tool_calls"]:
                     tool_name = tc["function"]["name"]
-                    tool_args = self._safe_json_loads(tc["function"]["arguments"])
+                    tool_args = self.llm.safe_json_loads(tc["function"]["arguments"])
 
                     # 剔除 schema 未声明的字段：模型常会塞一些工具不认的 key
                     # （如 search_code 的 file_pattern 旧版），如果不剔除，同语义不同
@@ -274,7 +226,6 @@ class AgentRunner:
         logger.warning("Agent exceeded MAX_TOOL_ROUNDS=%d, forcing final answer", self.MAX_TOOL_ROUNDS)
         try:
             kwargs_final = {
-                "model": self.model,
                 "messages": full_messages + [{
                     "role": "system",
                     "content": (
@@ -282,12 +233,8 @@ class AgentRunner:
                         "现在不允许再调用工具，立即基于已收集的所有信息给出最终回答。"
                     ),
                 }],
-                "max_tokens": 4096,
-                "temperature": 0.7,
-                "timeout": self.CHAT_TIMEOUT,
             }
-            response = await self.client.chat.completions.create(**kwargs_final, stream=True)
-            _, final_text = await self._handle_streaming_response(response)
+            _, final_text = await self.llm.chat_stream(**kwargs_final)
             if final_text:
                 yield {"type": EVENT_TOKEN, "data": final_text}
                 self._auto_remember(messages, final_text)
@@ -324,41 +271,6 @@ class AgentRunner:
     # 内部方法
     # ======================================================================
 
-    def _parse_openai_retry_after(self, e: Exception) -> float:
-        """从 OpenAI API 异常中解析 Retry-After 时间。
-
-        优先读取异常中的 ``response`` 属性（httpx 或 requests 响应对象），
-        取 ``Retry-After`` 头或 ``X-RateLimit-Reset-`` 头；解析失败返回 0
-        让调用方用指数退避兜底。
-        """
-        try:
-            # openai 库抛出的 APIError 或 RateLimitError 有 response 属性
-            resp = getattr(e, "response", None)
-            if resp is not None and hasattr(resp, "headers"):
-                # httpx Response
-                ra = resp.headers.get("retry-after") or resp.headers.get("Retry-After")
-                if ra:
-                    parsed = float(ra)
-                    return min(parsed, 10.0)
-
-                # X-RateLimit-Reset-Reset 是 epoch 秒
-                reset = resp.headers.get("x-ratelimit-reset") or resp.headers.get("X-RateLimit-Reset")
-                if reset:
-                    import time
-                    wait = float(reset) - time.time()
-                    if wait > 0:
-                        return min(wait, 10.0)
-
-            # 某些异常以字符串形式包含 "try again in X.Xs"
-            msg = str(e).lower()
-            import re
-            m = re.search(r"(?:retry after|try again in)\s*([\d.]+)\s*s", msg)
-            if m:
-                return min(float(m.group(1)), 10.0)
-        except (ValueError, TypeError, AttributeError):
-            pass
-        return 0.0
-
     def _build_system_prompt(self, messages: List[dict], custom_prompt: Optional[str] = None) -> str:
         """构建 system prompt，注入相关记忆"""
         user_query = self._last_user_message(messages)
@@ -380,6 +292,15 @@ class AgentRunner:
                 )
             memory_context = "\n\n---\n### 相关上下文（来自知识库）\n" + "\n\n".join(memory_lines)
 
+        # 注入当前日期时间（UTC），让 AI 能正确计算"最近 N 天"等时间范围
+        from datetime import datetime, timezone
+        now_utc = datetime.now(timezone.utc)
+        time_context = (
+            f"\n\n## 当前时间\n当前 UTC 时间：{now_utc.strftime('%Y-%m-%d %H:%M:%S')}。\n"
+            f"用户问题中的时间范围（如'最近 N 天'）请以这个日期为基准计算。\n"
+            f"搜索时优先使用工具的 days_back 参数指定时间范围，而不是依赖默认值。"
+        )
+
         # 构建已配置仓库列表，让 AI 知道它能操作哪些项目
         configured_repos = list(Config.REPOS.keys())
         repo_list_text = ""
@@ -396,6 +317,7 @@ class AgentRunner:
 4. 中文回答，技术术语保留英文
 5. 不确定的内容不要编造，说明"需要进一步确认"
 6. 你可以同时调用多个工具来提高效率
+7. **完全依赖工具返回的数据**，不要根据自己的记忆判断 PR/Issue 的合并状态或内容。工具返回结果的 merged 字段比 state 字段更能准确反映 PR 是否被合并。{time_context}
 
 ## 可用工具
 你可以在对话中调用工具搜索 GitHub、arXiv、本地代码库和知识库。
@@ -429,92 +351,6 @@ class AgentRunner:
                 return m.get("content", "")[:200]
         return ""
 
-    async def _handle_streaming_response(self, response) -> tuple:
-        """处理 streaming 响应。
-
-        使用 async for 迭代以避免阻塞事件循环。
-
-        Returns:
-            (assistant_message_dict, text_content_str)
-        """
-        content_parts = []
-        tool_calls = {}
-
-        async for chunk in response:
-            if not chunk.choices:
-                continue
-
-            delta = chunk.choices[0].delta
-            if not delta:
-                continue
-
-            if delta.content:
-                content_parts.append(delta.content)
-
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in tool_calls:
-                        tool_calls[idx] = {
-                            "id": tc_delta.id or "",
-                            "type": "function",
-                            "function": {"name": "", "arguments": ""},
-                        }
-                    # OpenAI streaming: id 可能在后续 chunk 才出现
-                    if tc_delta.id:
-                        tool_calls[idx]["id"] = tc_delta.id
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            tool_calls[idx]["function"]["name"] = tc_delta.function.name
-                        if tc_delta.function.arguments:
-                            tool_calls[idx]["function"]["arguments"] += tc_delta.function.arguments
-
-        text_content = "".join(content_parts) if content_parts else ""
-
-        assistant_message = {"role": "assistant", "content": text_content or None}
-        if tool_calls:
-            assistant_message["tool_calls"] = [
-                tool_calls[i] for i in sorted(tool_calls.keys())
-            ]
-
-        return assistant_message, text_content
-
-    def _handle_non_streaming_response(self, response) -> tuple:
-        """处理非 streaming 响应
-
-        Returns:
-            (assistant_message_dict, text_content_str)
-        """
-        choice = response.choices[0]
-        msg = choice.message
-
-        text_content = msg.content or ""
-        assistant_message = {"role": "assistant", "content": text_content or None}
-
-        if msg.tool_calls:
-            assistant_message["tool_calls"] = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in msg.tool_calls
-            ]
-
-        return assistant_message, text_content
-
-    def _safe_json_loads(self, s: str) -> dict:
-        """安全解析 JSON 字符串"""
-        if not s:
-            return {}
-        try:
-            return json.loads(s)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-
     @staticmethod
     def _get_declared_tool_props(tool_name: str):
         """从 tool schema 里取出声明的属性名集合。
@@ -522,14 +358,8 @@ class AgentRunner:
         用来在执行/缓存前剔除模型塞进来的 schema 外字段，避免同语义不同噪声
         key 导致缓存 miss、重复执行。
         """
-        tool_def = tool_registry.get_tool(tool_name)
-        if not tool_def:
-            return None
-        params = tool_def.get("schema", {}).get("function", {}).get("parameters", {})
-        props = params.get("properties")
-        if not isinstance(props, dict):
-            return None
-        return set(props.keys())
+        from app.services.tools._shared import get_declared_tool_props
+        return get_declared_tool_props(tool_name)
 
     def _try_parse_text_tool_call(self, text: str) -> Optional[List[dict]]:
         """从模型输出文本中解析 tool call（用于不支持 function calling 的模型）。
@@ -583,7 +413,7 @@ class AgentRunner:
             if args is None:
                 args = obj.get("args") or obj.get("parameters") or {}
             if isinstance(args, str):
-                args = self._safe_json_loads(args)
+                args = self.llm.safe_json_loads(args)
             if not isinstance(args, dict):
                 args = {}
 

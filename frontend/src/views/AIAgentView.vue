@@ -3,6 +3,7 @@ import { onMounted, onBeforeUnmount, ref, nextTick, watchEffect, computed } from
 import { useAIAgentStore, KNOWLEDGE_TYPE_LABELS, KNOWLEDGE_TYPE_ORDER } from '@/stores/aiAgent'
 import { useAppStore } from '@/stores/app'
 import { renderMarkdown } from '@/composables/useMarkdown'
+import { api } from '@/api/client'
 
 const agentStore = useAIAgentStore()
 const appStore = useAppStore()
@@ -111,9 +112,8 @@ async function handleAddKnowledge() {
       .split(/[,，]/)
       .map(t => t.trim())
       .filter(Boolean)
-    const res = await fetch('/api/ai-agent/memories', {
+    await api('/api/ai-agent/memories', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         content,
         source_type: 'manual',
@@ -121,10 +121,6 @@ async function handleAddKnowledge() {
         tags: tags.length ? tags : undefined,
       }),
     })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw new Error(err.detail || '添加失败')
-    }
     appStore.showToast('知识已添加', '', 'success')
     showAddModal.value = false
     agentStore.loadKbStats()
@@ -220,9 +216,7 @@ async function loadModalEntries(append: boolean = false) {
     const q = modalSearchInput.value.trim()
     if (q) params.set('q', q)
 
-    const data: any = await fetch(`/api/ai-agent/memories?${params}`, {
-      headers: { 'Content-Type': 'application/json' },
-    }).then(r => r.json())
+    const data: any = await api(`/api/ai-agent/memories?${params}`)
 
     if (append) {
       modalEntries.value.push(...(data.results || []))
@@ -257,11 +251,32 @@ function closeKbModal() {
 
 // Copy knowledge entry content
 function copyEntryContent(content: string) {
+  if (!navigator.clipboard) {
+    fallbackCopy(content)
+    return
+  }
   navigator.clipboard.writeText(content).then(() => {
     appStore.showToast('已复制', '', 'info')
   }).catch(() => {
-    appStore.showToast('复制失败', '请手动选择复制', 'error')
+    fallbackCopy(content)
   })
+}
+
+function fallbackCopy(text: string) {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
+  document.body.appendChild(textarea)
+  textarea.select()
+  try {
+    document.execCommand('copy')
+    appStore.showToast('已复制', '', 'info')
+  } catch {
+    appStore.showToast('复制失败', '请手动选择复制', 'error')
+  }
+  document.body.removeChild(textarea)
 }
 
 async function deleteEntry(entry: any) {
@@ -273,8 +288,7 @@ async function deleteEntry(entry: any) {
   })
   if (!confirmed) return
   try {
-    const res = await fetch(`/api/ai-agent/memories/${entry.id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error('删除失败')
+    await api(`/api/ai-agent/memories/${entry.id}`, { method: 'DELETE' })
     appStore.showToast('已删除', '', 'info')
     modalEntries.value = modalEntries.value.filter(e => e.id !== entry.id)
     modalTotal.value = Math.max(0, modalTotal.value - 1)
@@ -313,9 +327,18 @@ function doCopyToClipboard() {
       appStore.showToast('没有可导出的消息', '', 'info')
       return
     }
-    navigator.clipboard.writeText(md)
-    closeExportMenu()
-    appStore.showToast('已复制到剪贴板', '', 'info')
+    if (!navigator.clipboard) {
+      closeExportMenu()
+      fallbackCopy(md)
+      return
+    }
+    navigator.clipboard.writeText(md).then(() => {
+      closeExportMenu()
+      appStore.showToast('已复制到剪贴板', '', 'info')
+    }).catch(() => {
+      closeExportMenu()
+      fallbackCopy(md)
+    })
   } catch (e: any) {
     closeExportMenu()
     appStore.showToast('复制失败', e?.message || '未知错误', 'error')
@@ -914,11 +937,15 @@ const sortedKbTypes = computed(() => {
   text-underline-offset: 2px;
 }
 .msg-content :deep(ul),
-.msg-content :deep(ol) { padding-left: var(--space-5); margin: var(--space-2) 0; }
-.msg-content :deep(li) { margin: 2px 0; }
+.msg-content :deep(ol) { padding-left: var(--space-5); margin: var(--space-1) 0; }
+.msg-content :deep(li) { margin: 1px 0; }
+.msg-content :deep(p) { margin: var(--space-2) 0; }
+.msg-content :deep(p:first-child) { margin-top: 0; }
+.msg-content :deep(p:last-child) { margin-bottom: 0; }
 .msg-content :deep(h1),
 .msg-content :deep(h2),
-.msg-content :deep(h3) { margin: var(--space-3) 0 var(--space-2); font-weight: 600; }
+.msg-content :deep(h3),
+.msg-content :deep(h4) { margin: var(--space-3) 0 var(--space-1); font-weight: 600; }
 .msg-content :deep(blockquote) {
   border-left: 3px solid var(--border);
   padding-left: var(--space-3);
@@ -1028,6 +1055,7 @@ const sortedKbTypes = computed(() => {
 .kb-source-article { background: var(--signal-yellow-glow); color: var(--signal-yellow); border-color: rgba(242,204,96,0.3); }
 .kb-source-manual { background: var(--amber-glow); color: var(--amber); border-color: rgba(255,180,84,0.3); }
 .kb-source-conversation { background: var(--bg-elev-3); color: var(--text-secondary); border-color: var(--border); }
+.kb-source-report { background: var(--signal-red-glow); color: var(--signal-red); border-color: rgba(255,107,107,0.3); }
 
 .chat-input-bar {
   display: flex;

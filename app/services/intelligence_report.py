@@ -11,8 +11,9 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 
+from app.config import Config
 from app.services._shared import get_github_client
-from app.services.ai_assistant import AIAssistant
+from app.services.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -54,132 +55,29 @@ class IntelligenceReportGenerator:
         },
     }
 
-    # OpenAI function calling 的工具定义
-    TOOLS = [
-        {
-            "type": "function",
-            "function": {
-                "name": "search_issues",
-                "description": "在指定 GitHub 仓库搜索 issue/PR。可按关键词、状态、时间过滤。用于发现与任务相关的讨论。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "搜索关键词，空字符串则返回最近创建的 issue/PR",
-                        },
-                        "repo": {
-                            "type": "string",
-                            "description": "仓库全名，如 'vllm-project/vllm'",
-                        },
-                        "state": {
-                            "type": "string",
-                            "enum": ["open", "closed", "all"],
-                            "description": "issue/PR 状态过滤，默认 all",
-                        },
-                        "days_back": {
-                            "type": "integer",
-                            "description": "只搜索最近 N 天内创建的，默认 90",
-                        },
-                    },
-                    "required": ["repo"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_issue_detail",
-                "description": "获取某个 issue/PR 的正文内容和评论。当 search_issues 发现感兴趣的条目时调用此函数深入了解。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "repo": {
-                            "type": "string",
-                            "description": "仓库全名，如 'vllm-project/vllm'",
-                        },
-                        "number": {
-                            "type": "integer",
-                            "description": "issue/PR 编号",
-                        },
-                    },
-                    "required": ["repo", "number"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_pr_diff",
-                "description": "获取某个 PR 的 diff 内容。当需要分析 PR 的具体代码变更时调用。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "repo": {
-                            "type": "string",
-                            "description": "仓库全名，如 'vllm-project/vllm'",
-                        },
-                        "number": {
-                            "type": "integer",
-                            "description": "PR 编号",
-                        },
-                    },
-                    "required": ["repo", "number"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "search_arxiv",
-                "description": "在 arXiv 搜索与任务相关的学术论文。用于学术动态调研。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "搜索关键词，英文效果更好，如 'flash attention triton kernel'",
-                        },
-                        "max_results": {
-                            "type": "integer",
-                            "description": "最大返回数量，默认 5",
-                        },
-                    },
-                    "required": ["query"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_github_releases",
-                "description": "获取 GitHub 仓库最近的 release 列表。用于了解项目的版本发布动态，避免编造版本号。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "repo": {
-                            "type": "string",
-                            "description": "仓库全名，如 'vllm-project/vllm'",
-                        },
-                        "per_page": {
-                            "type": "integer",
-                            "description": "返回数量，默认 5",
-                        },
-                    },
-                    "required": ["repo"],
-                },
-            },
-        },
-    ]
+    # OpenAI function calling 的工具定义（引用 tools/registry 中的 schema）
+    # 不再单独定义，复用已注册的工具 schema
+    @property
+    def TOOLS(self):
+        from app.services.tools import registry as tool_registry
+        return tool_registry.get_tool_schemas([
+            "search_issues",
+            "get_issue_detail",
+            "get_pr_diff",
+            "search_arxiv",
+            "get_github_releases",
+            "search_docs",
+            "search_memory",
+        ])
 
     def __init__(self):
         self.client = get_github_client()
-        self.ai: Optional[AIAssistant] = None
+        self.llm: Optional[LLMClient] = None
 
-    def _get_ai(self) -> AIAssistant:
-        if self.ai is None:
-            self.ai = AIAssistant()
-        return self.ai
+    def _get_llm(self) -> LLMClient:
+        if self.llm is None:
+            self.llm = LLMClient()
+        return self.llm
 
     def generate_report(
         self,
@@ -216,19 +114,19 @@ class IntelligenceReportGenerator:
             {"role": "user", "content": f"请开始调研并生成关于「{task_title}」的洞察报告。"},
         ]
 
-        ai = self._get_ai()
+        llm = self._get_llm()
         report_content = ""
 
         # 尝试 Agent 模式（function calling）；如果 API 不支持 tools，回退到单次模式
         try:
-            report_content = self._agent_loop(ai, messages, github_repos, effective_sources)
+            report_content = self._agent_loop(llm, messages, github_repos, effective_sources)
         except Exception as e:
             # 如果是 tools 不支持的错误，回退到单次模式
             err_str = str(e).lower()
             tools_unsupported = any(kw in err_str for kw in ("tool", "function_call", "not support", "unrecognized"))
             if tools_unsupported:
                 logger.warning(f"Agent mode failed (likely tools unsupported), falling back to single-shot: {e}")
-                report_content = self._single_shot_report(ai, task_title, task_description, effective_sources, extra_prompt, github_repos)
+                report_content = self._single_shot_report(llm, task_title, task_description, effective_sources, extra_prompt, github_repos)
             else:
                 raise
 
@@ -237,7 +135,7 @@ class IntelligenceReportGenerator:
             "sources": effective_sources,
         }
 
-    def _agent_loop(self, ai: AIAssistant, messages: List[dict], github_repos: List[str], effective_sources: List[str]) -> str:
+    def _agent_loop(self, llm: LLMClient, messages: List[dict], github_repos: List[str], effective_sources: List[str]) -> str:
         """Agent 循环：分阶段引导 AI 搜索和阅读
 
         阶段 1（前 N 轮）：搜索 - 每个 GitHub 仓库至少搜一轮
@@ -262,28 +160,41 @@ class IntelligenceReportGenerator:
                 messages.append({"role": "user", "content": guidance})
 
             try:
-                response = ai.client.chat.completions.create(
-                    model=ai.model,
+                import asyncio
+                assistant_message, text_content = asyncio.run(llm.chat_async(
                     messages=messages,
                     tools=self.TOOLS,
-                    max_tokens=4096,
+                    max_tokens=Config.LLM_MAX_TOKENS,
                     temperature=0.3,
-                    timeout=ai.DEFAULT_TIMEOUT,
-                )
-            except Exception:
-                logger.exception(f"AI chat failed at round {round_num}")
+                ))
+            except Exception as e:
+                err_str = str(e).lower()
+                # 区分不同异常类型，给出更精确的日志
+                if any(kw in err_str for kw in ("rate limit", "429", "too many requests")):
+                    logger.warning(f"AI chat rate limited at round {round_num}, will retry: {e}")
+                elif any(kw in err_str for kw in ("timeout", "timed out", "read timed out")):
+                    logger.warning(f"AI chat timed out at round {round_num}, will retry: {e}")
+                elif any(kw in err_str for kw in ("context length", "maximum context", "token limit", "max_tokens")):
+                    logger.warning(f"AI chat context exceeded at round {round_num}, truncating history: {e}")
+                    # 截断历史消息（保留 system + 最近 4 轮的对话 + tool 结果）
+                    if len(messages) > 10:
+                        system = messages[0]
+                        messages = [system] + messages[-8:]
+                        continue
+                else:
+                    logger.exception(f"AI chat failed at round {round_num}: {e}")
                 raise
 
-            choice = response.choices[0]
-            msg = choice.message
+            msg = assistant_message
+            tool_calls = msg.get("tool_calls")
 
             # 如果没有 tool_calls，说明 AI 已完成（直接返回了报告）
-            if not msg.tool_calls:
-                return msg.content or ""
+            if not tool_calls:
+                return text_content or ""
 
             # 统计本轮调用的工具类型
-            has_search = any(tc.function.name == "search_issues" for tc in msg.tool_calls)
-            has_detail = any(tc.function.name in ("get_issue_detail", "get_pr_diff") for tc in msg.tool_calls)
+            has_search = any(tc["function"]["name"] == "search_issues" for tc in tool_calls)
+            has_detail = any(tc["function"]["name"] in ("get_issue_detail", "get_pr_diff") for tc in tool_calls)
             if has_search:
                 search_count += 1
             if has_detail:
@@ -292,17 +203,17 @@ class IntelligenceReportGenerator:
             # 把 assistant 的 tool_calls 消息加入历史
             messages.append({
                 "role": "assistant",
-                "content": msg.content,
+                "content": msg.get("content"),
                 "tool_calls": [
                     {
-                        "id": tc.id,
+                        "id": tc["id"],
                         "type": "function",
                         "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"],
                         },
                     }
-                    for tc in msg.tool_calls
+                    for tc in tool_calls
                 ],
             })
 
@@ -310,17 +221,21 @@ class IntelligenceReportGenerator:
             from concurrent.futures import ThreadPoolExecutor
 
             def _exec_one(tc):
-                tool_name = tc.function.name
+                tool_name = tc["function"]["name"]
                 try:
-                    tool_args = json.loads(tc.function.arguments)
+                    tool_args = json.loads(tc["function"]["arguments"])
                 except (json.JSONDecodeError, TypeError):
                     tool_args = {}
+                # 剔除 schema 未声明的字段，避免噪声字段影响执行
+                declared = self._get_declared_tool_props(tool_name)
+                if declared is not None:
+                    tool_args = {k: v for k, v in tool_args.items() if k in declared}
                 logger.info(f"Agent round {round_num} (search={search_count}, detail={detail_count}): {tool_name}({tool_args})")
                 result = self._execute_tool(tool_name, tool_args)
-                return tc.id, json.dumps(result, ensure_ascii=False)
+                return tc["id"], json.dumps(result, ensure_ascii=False)
 
-            with ThreadPoolExecutor(max_workers=min(len(msg.tool_calls), 5)) as pool:
-                futures = [pool.submit(_exec_one, tc) for tc in msg.tool_calls]
+            with ThreadPoolExecutor(max_workers=min(len(tool_calls), 5)) as pool:
+                futures = [pool.submit(_exec_one, tc) for tc in tool_calls]
                 for f in futures:
                     tool_call_id, content = f.result()
                     messages.append({
@@ -335,17 +250,17 @@ class IntelligenceReportGenerator:
             "content": "已达到搜索上限。请基于已收集的信息，直接生成完整的 Markdown 洞察报告，不要调用工具。",
         })
         try:
-            response = ai.client.chat.completions.create(
-                model=ai.model,
+            import asyncio
+            _, final_text = asyncio.run(llm.chat_async(
                 messages=messages,
-                max_tokens=4096,
+                max_tokens=Config.LLM_MAX_TOKENS,
                 temperature=0.5,
-                timeout=ai.DEFAULT_TIMEOUT,
-            )
-            return response.choices[0].message.content or ""
+            ))
+            return final_text or ""
         except Exception:
             logger.exception("Final report generation failed")
-            raise
+            # 返回已有数据摘要作为降级结果
+            return self._build_fallback_report(messages)
 
     def _phase_guidance(
         self, round_num: int, search_count: int, detail_count: int,
@@ -399,43 +314,48 @@ class IntelligenceReportGenerator:
         return ""
 
     def _single_shot_report(
-        self, ai: AIAssistant, task_title: str, task_description: str,
+        self, llm: LLMClient, task_title: str, task_description: str,
         effective_sources: List[str], extra_prompt: str, github_repos: List[str],
     ) -> str:
         """回退模式：先批量搜索 GitHub + arXiv + releases，再让 AI 一次性生成报告"""
         sections = []
         for source in effective_sources:
-            cfg = self.SOURCE_CONFIG.get(source, {})
-            if cfg.get("type") == "github":
-                items = self._search_github_for_report(source, task_title, task_description)
-                sections.append(self._format_github_section(source, items))
-            elif source == "academic":
-                # 搜 arXiv
-                arxiv_result = self._tool_search_arxiv({
-                    "query": self._extract_keywords_en(task_title + " " + task_description),
-                    "max_results": 5,
-                })
-                if arxiv_result.get("results"):
-                    lines = ["学术动态:"]
-                    for p in arxiv_result["results"][:5]:
-                        lines.append(f"- {p['title']}")
-                        lines.append(f"  作者: {', '.join(p.get('authors', [])[:3])}")
-                        lines.append(f"  摘要: {p.get('summary', '')[:200]}")
-                        lines.append(f"  URL: {p.get('url', '')}")
-                    sections.append("\n".join(lines))
-                else:
-                    sections.append("学术动态: 未找到相关论文")
-            elif source == "news":
-                # 获取 vllm releases
-                releases = self._tool_get_github_releases({"repo": "vllm-project/vllm", "per_page": 5})
-                if releases.get("results"):
-                    lines = ["新闻动态 (GitHub Releases):"]
-                    for r in releases["results"][:5]:
-                        lines.append(f"- {r['tag']} ({r.get('published_at', '')})")
-                        lines.append(f"  {r.get('body', '')[:200]}")
-                    sections.append("\n".join(lines))
-                else:
-                    sections.append("新闻动态: 无法获取 release 信息")
+            try:
+                cfg = self.SOURCE_CONFIG.get(source, {})
+                if cfg.get("type") == "github":
+                    items = self._search_github_for_report(source, task_title, task_description)
+                    sections.append(self._format_github_section(source, items))
+                elif source == "academic":
+                    # 搜 arXiv
+                    arxiv_result = self._tool_search_arxiv({
+                        "query": self._extract_keywords_en(task_title + " " + task_description),
+                        "max_results": 5,
+                    })
+                    if arxiv_result.get("results"):
+                        lines = ["学术动态:"]
+                        for p in arxiv_result["results"][:5]:
+                            lines.append(f"- {p['title']}")
+                            lines.append(f"  作者: {', '.join(p.get('authors', [])[:3])}")
+                            lines.append(f"  摘要: {p.get('summary', '')[:200]}")
+                            lines.append(f"  URL: {p.get('url', '')}")
+                        sections.append("\n".join(lines))
+                    else:
+                        sections.append("学术动态: 未找到相关论文")
+                elif source == "news":
+                    # 获取 vllm releases
+                    releases = self._tool_get_github_releases({"repo": "vllm-project/vllm", "per_page": 5})
+                    if releases.get("results"):
+                        lines = ["新闻动态 (GitHub Releases):"]
+                        for r in releases["results"][:5]:
+                            lines.append(f"- {r['tag']} ({r.get('published_at', '')})")
+                            lines.append(f"  {r.get('body', '')[:200]}")
+                        sections.append("\n".join(lines))
+                    else:
+                        sections.append("新闻动态: 无法获取 release 信息")
+            except Exception:
+                logger.exception(f"Failed to collect data from source '{source}' in single-shot mode")
+                display_name = self.SOURCE_CONFIG.get(source, {}).get("display_name", source)
+                sections.append(f"{display_name}: 数据收集失败")
 
         sections_text = "\n\n".join(sections)
         extra_section = f"\n\n## 用户补充信息\n{extra_prompt}" if extra_prompt else ""
@@ -453,7 +373,7 @@ class IntelligenceReportGenerator:
 要求：使用中文，内容要有实质价值，直接输出 Markdown，不要包裹在代码块中。
 不要编造版本号或论文标题，只使用上面提供的真实数据。"""
 
-        return ai._chat(prompt, max_tokens=4096, temperature=0.7)
+        return llm.chat_sync(prompt, max_tokens=Config.LLM_MAX_TOKENS, temperature=0.7)
 
     def _search_github_for_report(self, source: str, task_title: str, task_description: str) -> List[dict]:
         """回退模式用：搜索 GitHub issue/PR"""
@@ -530,7 +450,7 @@ class IntelligenceReportGenerator:
         extra_prompt: str,
         github_repos: List[str],
     ) -> str:
-        """构建 system prompt"""
+        """构建 system prompt，注入知识库相关记忆"""
         source_descriptions = []
         for s in effective_sources:
             cfg = self.SOURCE_CONFIG.get(s, {})
@@ -547,6 +467,27 @@ class IntelligenceReportGenerator:
         repos_text = ", ".join(github_repos) if github_repos else "无"
         extra_section = f"\n\n## 用户补充信息\n{extra_prompt}" if extra_prompt else ""
 
+        # 从知识库召回相关记忆
+        memory_context = ""
+        try:
+            from app.services.memory_service import MemoryService
+            query = f"{task_title} {task_description}"
+            if query.strip():
+                memories = MemoryService().recall(query=query, top_k=5)
+                if memories:
+                    memory_lines = []
+                    for i, mem in enumerate(memories, 1):
+                        content_preview = mem.get("content", "")[:300]
+                        source_ref = mem.get("source_ref", "")
+                        source_type = mem.get("source_type", "")
+                        tags = ", ".join(mem.get("tags", [])[:5])
+                        memory_lines.append(
+                            f"[{i}] 来源: {source_type} | 引用: {source_ref} | 标签: {tags}\n{content_preview}"
+                        )
+                    memory_context = "\n\n## 知识库相关记录\n" + "\n\n".join(memory_lines)
+        except Exception:
+            logger.warning("Failed to recall memories for report generation", exc_info=True)
+
         return f"""你是一位资深的 vLLM 社区贡献者和技术分析师。你的任务是为以下个人任务生成一份结构化的洞察报告。
 
 ## 任务信息
@@ -558,6 +499,7 @@ class IntelligenceReportGenerator:
 
 ## 可用 GitHub 仓库
 {repos_text}
+{memory_context}
 
 ## 工具说明
 你有以下工具可用：
@@ -618,8 +560,66 @@ class IntelligenceReportGenerator:
 - GitHub 搜索链接格式：https://github.com/{{owner}}/{{repo}}/issues?q={{关键词}}
 - arXiv 搜索链接格式：https://arxiv.org/search/?query={{关键词}}&searchtype=all"""
 
+    @staticmethod
+    def _build_fallback_report(messages: List[dict]) -> str:
+        """在最终报告生成失败时，从已有对话历史中提取数据构造降级报告
+
+        遍历 tool 消息结果，收集已搜索到的 issue/PR 信息作为降级输出。
+        """
+        parts = ["# 洞察报告（降级版：AI 最终生成失败，基于已有数据自动汇总）\n"]
+        seen_issues = set()
+
+        for msg in messages:
+            if msg.get("role") != "tool":
+                continue
+            try:
+                data = json.loads(msg.get("content", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(data, dict):
+                continue
+
+            # 提取搜索结果中的 issue/PR 列表
+            results = data.get("results")
+            if isinstance(results, list):
+                for r in results:
+                    if isinstance(r, dict):
+                        num = r.get("number")
+                        if num and num not in seen_issues:
+                            seen_issues.add(num)
+                            title = r.get("title", "")
+                            state = r.get("state", "")
+                            url = r.get("url", "")
+                            parts.append(f"- {title} (#{num}, {state})")
+                            if url:
+                                parts.append(f"  {url}")
+
+        if len(parts) == 1:
+            parts.append("（无法从对话历史中提取有效数据）")
+
+        parts.append(f"\n\n---\n*共搜索到 {len(seen_issues)} 个相关 issue/PR*")
+        return "\n".join(parts)
+
     def _execute_tool(self, name: str, args: dict) -> dict:
-        """执行 AI 请求的 tool call"""
+        """执行 AI 请求的 tool call
+
+        优先通过工具注册表执行（异步），注册表中没有的再走自带的遗留同步实现。
+        """
+        try:
+            # 优先使用工具注册表（与 AgentRunner 共享一套工具逻辑）
+            from app.services.tools import registry as tool_registry
+            import asyncio
+            result = asyncio.run(tool_registry.execute_tool(name, args))
+            if result is not None:
+                return result
+            # 注册表返回 None 表示未找到该工具，走遗留分支
+            return self._execute_tool_legacy(name, args)
+        except Exception as e:
+            logger.exception(f"tool {name} failed")
+            return {"error": str(e)}
+
+    def _execute_tool_legacy(self, name: str, args: dict) -> dict:
+        """遗留工具执行分支（不在注册表中的工具）"""
         try:
             if name == "search_issues":
                 return self._tool_search_issues(args)
@@ -657,12 +657,17 @@ class IntelligenceReportGenerator:
         if keywords:
             query_parts.append(keywords)
 
+        # 搜索条数上限（AI 有轮次限制，返回太多会导致选择困难）
+        SEARCH_LIMIT = 20
+
         query = " ".join(query_parts)
-        items = self.client._search_issues(query) or []
+        result = self.client._search_issues_with_count(query)
+        items = result.get("items") or []
+        total_count = result.get("total_count", len(items))
 
         # 只返回关键字段，避免 token 爆炸
         results = []
-        for item in items[:15]:
+        for item in items[:SEARCH_LIMIT]:
             if not isinstance(item, dict):
                 continue
             html_url = item.get("html_url", "")
@@ -672,13 +677,20 @@ class IntelligenceReportGenerator:
                 "title": item.get("title", ""),
                 "state": item.get("state", "unknown"),
                 "type": item_type,
+                "merged": item.get("merged", False),  # 搜索 API 可能不返回此字段，默认为 False
                 "created_at": item.get("created_at"),
                 "comments": item.get("comments", 0),
                 "url": html_url,
                 "labels": [l.get("name") for l in item.get("labels", []) if isinstance(l, dict)][:5],
             })
 
-        return {"results": results, "total": len(items), "query": query}
+        return {
+            "results": results,
+            "total": min(total_count, SEARCH_LIMIT),
+            "total_count": total_count,
+            "query": query,
+            "truncated": total_count > SEARCH_LIMIT,
+        }
 
     def _get_allowed_repos(self) -> list:
         """获取所有允许的 GitHub 仓库列表"""
@@ -700,12 +712,15 @@ class IntelligenceReportGenerator:
         if not self._validate_repo(repo):
             return {"error": f"repo '{repo}' is not in the allowed list"}
 
-        # 临时构建 URL（支持任意仓库）
+        # 先通过 issues 端点获取基本信息
         url = f"https://api.github.com/repos/{repo}/issues/{number}"
         item = self.client._request_with_retry("GET", url)
 
         if not item or not isinstance(item, dict):
             return {"error": f"not found: {repo}#{number}"}
+
+        html_url = item.get("html_url", "")
+        item_type = "pr" if "/pull/" in html_url else "issue"
 
         # 获取评论（如果有）
         comments = []
@@ -722,13 +737,22 @@ class IntelligenceReportGenerator:
                             "created_at": c.get("created_at"),
                         })
 
-        html_url = item.get("html_url", "")
-        item_type = "pr" if "/pull/" in html_url else "issue"
+        # 如果是 PR，从 pulls 端点获取合并状态（issues API 不返回 merged 字段）
+        merged = False
+        if item_type == "pr":
+            try:
+                pr_url = f"https://api.github.com/repos/{repo}/pulls/{number}"
+                pr_data = self.client._request_with_retry("GET", pr_url)
+                if isinstance(pr_data, dict):
+                    merged = pr_data.get("merged", False)
+            except Exception:
+                logger.warning(f"Failed to fetch PR merge status for {repo}#{number}")
 
         return {
             "number": item.get("number"),
             "title": item.get("title", ""),
             "state": item.get("state", "unknown"),
+            "merged": merged,  # PR 是否已合并（比 state 更准确），issues API 不返回此字段
             "type": item_type,
             "body": (item.get("body") or "")[:3000],  # 截断长正文
             "author": (item.get("user") or {}).get("login", ""),
@@ -841,6 +865,15 @@ class IntelligenceReportGenerator:
             })
 
         return {"results": results, "repo": repo}
+
+    @staticmethod
+    def _get_declared_tool_props(tool_name: str):
+        """从 tool schema 里取出声明的属性名集合。
+
+        用来在执行前剔除模型塞进来的 schema 外字段，避免噪声字段导致执行异常。
+        """
+        from app.services.tools._shared import get_declared_tool_props
+        return get_declared_tool_props(tool_name)
 
     def _resolve_sources(
         self, sources: List[str], excluded_sources: Optional[List[str]] = None

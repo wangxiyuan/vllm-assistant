@@ -4,7 +4,7 @@ import { useCommunityStore } from '@/stores/community'
 import { useAppStore } from '@/stores/app'
 import { usePRCenterStore } from '@/stores/prCenter'
 import { useWatchlistStore } from '@/stores/watchlist'
-import { renderMarkdown, renderSummary, renderReview, renderDiff } from '@/composables/useMarkdown'
+import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
 import { issueType, issueTypeLabel, issueStateLabel, prStateLabel, timeAgo, exactTime } from '@/utils/helpers'
 import type { Issue, PR } from '@/utils/types'
 
@@ -249,7 +249,7 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
             <!-- AI Summary tab -->
             <template v-if="prStore.prDetailTab === 'summary'">
               <div v-if="prStore.aiSummaryLoading" class="detail-loading">AI 总结生成中…</div>
-              <div v-else-if="prStore.aiSummary" class="ai-section-body" v-html="renderSummary(prStore.aiSummary)"></div>
+              <div v-else-if="prStore.aiSummary" class="ai-section-body" v-html="renderMarkdown(prStore.aiSummary)"></div>
               <div v-else class="empty-state is-compact">
                 <p>尚未生成 AI 总结</p>
                 <button class="btn btn-sm btn-primary" @click="prStore.generateSummary('pr')">生成 AI 总结</button>
@@ -259,7 +259,7 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
             <!-- AI Review tab -->
             <template v-if="prStore.prDetailTab === 'review'">
               <div v-if="prStore.aiReviewLoading" class="detail-loading">AI Review 生成中… ({{ prStore.aiReviewElapsed }}s)</div>
-              <div v-else-if="prStore.aiReview" class="ai-section-body" v-html="renderReview(prStore.aiReview)"></div>
+              <div v-else-if="prStore.aiReview" class="ai-section-body" v-html="renderMarkdown(prStore.aiReview)"></div>
               <div v-else class="empty-state is-compact">
                 <p>尚未生成 AI Review</p>
                 <button class="btn btn-sm btn-primary" @click="prStore.generateReview()">生成 AI Review</button>
@@ -346,7 +346,7 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
             <!-- AI Summary tab -->
             <template v-if="prStore.issueDetailTab === 'summary'">
               <div v-if="prStore.aiSummaryLoading" class="detail-loading">AI 总结生成中…</div>
-              <div v-else-if="prStore.aiSummary" class="ai-section-body" v-html="renderSummary(prStore.aiSummary)"></div>
+              <div v-else-if="prStore.aiSummary" class="ai-section-body" v-html="renderMarkdown(prStore.aiSummary)"></div>
               <div v-else class="empty-state is-compact">
                 <p>尚未生成 AI 总结</p>
                 <button class="btn btn-sm btn-primary" @click="prStore.generateSummary('issue')">生成 AI 总结</button>

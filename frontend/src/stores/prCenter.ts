@@ -404,7 +404,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
       const isCurrent = (isPR && selectedPR.value?.pr_number === number)
         || (!isPR && selectedIssue.value?.number === number)
       if (isCurrent) {
-        aiSummary.value = { error: e.message }
+        aiSummary.value = `**摘要生成失败**：${e.message}`
       }
     } finally {
       delete pendingSummaries.value[pendingKey]
@@ -442,11 +442,10 @@ export const usePRCenterStore = defineStore('prCenter', () => {
       }, { timeout: 150000 })
       if (selectedPR.value?.pr_number === prNumber) {
         aiReview.value = review
-        if (review.error) useAppStore().showToast('AI Review 异常', review.error, 'error')
       }
     } catch (e: any) {
       if (selectedPR.value?.pr_number === prNumber) {
-        aiReview.value = { error: e.message }
+        aiReview.value = `**Review 生成失败**：${e.message}`
         useAppStore().showToast('AI Review 失败', e.message, 'error')
       }
     } finally {

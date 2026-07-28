@@ -287,7 +287,7 @@ class MemoryService:
             ).fetchall()
             by_type = {r[0]: r[1] for r in type_counts}
             # 补全所有已知类型（数量为 0 的也显示）
-            known_types = ["docs", "code_structure", "issue", "pr", "article", "manual", "conversation"]
+            known_types = ["docs", "code_structure", "issue", "pr", "article", "manual", "conversation", "report"]
             for t in known_types:
                 if t not in by_type:
                     by_type[t] = 0

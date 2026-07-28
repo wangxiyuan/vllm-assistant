@@ -141,6 +141,15 @@ async def execute_tool(name: str, args: dict) -> dict:
     try:
         if handler is None:
             return {"error": f"Tool '{name}' has no handler"}
+
+        # 速率限制：根据工具名获取对应的限流器
+        from app.services.tools.rate_limiter import get_limiter_for_tool
+        limiter = get_limiter_for_tool(name)
+        if limiter:
+            wait = await limiter.acquire()
+            if wait > 0:
+                logger.debug(f"Rate limited tool '{name}', waited {wait:.2f}s")
+
         result = await handler(args)
         return result if isinstance(result, dict) else {"result": result}
     except Exception as e:

@@ -76,7 +76,7 @@ export const useIntelStore = defineStore('intel', () => {
         extra_prompt: intelForm.value.extra_prompt,
       }
       if (intelForm.value.title.trim()) payload.title = intelForm.value.title.trim()
-      const result: any = await api('/api/intelligence/generate', {
+      const result: any = await api('/api/ai-agent/reports/generate', {
         method: 'POST',
         body: JSON.stringify(payload),
       }, { timeout: 30000 })
@@ -161,13 +161,20 @@ export const useIntelStore = defineStore('intel', () => {
   }
 
   async function deleteReport(report: IntelReport) {
-    if (!confirm(`确认删除报告 "${report.title}"？此操作不可撤销。`)) return
+    const appStore = useAppStore()
+    const confirmed = await appStore.showConfirm({
+      title: '删除报告',
+      message: `确认删除报告 "${report.title}"？此操作不可撤销。`,
+      confirmText: '删除',
+      danger: true,
+    })
+    if (!confirmed) return
     const backup = { ...report }
     try {
       await api(`/api/intelligence/reports/${report.id}`, { method: 'DELETE' })
       reports.value = reports.value.filter(r => r.id !== report.id)
       if (selectedReport.value?.id === report.id) closeReport()
-      useAppStore().showUndoToast('已删除', report.title, async () => {
+      appStore.showUndoToast('已删除', report.title, async () => {
         try {
           const payload: any = {
             task_id: backup.task_id,
@@ -176,7 +183,7 @@ export const useIntelStore = defineStore('intel', () => {
             extra_prompt: backup.extra_prompt || '',
           }
           if (backup.title) payload.title = backup.title
-          const result: any = await api('/api/intelligence/generate', {
+          const result: any = await api('/api/ai-agent/reports/generate', {
             method: 'POST',
             body: JSON.stringify(payload),
           }, { timeout: 30000 })
@@ -186,38 +193,59 @@ export const useIntelStore = defineStore('intel', () => {
             created_at: new Date().toISOString(), status: 'generating' as const, word_count: 0,
           })
           pollReportStatus(result.report_id)
-          useAppStore().showToast('已重新生成', '', 'success')
+          appStore.showToast('已重新生成', '', 'success')
         } catch (e: any) {
-          useAppStore().showToast('恢复失败', e.message, 'error')
+          appStore.showToast('恢复失败', e.message, 'error')
         }
       }, 10000)
     } catch (e: any) {
-      useAppStore().showToast('删除失败', e.message, 'error')
+      appStore.showToast('删除失败', e.message, 'error')
     }
   }
 
   async function regenerateReport(report: IntelReport) {
-    if (!confirm(`确认重新生成报告 "${report.title}"？`)) return
+    const appStore = useAppStore()
+    const confirmed = await appStore.showConfirm({
+      title: '重新生成报告',
+      message: `确认重新生成报告 "${report.title}"？`,
+      confirmText: '重新生成',
+    })
+    if (!confirmed) return
     try {
       const payload: any = {
+        report_id: report.id,
         task_id: report.task_id,
         sources: report.sources || ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'],
         excluded_sources: report.excluded_sources || [],
         extra_prompt: report.extra_prompt || '',
       }
-      const result: any = await api('/api/intelligence/generate', {
+      const result: any = await api('/api/ai-agent/reports/generate', {
         method: 'POST',
         body: JSON.stringify(payload),
       }, { timeout: 30000 })
-      useAppStore().showToast('重新生成中', result.message, 'success')
-      reports.value.unshift({
-        id: result.report_id, title: result.title,
-        task_id: result.task_id, sources: payload.sources,
-        created_at: new Date().toISOString(), status: 'generating' as const, word_count: 0,
-      })
+      appStore.showToast('重新生成中', result.message, 'success')
+      // 用新 report_id 替换旧记录，保持列表位置不变
+      const idx = reports.value.findIndex(r => r.id === report.id)
+      if (idx >= 0) {
+        reports.value[idx] = {
+          id: result.report_id,
+          title: result.title,
+          task_id: result.task_id,
+          sources: payload.sources,
+          created_at: new Date().toISOString(),
+          status: 'generating' as const,
+          word_count: 0,
+        }
+      } else {
+        reports.value.unshift({
+          id: result.report_id, title: result.title,
+          task_id: result.task_id, sources: payload.sources,
+          created_at: new Date().toISOString(), status: 'generating' as const, word_count: 0,
+        })
+      }
       pollReportStatus(result.report_id)
     } catch (e: any) {
-      useAppStore().showToast('重新生成失败', e.message, 'error')
+      appStore.showToast('重新生成失败', e.message, 'error')
     }
   }
 
@@ -227,6 +255,19 @@ export const useIntelStore = defineStore('intel', () => {
       return
     }
     try {
+      if (!navigator.clipboard) {
+        const textarea = document.createElement('textarea')
+        textarea.value = reportDetails.value.content
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        textarea.style.pointerEvents = 'none'
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+        useAppStore().showToast('已复制', 'Markdown 内容已复制到剪贴板', 'success')
+        return
+      }
       await navigator.clipboard.writeText(reportDetails.value.content)
       useAppStore().showToast('已复制', 'Markdown 内容已复制到剪贴板', 'success')
     } catch {

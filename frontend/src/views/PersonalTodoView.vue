@@ -18,6 +18,64 @@ const router = useRouter()
 const editRefInput = ref('')
 const resolveRefLoading = ref(false)
 
+// Drag-and-drop state
+const draggedTaskId = ref<number | null>(null)
+const dragOverPriority = ref<string | null>(null)
+
+function onCardDragStart(e: DragEvent, task: any) {
+  draggedTaskId.value = task.id
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(task.id))
+  }
+  // 拖拽时卡片半透明
+  const el = e.target as HTMLElement
+  const card = el.closest('.kanban-card') as HTMLElement | null
+  if (card) {
+    setTimeout(() => card.classList.add('dragging'), 0)
+  }
+}
+
+function onCardDragEnd(e: DragEvent) {
+  const el = e.target as HTMLElement
+  const card = el.closest('.kanban-card') as HTMLElement | null
+  if (card) {
+    card.classList.remove('dragging')
+  }
+  draggedTaskId.value = null
+  dragOverPriority.value = null
+}
+
+function onColumnDragOver(e: DragEvent) {
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'move'
+  }
+  e.preventDefault()
+}
+
+function onColumnDragEnter(priority: string) {
+  dragOverPriority.value = priority
+}
+
+function onColumnDragLeave() {
+  dragOverPriority.value = null
+}
+
+function onColumnDrop(e: DragEvent, targetPriority: string) {
+  e.preventDefault()
+  const taskId = draggedTaskId.value
+  draggedTaskId.value = null
+  dragOverPriority.value = null
+
+  if (taskId === null) return
+
+  // 找到被拖拽的任务
+  const task = todoStore.tasks.find(t => t.id === taskId)
+  if (!task || task.priority === targetPriority) return
+
+  todoStore.moveTaskPriority(taskId, targetPriority)
+}
+
 async function addEditRef() {
   if (!editRefInput.value.trim()) return
   resolveRefLoading.value = true
@@ -129,40 +187,37 @@ async function generateInsight(task: any) {
     <!-- Kanban view -->
     <template v-if="todoStore.useKanban">
       <div class="kanban-board">
-        <div v-for="(items, priority) in todoStore.tasksByPriority" :key="priority" class="kanban-column">
+        <div v-for="(items, priority) in todoStore.tasksByPriority" :key="priority" class="kanban-column"
+             :class="{ 'drag-over': dragOverPriority === priority }"
+             @dragover="onColumnDragOver"
+             @dragenter="onColumnDragEnter(priority)"
+             @dragleave="onColumnDragLeave"
+             @drop="onColumnDrop($event, priority)">
           <h3 class="kanban-column-title" :class="priorityClass(priority)">{{ priority }}</h3>
-          <div v-for="task in items" :key="task.id" class="kanban-card" :class="{ 'overdue': task.due_date && task.due_date < todoStore.todayISO && task.status !== 'done' }" @click="todoStore.openTask(task)">
+          <div v-for="task in items" :key="task.id" class="kanban-card"
+               draggable="true"
+               :class="{ 'overdue': task.due_date && task.due_date < todoStore.todayISO && task.status !== 'done' }"
+               @dragstart="onCardDragStart($event, task)"
+               @dragend="onCardDragEnd"
+               @click="todoStore.openTask(task)">
             <div class="kanban-card-header">
               <span class="badge" :class="statusClass(task.status)">{{ statusLabel(task.status) }}</span>
               <span class="kanban-card-source">{{ sourceLabel(task.source) }}</span>
             </div>
             <h4 class="kanban-card-title">{{ task.title }}</h4>
-            <div class="kanban-card-meta">
+            <div class="kanban-card-footer">
               <span v-if="task.assignee_id" class="badge badge-assignee">{{ usersStore.userName(task.assignee_id) }}</span>
-              <span v-if="task.area" class="meta-item">{{ task.area }}</span>
-              <span v-if="task.due_date" class="meta-item" :class="{ 'overdue': task.due_date < todoStore.todayISO && task.status !== 'done' }">截止 {{ task.due_date }}</span>
-              <span v-if="task.subtask_count && task.subtask_count > 0" class="badge badge-subtask">{{ task.subtask_done_count || 0 }}/{{ task.subtask_count }}</span>
-            </div>
-            <div class="kanban-card-meta" v-if="task.related_refs && task.related_refs.length > 0">
-              <span v-for="(ref, idx) in task.related_refs.slice(0, 3)" :key="idx" class="ref-badge clickable" @click.stop="openUrl(ref.url)" :title="ref.title || (ref.repo + '#' + ref.number)">
+              <span v-if="task.area" class="kanban-tag">{{ task.area }}</span>
+              <span v-if="task.due_date" class="kanban-tag" :class="{ 'overdue': task.due_date < todoStore.todayISO && task.status !== 'done' }">📅 {{ task.due_date }}</span>
+              <span v-if="task.subtask_count && task.subtask_count > 0" class="kanban-tag">{{ task.subtask_done_count || 0 }}/{{ task.subtask_count }} 📋</span>
+              <span v-for="(ref, idx) in (task.related_refs || []).slice(0, 2)" :key="idx" class="ref-badge ref-badge-sm" :title="ref.title || (ref.repo + '#' + ref.number)">
                 <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
                 <span>{{ ref.repo }}#{{ ref.number }}</span>
               </span>
-            </div>
-            <div class="kanban-card-badges" v-if="task.has_dedup_check || task.has_ai_insight">
-              <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="badge badge-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
-              <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="badge badge-success">无重复</span>
-              <button v-if="task.has_ai_insight" class="badge badge-info insight-badge" @click.stop="openInsight(task)" title="查看洞察报告">有洞察</button>
-            </div>
-            <div class="kanban-card-actions">
-              <button class="card-action-btn is-primary" @click.stop="todoStore.toggleTaskDone(task)" :title="task.status === 'done' ? '恢复未完成' : '标记完成'" v-if="task.status !== 'cancelled'">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                {{ task.status === 'done' ? '恢复' : '完成' }}
-              </button>
-              <button class="card-action-btn is-primary" @click.stop="generateInsight(task)" title="生成洞察报告" :disabled="todoStore.insightGenLoading">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                洞察
-              </button>
+              <span v-if="(task.related_refs || []).length > 2" class="kanban-tag">+{{ task.related_refs.length - 2 }}</span>
+              <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
+              <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success">✓ 无重复</span>
+              <span v-if="task.has_ai_insight" class="kanban-tag is-info">🔍 有洞察</span>
             </div>
           </div>
         </div>
@@ -184,18 +239,18 @@ async function generateInsight(task: any) {
               <span class="badge" :class="statusClass(task.status)">{{ statusLabel(task.status) }}</span>
               <span>{{ sourceLabel(task.source) }}</span>
               <span v-if="task.assignee_id" class="badge badge-assignee">{{ usersStore.userName(task.assignee_id) }}</span>
-              <span v-if="task.area">{{ task.area }}</span>
-              <span v-if="task.due_date" :class="{ 'overdue': task.due_date < todoStore.todayISO && task.status !== 'done' }">截止 {{ task.due_date }}</span>
-              <span v-if="task.subtask_count && task.subtask_count > 0" class="badge badge-subtask">{{ task.subtask_done_count || 0 }}/{{ task.subtask_count }}</span>
-              <span v-for="(ref, idx) in (task.related_refs || []).slice(0, 2)" :key="idx" class="ref-badge" :title="ref.title || (ref.repo + '#' + ref.number)">
+              <span v-if="task.area" class="kanban-tag">{{ task.area }}</span>
+              <span v-if="task.due_date" class="kanban-tag" :class="{ 'overdue': task.due_date < todoStore.todayISO && task.status !== 'done' }">📅 {{ task.due_date }}</span>
+              <span v-if="task.subtask_count && task.subtask_count > 0" class="kanban-tag">{{ task.subtask_done_count || 0 }}/{{ task.subtask_count }} 📋</span>
+              <span v-for="(ref, idx) in (task.related_refs || []).slice(0, 3)" :key="idx" class="ref-badge" :title="ref.title || (ref.repo + '#' + ref.number)">
                 <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
                 <span>{{ ref.repo }}#{{ ref.number }}</span>
               </span>
+              <span v-if="(task.related_refs || []).length > 3" class="kanban-tag">+{{ task.related_refs.length - 3 }}</span>
+              <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
+              <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success">✓ 无重复</span>
+              <span v-if="task.has_ai_insight" class="kanban-tag is-info">🔍 有洞察</span>
             </div>
-          </div>
-          <div class="item-side">
-            <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="badge badge-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
-            <button v-if="task.has_ai_insight" class="badge badge-info insight-badge" @click.stop="openInsight(task)" title="查看洞察报告">有洞察</button>
           </div>
         </div>
       </div>
@@ -220,7 +275,7 @@ async function generateInsight(task: any) {
               <label class="form-label">描述</label>
               <textarea class="textarea" v-model="todoStore.newTask.description" placeholder="描述（可选）" rows="3"></textarea>
             </div>
-            <div class="form-row" style="align-items:flex-end;">
+            <div class="form-row" style="align-items:flex-start;">
               <div class="field">
                 <label class="form-label">优先级</label>
                 <select class="select" v-model="todoStore.newTask.priority">
@@ -241,7 +296,7 @@ async function generateInsight(task: any) {
                 </select>
               </div>
             </div>
-            <div class="form-row" style="align-items:flex-end;">
+            <div class="form-row" style="align-items:flex-start;margin-top:var(--space-4);">
               <div class="field">
                 <label class="form-label">领域</label>
                 <input class="input" type="text" placeholder="如 engine" v-model="todoStore.newTask.area" />
@@ -479,15 +534,15 @@ async function generateInsight(task: any) {
                 <div class="edit-form-grid">
                   <!-- Left column: main fields -->
                   <div class="edit-form-main">
-                    <div class="form-group" style="margin-bottom:var(--space-3);">
+                    <div class="field" style="margin-bottom:var(--space-3);">
                       <label class="field-label-sm">标题</label>
                       <input class="input" type="text" v-model="todoStore.editTaskForm.title" placeholder="任务标题" />
                     </div>
-                    <div class="form-group" style="margin-bottom:var(--space-3);">
+                    <div class="field" style="margin-bottom:var(--space-3);">
                       <label class="field-label-sm">描述</label>
                       <textarea class="textarea" rows="2" v-model="todoStore.editTaskForm.description" placeholder="描述（可选）"></textarea>
                     </div>
-                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-2);margin-bottom:var(--space-3);">
+                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-3);margin-bottom:var(--space-3);">
                       <div class="field">
                         <label class="field-label-sm">优先级</label>
                         <select class="select" v-model="todoStore.editTaskForm.priority">
@@ -515,7 +570,7 @@ async function generateInsight(task: any) {
                         <input class="input" type="text" v-model="todoStore.editTaskForm.area" placeholder="如 engine" />
                       </div>
                     </div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);margin-bottom:var(--space-3);">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);margin-bottom:var(--space-3);">
                       <div class="field">
                         <label class="field-label-sm">截止日期</label>
                         <input class="input" type="date" v-model="todoStore.editTaskForm.due_date" />
@@ -530,25 +585,27 @@ async function generateInsight(task: any) {
                   </div>
                   <!-- Right column: related refs -->
                   <div class="edit-form-refs">
-                    <label class="field-label-sm">关联 PR/Issue</label>
-                    <div class="ref-input-row" style="margin-bottom:var(--space-2);">
-                      <input class="input" type="text" v-model="editRefInput"
-                             placeholder="如 vllm#123 或纯数字" @keyup.enter="addEditRef()" />
-                      <button class="btn" @click="addEditRef()" :disabled="resolveRefLoading || !editRefInput.trim()">
-                        {{ resolveRefLoading ? '解析中…' : '添加' }}
-                      </button>
-                    </div>
-                    <div v-if="todoStore.editTaskForm.related_refs && todoStore.editTaskForm.related_refs.length > 0" style="display:flex;flex-direction:column;gap:4px;">
-                      <span v-for="(ref, idx) in todoStore.editTaskForm.related_refs" :key="idx" class="ref-badge" :title="ref.title" style="display:inline-flex;align-items:center;justify-content:space-between;">
-                        <span>
-                          <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
-                          <span>{{ ref.repo }}#{{ ref.number }}</span>
+                    <div class="field">
+                      <label class="field-label-sm">关联 PR/Issue</label>
+                      <div class="ref-input-row" style="margin-bottom:var(--space-2);">
+                        <input class="input" type="text" v-model="editRefInput"
+                               placeholder="如 vllm#123 或纯数字" @keyup.enter="addEditRef()" />
+                        <button class="btn" @click="addEditRef()" :disabled="resolveRefLoading || !editRefInput.trim()">
+                          {{ resolveRefLoading ? '解析中…' : '添加' }}
+                        </button>
+                      </div>
+                      <div v-if="todoStore.editTaskForm.related_refs && todoStore.editTaskForm.related_refs.length > 0" style="display:flex;flex-direction:column;gap:4px;">
+                        <span v-for="(ref, idx) in todoStore.editTaskForm.related_refs" :key="idx" class="ref-badge" :title="ref.title" style="display:inline-flex;align-items:center;justify-content:space-between;">
+                          <span>
+                            <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
+                            <span>{{ ref.repo }}#{{ ref.number }}</span>
+                          </span>
+                          <span class="ref-remove" @click="todoStore.editTaskForm.related_refs.splice(idx, 1)" style="margin-left:6px;">&times;</span>
                         </span>
-                        <span class="ref-remove" @click="todoStore.editTaskForm.related_refs.splice(idx, 1)" style="margin-left:6px;">&times;</span>
-                      </span>
-                    </div>
-                    <div v-else style="color:var(--text-tertiary);font-size:var(--text-xs);padding:var(--space-3);text-align:center;border:1px dashed var(--border-faint);border-radius:var(--radius-sm);">
-                      暂无关联引用，在上方输入 vllm#编号 添加
+                      </div>
+                      <div v-else style="color:var(--text-tertiary);font-size:var(--text-xs);padding:var(--space-3);text-align:center;border:1px dashed var(--border-faint);border-radius:var(--radius-sm);">
+                        暂无关联引用，在上方输入 vllm#编号 添加
+                      </div>
                     </div>
                   </div>
                 </div>

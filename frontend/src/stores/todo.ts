@@ -468,6 +468,28 @@ export const useTodoStore = defineStore('todo', () => {
   }
 
   // Insight
+  async function moveTaskPriority(taskId: number, newPriority: string) {
+    const idx = tasks.value.findIndex(t => t.id === taskId)
+    if (idx < 0) return
+    const oldPriority = tasks.value[idx].priority
+    if (oldPriority === newPriority) return
+
+    // 乐观更新
+    tasks.value[idx] = { ...tasks.value[idx], priority: newPriority }
+    try {
+      await api(`/api/personal-todo/tasks/${taskId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ priority: newPriority }),
+      })
+    } catch (e: any) {
+      // 失败回滚
+      if (idx >= 0) {
+        tasks.value[idx] = { ...tasks.value[idx], priority: oldPriority }
+      }
+      useAppStore().showToast('更新失败', e.message, 'error')
+    }
+  }
+
   async function openTaskInsight(task: TodoTask) {
     const reportId = (task as any).latest_insight_report_id
     if (!reportId) {
@@ -482,7 +504,7 @@ export const useTodoStore = defineStore('todo', () => {
     if (insightGenLoading.value) return
     insightGenLoading.value = true
     try {
-      const result: any = await api('/api/intelligence/generate', {
+      const result: any = await api('/api/ai-agent/reports/generate', {
         method: 'POST',
         body: JSON.stringify({
           task_id: task.id,
@@ -512,7 +534,7 @@ export const useTodoStore = defineStore('todo', () => {
     loadTasks, createTask, deleteTask, toggleTaskDone,
     openTask, closeTask, loadTaskDetails,
     startEditTask, cancelEditTask, saveTask,
-    runDedupCheck, openTaskInsight, generateInsightFromTask,
+    runDedupCheck, moveTaskPriority, openTaskInsight, generateInsightFromTask,
     loadSubtasks, createSubtask, toggleSubtaskDone, deleteSubtask,
     startEditSubtask, cancelEditSubtask, saveSubtask,
     resolveRefLoading, resolveRef, addRef, removeRef,
