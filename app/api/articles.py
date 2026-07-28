@@ -19,6 +19,7 @@ from app.services.code_ref_parser import CodeRefParser
 from app.services.local_code_sync import LocalCodeSyncService
 from app.services.article_renderer import ArticleRenderer
 from app.services.article_validator import ArticleValidator
+from app.services.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -128,6 +129,15 @@ async def create_article(req: ArticleCreate, db: Session = Depends(get_db)):
     parser = CodeRefParser()
     refs_result = parser.save_article_refs(article.id, article.content, db)
 
+    # 同步到知识库（仅 published 文章会被索引）
+    if article.status == "published":
+        try:
+            mem = MemoryService()
+            mem._build_from_articles()
+            logger.info(f"Knowledge base synced after article create: id={article.id}")
+        except Exception:
+            logger.exception(f"Failed to sync knowledge base after article create: id={article.id}")
+
     return {
         "id": article.id,
         "title": article.title,
@@ -168,6 +178,15 @@ async def update_article(article_id: int, req: ArticleUpdate, db: Session = Depe
 
     db.commit()
     db.refresh(article)
+
+    # 同步到知识库（仅 published 文章会被索引）
+    if article.status == "published":
+        try:
+            mem = MemoryService()
+            mem._build_from_articles()
+            logger.info(f"Knowledge base synced after article update: id={article.id}")
+        except Exception:
+            logger.exception(f"Failed to sync knowledge base after article update: id={article.id}")
 
     return _article_to_response(article)
 
