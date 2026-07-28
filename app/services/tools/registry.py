@@ -40,6 +40,10 @@ CATEGORY_TOOLS: Dict[str, List[str]] = {
     "academic": [
         "search_arxiv",
     ],
+    "web": [
+        "search_web",
+        "extract_web_content",
+    ],
 }
 
 

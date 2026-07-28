@@ -57,6 +57,12 @@ class Config:
     # Personal TODO - 洞察报告异步超时（秒）
     INTELLIGENCE_REPORT_TIMEOUT: int = int(os.getenv("INTELLIGENCE_REPORT_TIMEOUT", "180"))
 
+    # Tavily 兼容 Web Search API（用于 web 搜索工具）
+    # 默认使用公益服务 https://tavily.claude-code-best.win，无需 API Key
+    # 也可配置为官方 Tavily 或其他兼容服务
+    TAVILY_API_URL: str = os.getenv("TAVILY_API_URL", "https://tavily.claude-code-best.win")
+    TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+
     # ===== 代码仓库配置 =====
     # 代码仓库列表：{"vllm": "https://github.com/vllm-project/vllm.git", ...}
     REPOS: Dict[str, str] = {}

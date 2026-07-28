@@ -13,3 +13,4 @@ from . import knowledge_tools
 from . import code_tools
 from . import doc_tools
 from . import academic_tools
+from . import web_search_tools

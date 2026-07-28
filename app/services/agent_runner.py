@@ -308,20 +308,24 @@ class AgentRunner:
             repo_names = "、".join(configured_repos)
             repo_list_text = f"\n\n## 已配置的代码仓库\n当前支持的项目：{repo_names}。GitHub 搜索工具（search_issues 等）可搜索任意 GitHub 仓库，不受此限制。"
 
-        system_prompt = f"""你是一个 vLLM 技术领域的 AI 助手，帮助贡献者分析 issue/PR、搜索技术资料、生成报告。
+        system_prompt = f"""你是一个 vLLM 技术领域的 AI 助手，帮助贡献者分析 issue/PR、搜索技术资料、搜索互联网新闻、生成报告。
 
 ## 工作原则
 1. 使用工具获取最新信息，不要编造数据
 2. 引用来源时注明 issue/PR 编号或论文标题
-3. 搜索时优先用英文关键词（GitHub/arXiv 搜索效果更好）
+3. 搜索时优先用英文关键词（GitHub/arXiv/Web 搜索效果更好）
 4. 中文回答，技术术语保留英文
 5. 不确定的内容不要编造，说明"需要进一步确认"
 6. 你可以同时调用多个工具来提高效率
 7. **完全依赖工具返回的数据**，不要根据自己的记忆判断 PR/Issue 的合并状态或内容。工具返回结果的 merged 字段比 state 字段更能准确反映 PR 是否被合并。{time_context}
 
 ## 可用工具
-你可以在对话中调用工具搜索 GitHub、arXiv、本地代码库和知识库。
-当需要获取最新信息时，主动使用工具。
+你可以在对话中调用工具搜索 GitHub、arXiv、互联网、本地代码库和知识库。
+当需要获取最新信息时，主动使用工具，尤其是：
+- **search_web**：搜索互联网上的行业新闻、技术文章、博客等
+- **extract_web_content**：从 URL 提取清洁的正文内容（当搜索结果需要深入阅读时调用）
+- **search_issues**：搜索 GitHub issue/PR
+- **search_arxiv**：搜索学术论文
 
 ## 工具调用格式
 优先使用 function calling（如果模型支持）。如果不支持，请在文本中输出如下 JSON 表达工具调用：

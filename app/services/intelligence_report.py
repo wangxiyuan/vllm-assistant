@@ -66,6 +66,8 @@ class IntelligenceReportGenerator:
             "get_pr_diff",
             "search_arxiv",
             "get_github_releases",
+            "search_web",
+            "extract_web_content",
             "search_docs",
             "search_memory",
         ])
@@ -274,7 +276,7 @@ class IntelligenceReportGenerator:
         # 阶段 1：搜索阶段
         if search_count < search_budget:
             if search_count == 0:
-                # 第一轮：引导按仓库逐个搜索 + arxiv + releases
+                # 第一轮：引导按仓库逐个搜索 + arxiv + releases + web
                 repos_str = "、".join(github_repos)
                 parts = [
                     f"现在进入搜索阶段。请对以下每个仓库分别搜索：{repos_str}",
@@ -282,8 +284,18 @@ class IntelligenceReportGenerator:
                     f"关键词应从任务标题中提取核心概念，不要用太长的短语。",
                 ]
                 if "academic" in effective_sources:
-                    parts.append("同时调用 search_arxiv 搜索相关论文（用英文关键词）。")
+                    parts.append(
+                        "同时调用 search_arxiv 搜索相关论文。"
+                        "**注意：arXiv 搜索必须用英文关键词。**"
+                        "如果任务标题包含中文，请先将其翻译成英文核心关键词再搜索。"
+                        "例如「vLLM 推理性能优化」→ 搜索 `vLLM inference performance optimization`。"
+                    )
                 if "news" in effective_sources:
+                    parts.append(
+                        "同时调用 search_web 搜索行业新闻。"
+                        "搜索关键词用英文效果更好，如 `vLLM latest news`、`LLM inference framework`。"
+                        "如果搜索结果中有感兴趣的文章，可以进一步调用 extract_web_content 提取正文。"
+                    )
                     parts.append("同时调用 get_github_releases 获取 vllm-project/vllm 的最近 release。")
                 return "\n".join(parts)
             return ""  # 后续搜索轮让 AI 自由发挥
@@ -317,7 +329,7 @@ class IntelligenceReportGenerator:
         self, llm: LLMClient, task_title: str, task_description: str,
         effective_sources: List[str], extra_prompt: str, github_repos: List[str],
     ) -> str:
-        """回退模式：先批量搜索 GitHub + arXiv + releases，再让 AI 一次性生成报告"""
+        """回退模式：先批量搜索 GitHub + arXiv + web + releases，再让 AI 一次性生成报告"""
         sections = []
         for source in effective_sources:
             try:
@@ -326,9 +338,10 @@ class IntelligenceReportGenerator:
                     items = self._search_github_for_report(source, task_title, task_description)
                     sections.append(self._format_github_section(source, items))
                 elif source == "academic":
-                    # 搜 arXiv
+                    # 先用 LLM 将中文关键词翻译成英文
+                    en_keywords = self._translate_keywords_to_en(task_title + " " + task_description)
                     arxiv_result = self._tool_search_arxiv({
-                        "query": self._extract_keywords_en(task_title + " " + task_description),
+                        "query": en_keywords,
                         "max_results": 5,
                     })
                     if arxiv_result.get("results"):
@@ -342,16 +355,34 @@ class IntelligenceReportGenerator:
                     else:
                         sections.append("学术动态: 未找到相关论文")
                 elif source == "news":
-                    # 获取 vllm releases
+                    # 1. 用 search_web 搜索行业新闻
+                    web_keywords = self._translate_keywords_to_en(task_title)
+                    web_result = self._execute_tool("search_web", {
+                        "query": web_keywords,
+                        "max_results": 5,
+                    })
+                    news_lines = ["新闻动态 (行业新闻 + GitHub Releases):"]
+                    if web_result and not web_result.get("error") and web_result.get("results"):
+                        for r in web_result["results"][:5]:
+                            url = r.get("url", "")
+                            title = r.get("title", "")
+                            snippet = r.get("content", "")[:200]
+                            if url and title:
+                                news_lines.append(f"- [{title}]({url})")
+                                if snippet:
+                                    news_lines.append(f"  {snippet}")
+                    else:
+                        news_lines.append("  (web 搜索未配置或不可用，以下仅展示 GitHub release 信息)")
+
+                    # 2. 获取 vllm releases
                     releases = self._tool_get_github_releases({"repo": "vllm-project/vllm", "per_page": 5})
                     if releases.get("results"):
-                        lines = ["新闻动态 (GitHub Releases):"]
+                        news_lines.append("")
+                        news_lines.append("版本发布:")
                         for r in releases["results"][:5]:
-                            lines.append(f"- {r['tag']} ({r.get('published_at', '')})")
-                            lines.append(f"  {r.get('body', '')[:200]}")
-                        sections.append("\n".join(lines))
-                    else:
-                        sections.append("新闻动态: 无法获取 release 信息")
+                            news_lines.append(f"- {r['tag']} ({r.get('published_at', '')})")
+                            news_lines.append(f"  {r.get('body', '')[:200]}")
+                    sections.append("\n".join(news_lines))
             except Exception:
                 logger.exception(f"Failed to collect data from source '{source}' in single-shot mode")
                 display_name = self.SOURCE_CONFIG.get(source, {}).get("display_name", source)
@@ -425,6 +456,46 @@ class IntelligenceReportGenerator:
                 seen.add(wl)
                 result.append(w)
         return " ".join(result[:6])
+
+    def _translate_keywords_to_en(self, text: str) -> str:
+        """用 LLM 将（可能含中文的）文本翻译成英文关键词
+
+        如果文本中已有足够英文关键词，直接提取；否则调用 LLM 翻译。
+
+        Returns:
+            英文关键词字符串（空格分隔）
+        """
+        # 先尝试直接提取英文关键词
+        en_keywords = self._extract_keywords_en(text)
+        # 如果提取到的英文关键词足够多（>=3个词），直接使用
+        if len(en_keywords.split()) >= 3:
+            return en_keywords
+
+        # 检测是否包含中文字符
+        if not re.search(r"[一-鿿]", text):
+            # 没有中文，用已有的英文关键词
+            return en_keywords or text[:100]
+
+        # 用 LLM 翻译
+        try:
+            llm = self._get_llm()
+            prompt = (
+                "请将以下文本翻译成英文搜索关键词（只输出关键词本身，不要多余内容）：\n\n"
+                f"{text}\n\n"
+                "输出格式：用空格分隔的英文关键词，不超过 6 个词。"
+            )
+            result = llm.chat_sync(prompt, max_tokens=100, temperature=0.1)
+            translated = result.strip()
+            # 清理：去掉可能的引号、换行、多余空格
+            translated = translated.strip('"').strip("'").strip()
+            # 如果翻译结果看起来有效（包含英文字母）
+            if re.search(r"[a-zA-Z]{3,}", translated):
+                return translated[:100]
+        except Exception:
+            logger.warning(f"LLM translation failed for '{text}', falling back to direct extraction")
+
+        # 降级：返回直接提取的英文关键词
+        return en_keywords or text[:100]
 
     def _format_github_section(self, source: str, items: List[dict]) -> str:
         """回退模式用：格式化 GitHub 搜索结果"""
@@ -506,14 +577,17 @@ class IntelligenceReportGenerator:
 - **search_issues**：在 GitHub 仓库搜索 issue/PR。每轮可并行调用多个。
 - **get_issue_detail**：读取 issue/PR 的正文和评论。每轮可并行调用多个。
 - **get_pr_diff**：读取 PR 的 diff 内容。
-- **search_arxiv**：搜索 arXiv 论文。用于学术动态调研，用英文关键词效果更好。
+- **search_arxiv**：搜索 arXiv 论文。用于学术动态调研，**必须用英文关键词**。
 - **get_github_releases**：获取仓库最近的 release 列表。用于新闻动态，避免编造版本号。
+- **search_web**：在互联网上搜索行业新闻、技术文章、博客等。用于了解业界动态、竞品信息。
+  - 默认使用 Tavily 兼容协议，无需额外配置。
+- **extract_web_content**：从指定 URL 提取清洁的文本内容。当搜索结果中的某篇文章需要深入了解时，用此工具获取完整正文。
 
 ## 工作原则
 1. **搜索要高效**：每个仓库搜索 1-2 次即可，用核心关键词，不要用长句。不同轮用不同关键词。
 2. **深入要聚焦**：搜索后选出 5-8 个最相关的条目读详情，优先 RFC issue 和高评论量的 issue。
-3. **学术用 arXiv**：如果包含学术来源，用英文关键词调 search_arxiv 搜 1 次即可。
-4. **新闻用 release**：如果包含新闻来源，调 get_github_releases 获取真实版本信息，不要编造版本号。
+3. **学术用 arXiv**：如果包含学术来源，用英文关键词调 search_arxiv 搜 1 次即可。**如果任务标题是中文，请先将其翻译成英文关键词再搜索**（如"vLLM 推理性能优化" → "vLLM inference performance optimization"）。
+4. **新闻用 search_web + release**：如果包含新闻来源，先用 search_web 搜索行业新闻（如 "vLLM latest news"、"LLM inference framework comparison"），再调 get_github_releases 获取真实版本信息，不要编造版本号。
 5. **报告要基于证据**：每个结论引用具体 issue/PR 编号或论文标题。不确定的内容不要编造。
 6. **接受局限性**：你的搜索轮次有限，不可能遍历所有 issue/PR。对于未能深入调研的部分，在报告中提供 GitHub 搜索链接和关键词建议，让用户自行深入。这比假装覆盖了所有内容更有价值。
 7. 会按阶段引导你：先搜索，再深入，最后生成报告。
@@ -544,7 +618,7 @@ class IntelligenceReportGenerator:
 提供 arXiv 搜索链接，如：https://arxiv.org/search/?query=关键词&searchtype=all
 
 ## 新闻动态
-（基于 GitHub release 数据列出真实的版本发布信息；不要编造版本号）
+（基于 GitHub release 数据和 web 搜索到的行业新闻，列出真实的版本发布信息和业界动态；不要编造版本号）
 
 ## AI 建议
 基于以上分析，给出 3-5 条具体、可执行的建议
