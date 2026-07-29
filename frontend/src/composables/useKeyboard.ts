@@ -1,6 +1,4 @@
 import { onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { useAppStore } from '@/stores/app'
 import { usePRCenterStore } from '@/stores/prCenter'
 import { useTodoStore } from '@/stores/todo'
 import { useIntelStore } from '@/stores/intel'
@@ -11,19 +9,6 @@ import { useUsersStore } from '@/stores/users'
 import { useAIAgentStore } from '@/stores/aiAgent'
 
 export function useKeyboard() {
-  const router = useRouter()
-
-  const routeKeyMap: Record<string, string> = {
-    '1': 'community',
-    '2': 'watchlist',
-    '3': 'pr-center',
-    '4': 'personal-todo',
-    '5': 'intelligence',
-    '6': 'articles',
-    '7': 'anatomy',
-    '8': 'ai-agent',
-  }
-
   function handleKeydown(e: KeyboardEvent) {
     const tag = (e.target as HTMLElement).tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
@@ -31,25 +16,11 @@ export function useKeyboard() {
     if ((e.target as HTMLElement).isContentEditable) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
 
-    // Number keys 1-7 for navigation
-    if (routeKeyMap[e.key]) {
-      e.preventDefault()
-      router.push({ name: routeKeyMap[e.key] })
-      return
-    }
-
     // / key to focus search
     if (e.key === '/') {
       e.preventDefault()
       const searchInput = document.querySelector('.search-bar input') as HTMLInputElement
       searchInput?.focus()
-      return
-    }
-
-    // R key for refresh
-    if (e.key === 'r' || e.key === 'R') {
-      e.preventDefault()
-      useAppStore().refreshAll()
       return
     }
 

@@ -316,3 +316,26 @@ class ModelAnatomyResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class QuickPromptCreate(BaseModel):
+    """创建常用提示"""
+    text: str
+
+
+class QuickPromptUpdate(BaseModel):
+    """更新常用提示"""
+    text: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class QuickPromptResponse(BaseModel):
+    """常用提示响应"""
+    id: int
+    text: str
+    sort_order: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True

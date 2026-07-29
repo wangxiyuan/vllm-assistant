@@ -143,6 +143,14 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
   }
 
   async function deleteSession(sessionId: string) {
+    const appStore = useAppStore()
+    const confirmed = await appStore.showConfirm({
+      title: '删除会话',
+      message: '确定删除这个会话？此操作不可撤销。',
+      confirmText: '删除',
+      danger: true,
+    })
+    if (!confirmed) return
     // 删的是当前正在流式生成的会话 → 立刻 abort，丢掉过程状态
     if (currentSessionId.value === sessionId && streaming.value) {
       stopGenerating()
@@ -162,7 +170,26 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
 
   async function sendMessage(content: string, tools?: string[]) {
     if (!content.trim()) return
+    messages.value.push({ role: 'user', content: content.trim() })
+    await _doStream(messages.value)
+  }
 
+  async function retriggerFrom(userMsgIndex: number) {
+    if (userMsgIndex < 0 || userMsgIndex >= messages.value.length) return
+    if (messages.value[userMsgIndex].role !== 'user') return
+    messages.value = messages.value.slice(0, userMsgIndex + 1)
+    await _doStream(messages.value)
+  }
+
+  function editUserMessage(msgIndex: number, newContent: string) {
+    if (msgIndex < 0 || msgIndex >= messages.value.length) return
+    if (messages.value[msgIndex].role !== 'user') return
+    messages.value[msgIndex].content = newContent.trim()
+    messages.value = messages.value.slice(0, msgIndex + 1)
+    _doStream(messages.value)
+  }
+
+  async function _doStream(pendingMessages: ChatMessage[]) {
     // If stuck in streaming state from a previous failed request, reset it
     if (streaming.value) {
       streaming.value = false
@@ -176,25 +203,17 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
 
     error.value = ''
 
-    // Create session if none (must happen before pushing user message,
-    // because createSession() resets messages)
     let sessionId = currentSessionId.value
     if (!sessionId) {
       sessionId = await createSession()
       if (!sessionId) return
     }
 
-    // Add user message
-    messages.value.push({ role: 'user', content: content.trim() })
-
     streaming.value = true
     activeStreamingSessionId.value = sessionId
     streamingSteps.value = []
     streamingFinal.value = ''
 
-    // 心跳式超时：每收到一个事件就重置计时器，连续 IDLE_TIMEOUT_MS 无任何事件才 abort。
-    // 多轮工具调用时每一轮都能拿到完整的 IDLE_TIMEOUT_MS，避免思考/调工具过程中
-    // 因为总时长超过固定超时而被打断。
     const controller = new AbortController()
     abortController = controller
     const IDLE_TIMEOUT_MS = 90_000
@@ -215,9 +234,9 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
         },
         signal: controller.signal,
         body: JSON.stringify({
-          messages: messages.value.map(m => ({ role: m.role, content: m.content })),
+          messages: pendingMessages.map(m => ({ role: m.role, content: m.content })),
           session_id: sessionId,
-          tools: tools || ['github', 'knowledge', 'code'],
+          tools: ['github', 'knowledge', 'code'],
           stream: true,
         }),
       })
@@ -237,7 +256,6 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
         const { done, value } = await reader.read()
         if (done) break
 
-        // 收到任何字节都算"有活动"，重置空闲计时器
         armIdleTimer()
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
@@ -253,11 +271,8 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
           }
           switch (event.type) {
             case 'thinking': {
-              // 跳过空思考（模型在 round 边界经常输出空文本，留个孤零零的 💭 很丑）
               const t = (event.data || '').trim()
               if (!t) break
-              // 思考内容覆盖：移除之前所有 thinking 步骤，只保留最新一条，
-              // 避免多轮推理时过程列表里堆积多条长思考内容
               streamingSteps.value = streamingSteps.value.filter(
                 s => s.type !== 'thinking'
               )
@@ -271,8 +286,6 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
               })
               break
             case 'tool_result': {
-              // FIFO 匹配：找到最早一个还没结果的 tool_call，挂上去。
-              // 避免「3 个同名 ⏳ 后跟 3 个孤儿 ✓」的乱序显示。
               const steps = streamingSteps.value
               for (const s of steps) {
                 if (s.type === 'tool_call' && s.tool.result === undefined) {
@@ -287,14 +300,12 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
               break
             case 'error':
               throw new Error(event.data || 'AI 响应异常')
-            // 'done' 由流自然结束处理
           }
         }
       }
     } catch (e: any) {
       if (e.name === 'AbortError') {
         if (userStopped.value) {
-          // 用户主动停止：保留已经流出来的部分作为 assistant 回复，但不报错
           error.value = ''
           useAppStore().showToast('已停止生成', '', 'info')
         } else {
@@ -309,8 +320,6 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
       if (idleTimer) clearTimeout(idleTimer)
       abortController = null
       activeStreamingSessionId.value = null
-      // 只在「用户还在原 session 内」且「没出错」时把流式文本落为 assistant 消息
-      // 用户已切到别的 session：丢弃 partial 文本，避免串写到新 session
       if (currentSessionId.value === sessionId && !error.value) {
         const finalText = streamingFinal.value.trim()
         if (finalText) {
@@ -420,7 +429,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
 
   return {
     messages, sessions, currentSessionId, loading, streaming, activeStreamingSessionId, streamingSteps, streamingFinal, error, userStopped,
-    loadSessions, createSession, switchSession, deleteSession, sendMessage, stopGenerating,
+    loadSessions, createSession, switchSession, deleteSession, sendMessage, retriggerFrom, editUserMessage, stopGenerating,
 
     // Knowledge base
     kbStats, kbLoading, kbSearchQuery, kbSelectedType,

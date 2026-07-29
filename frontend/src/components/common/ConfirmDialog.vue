@@ -6,7 +6,7 @@ const appStore = useAppStore()
 
 <template>
   <Teleport to="body">
-    <div v-if="appStore.confirmDialog.show" class="modal-backdrop" @click="appStore.confirmCancel()">
+    <div v-if="appStore.confirmDialog.show" class="modal-backdrop confirm-backdrop" @click="appStore.confirmCancel()">
       <div class="modal confirm-modal" @click.stop>
         <div class="modal-header">
           <h3>{{ appStore.confirmDialog.title }}</h3>

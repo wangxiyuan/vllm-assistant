@@ -1300,8 +1300,14 @@ a.item-title:hover { color: var(--amber-bright); }
 }
 
 /* Confirm dialog: compact, centered */
+.confirm-backdrop {
+    align-items: center !important;
+    justify-content: center !important;
+    z-index: calc(var(--z-modal) + 20) !important;
+}
 .confirm-modal {
     width: min(420px, 92vw);
+    z-index: calc(var(--z-modal) + 21);
 }
 .confirm-modal .modal-actions {
     background: transparent;

@@ -12,6 +12,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.config import Config
+from app.database import SessionLocal
+from app.models import AIMemory, AIChatSession, AIChatMessage, QuickPrompt
+from app.schemas import QuickPromptCreate, QuickPromptUpdate, QuickPromptResponse
 from app.services.agent_runner import AgentRunner
 
 logger = logging.getLogger(__name__)
@@ -703,5 +706,97 @@ async def update_session_title(session_id: str, request: dict):
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to update title")
+    finally:
+        db.close()
+
+
+# ============================================================
+# Quick Prompts — 常用提示 CRUD
+# ============================================================
+
+@router.get("/quick-prompts", response_model=List[QuickPromptResponse])
+def list_quick_prompts():
+    """列出所有常用提示"""
+    db = SessionLocal()
+    try:
+        prompts = db.query(QuickPrompt).order_by(QuickPrompt.sort_order, QuickPrompt.id).all()
+        return [
+            QuickPromptResponse(
+                id=p.id, text=p.text, sort_order=p.sort_order,
+                created_at=p.created_at.isoformat() + "Z" if p.created_at else None,
+                updated_at=p.updated_at.isoformat() + "Z" if p.updated_at else None,
+            )
+            for p in prompts
+        ]
+    finally:
+        db.close()
+
+
+@router.post("/quick-prompts", response_model=QuickPromptResponse)
+def create_quick_prompt(req: QuickPromptCreate):
+    """创建常用提示"""
+    db = SessionLocal()
+    try:
+        max_order = db.query(QuickPrompt).count()
+        prompt = QuickPrompt(text=req.text, sort_order=max_order)
+        db.add(prompt)
+        db.commit()
+        db.refresh(prompt)
+        return QuickPromptResponse(
+            id=prompt.id, text=prompt.text, sort_order=prompt.sort_order,
+            created_at=prompt.created_at.isoformat() + "Z" if prompt.created_at else None,
+            updated_at=prompt.updated_at.isoformat() + "Z" if prompt.updated_at else None,
+        )
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to create prompt")
+    finally:
+        db.close()
+
+
+@router.put("/quick-prompts/{prompt_id}", response_model=QuickPromptResponse)
+def update_quick_prompt(prompt_id: int, req: QuickPromptUpdate):
+    """更新常用提示"""
+    db = SessionLocal()
+    try:
+        prompt = db.query(QuickPrompt).filter(QuickPrompt.id == prompt_id).first()
+        if not prompt:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        if req.text is not None:
+            prompt.text = req.text
+        if req.sort_order is not None:
+            prompt.sort_order = req.sort_order
+        db.commit()
+        db.refresh(prompt)
+        return QuickPromptResponse(
+            id=prompt.id, text=prompt.text, sort_order=prompt.sort_order,
+            created_at=prompt.created_at.isoformat() + "Z" if prompt.created_at else None,
+            updated_at=prompt.updated_at.isoformat() + "Z" if prompt.updated_at else None,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update prompt")
+    finally:
+        db.close()
+
+
+@router.delete("/quick-prompts/{prompt_id}")
+def delete_quick_prompt(prompt_id: int):
+    """删除常用提示"""
+    db = SessionLocal()
+    try:
+        prompt = db.query(QuickPrompt).filter(QuickPrompt.id == prompt_id).first()
+        if not prompt:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        db.delete(prompt)
+        db.commit()
+        return {"status": "deleted"}
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete prompt")
     finally:
         db.close()

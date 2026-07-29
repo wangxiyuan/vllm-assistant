@@ -708,3 +708,14 @@ class AIChatMessage(Base):
     role = Column(String(20), nullable=False)  # user / assistant
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+class QuickPrompt(Base):
+    """AI Agent 常用提示"""
+    __tablename__ = "quick_prompts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    text = Column(Text, nullable=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

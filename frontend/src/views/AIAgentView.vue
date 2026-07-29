@@ -56,34 +56,29 @@ const isStreamingHere = computed(() =>
 
 const isComposing = ref(false)
 
-const STORAGE_KEY = 'ai-agent-quick-prompts'
-const DEFAULT_PROMPTS = [
-  '帮我分析这个项目的架构',
-  '最近有哪些新的 PR？',
-  '帮我查一下知识库中关于 vLLM 的信息',
-  '总结一下我关注的仓库动态',
-]
-
-function loadQuickPrompts(): string[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const arr = JSON.parse(raw)
-      if (Array.isArray(arr)) return arr as string[]
-    }
-  } catch (_) {}
-  return [...DEFAULT_PROMPTS]
+interface QuickPromptItem {
+  id: number
+  text: string
+  sort_order: number
 }
 
-function saveQuickPrompts() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(quickPrompts.value))
-}
-
-const quickPrompts = ref<string[]>(loadQuickPrompts())
+const quickPrompts = ref<QuickPromptItem[]>([])
+const quickPromptsLoading = ref(false)
 const editingPromptIdx = ref<number | null>(null)
 const editingPromptText = ref('')
 const showAddPrompt = ref(false)
 const newPromptText = ref('')
+
+async function loadQuickPrompts() {
+  quickPromptsLoading.value = true
+  try {
+    const data: any = await api('/api/ai-agent/quick-prompts')
+    quickPrompts.value = data || []
+  } catch (_) {
+  } finally {
+    quickPromptsLoading.value = false
+  }
+}
 
 function usePrompt(text: string) {
   inputText.value = text
@@ -91,13 +86,18 @@ function usePrompt(text: string) {
 
 function startEditPrompt(idx: number) {
   editingPromptIdx.value = idx
-  editingPromptText.value = quickPrompts.value[idx]
+  editingPromptText.value = quickPrompts.value[idx].text
 }
 
-function saveEditPrompt() {
-  if (editingPromptIdx.value !== null && editingPromptText.value.trim()) {
-    quickPrompts.value[editingPromptIdx.value] = editingPromptText.value.trim()
-    saveQuickPrompts()
+async function saveEditPrompt() {
+  const prompt = quickPrompts.value[editingPromptIdx.value!]
+  if (editingPromptIdx.value !== null && editingPromptText.value.trim() && prompt) {
+    try {
+      const data: any = await api(`/api/ai-agent/quick-prompts/${prompt.id}`, {
+        method: 'PUT', body: JSON.stringify({ text: editingPromptText.value.trim() }),
+      })
+      quickPrompts.value[editingPromptIdx.value] = data
+    } catch (_) {}
   }
   editingPromptIdx.value = null
   editingPromptText.value = ''
@@ -108,23 +108,50 @@ function cancelEditPrompt() {
   editingPromptText.value = ''
 }
 
-function deletePrompt(idx: number) {
-  quickPrompts.value.splice(idx, 1)
-  saveQuickPrompts()
+async function deletePrompt(idx: number) {
+  const prompt = quickPrompts.value[idx]
+  try {
+    await api(`/api/ai-agent/quick-prompts/${prompt.id}`, { method: 'DELETE' })
+    quickPrompts.value.splice(idx, 1)
+  } catch (_) {}
 }
 
-function addPrompt() {
+async function addPrompt() {
   if (newPromptText.value.trim()) {
-    quickPrompts.value.push(newPromptText.value.trim())
-    saveQuickPrompts()
+    try {
+      const data: any = await api('/api/ai-agent/quick-prompts', {
+        method: 'POST', body: JSON.stringify({ text: newPromptText.value.trim() }),
+      })
+      quickPrompts.value.push(data)
+    } catch (_) {}
   }
   newPromptText.value = ''
   showAddPrompt.value = false
 }
 
-function resetPrompts() {
-  quickPrompts.value = [...DEFAULT_PROMPTS]
-  saveQuickPrompts()
+const editingMsgIdx = ref<number | null>(null)
+const editingMsgText = ref('')
+
+function startEditMsg(idx: number) {
+  editingMsgIdx.value = idx
+  editingMsgText.value = agentStore.messages[idx].content
+}
+
+function saveEditMsg() {
+  if (editingMsgIdx.value !== null && editingMsgText.value.trim()) {
+    agentStore.editUserMessage(editingMsgIdx.value, editingMsgText.value.trim())
+  }
+  editingMsgIdx.value = null
+  editingMsgText.value = ''
+}
+
+function cancelEditMsg() {
+  editingMsgIdx.value = null
+  editingMsgText.value = ''
+}
+
+function regenerateResponse(userMsgIdx: number) {
+  agentStore.retriggerFrom(userMsgIdx)
 }
 
 function hasArgs(args: any): boolean {
@@ -235,6 +262,7 @@ function handleOutsideClick(e: MouseEvent) {
 
 onMounted(() => {
   agentStore.loadSessions()
+  loadQuickPrompts()
   document.addEventListener('click', handleOutsideClick)
 })
 
@@ -520,7 +548,24 @@ const sortedKbTypes = computed(() => {
           <div v-for="(msg, i) in agentStore.messages" :key="i"
                class="chat-message" :class="'msg-' + msg.role">
             <div class="msg-avatar">{{ msg.role === 'user' ? 'U' : 'AI' }}</div>
-            <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
+            <div class="msg-body">
+              <div v-if="editingMsgIdx === i" class="msg-edit-row">
+                <textarea class="textarea textarea-sm w-100" v-model="editingMsgText" rows="2" @keydown.enter.ctrl="saveEditMsg()" @keydown.escape="cancelEditMsg()"></textarea>
+                <div class="msg-edit-actions">
+                  <button class="btn btn-xs btn-primary" @click="saveEditMsg()">保存并重新生成</button>
+                  <button class="btn btn-xs" @click="cancelEditMsg()">取消</button>
+                </div>
+              </div>
+              <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
+              <div v-if="msg.role === 'user'" class="msg-actions">
+                <button class="msg-action-btn" @click="startEditMsg(i)" title="编辑">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button class="msg-action-btn" @click="regenerateResponse(i)" title="重新生成回复" v-if="i < agentStore.messages.length - 1 && agentStore.messages[i + 1]?.role === 'assistant'">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Streaming message: 思考过程 + 最终回答 -->
@@ -573,9 +618,14 @@ const sortedKbTypes = computed(() => {
           </div>
 
           <div v-if="agentStore.messages.length === 0 && !agentStore.streaming" class="quick-prompts-area">
-            <p class="quick-prompts-title">常用问题</p>
-            <div class="quick-prompts-grid">
-              <template v-for="(prompt, idx) in quickPrompts" :key="idx">
+            <div class="quick-prompts-header">
+              <span class="quick-prompts-header-icon"><Icon name="zap" :size="18" /></span>
+              <span class="quick-prompts-header-text">试试这样问我</span>
+              <span class="quick-prompts-header-hint">点击直接提问</span>
+            </div>
+            <div v-if="quickPromptsLoading" class="empty-state" style="padding:var(--space-4);">加载中...</div>
+            <div class="quick-prompts-list" v-else>
+              <template v-for="(prompt, idx) in quickPrompts" :key="prompt.id">
                 <div v-if="editingPromptIdx === idx" class="quick-prompt-card editing">
                   <input class="input input-sm w-100" v-model="editingPromptText" @keydown.enter.prevent="saveEditPrompt()" @keydown.escape="cancelEditPrompt()" />
                   <div class="quick-prompt-actions">
@@ -583,30 +633,30 @@ const sortedKbTypes = computed(() => {
                     <button class="btn btn-xs" @click="cancelEditPrompt()">取消</button>
                   </div>
                 </div>
-                <div v-else class="quick-prompt-card" @click="usePrompt(prompt)" role="button" tabindex="0">
-                  <span class="quick-prompt-text">{{ prompt }}</span>
-                  <button class="quick-prompt-edit" @click.stop="startEditPrompt(idx)" title="编辑">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                  </button>
-                  <button class="quick-prompt-delete" @click.stop="deletePrompt(idx)" title="删除">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                  </button>
+                <div v-else class="quick-prompt-card" @click="usePrompt(prompt.text)" role="button" tabindex="0">
+                  <span class="quick-prompt-icon"><Icon name="messageSquare" :size="15" /></span>
+                  <span class="quick-prompt-text">{{ prompt.text }}</span>
+                  <div class="quick-prompt-hover-actions">
+                    <button class="quick-prompt-edit" @click.stop="startEditPrompt(idx)" title="编辑">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button class="quick-prompt-delete" @click.stop="deletePrompt(idx)" title="删除">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                  </div>
                 </div>
               </template>
-              <div v-if="showAddPrompt" class="quick-prompt-card editing">
+              <button v-if="showAddPrompt" class="quick-prompt-card editing">
                 <input class="input input-sm w-100" v-model="newPromptText" placeholder="输入新的常用问题…" @keydown.enter.prevent="addPrompt()" @keydown.escape="showAddPrompt = false; newPromptText = ''" />
                 <div class="quick-prompt-actions">
                   <button class="btn btn-xs btn-primary" @click="addPrompt()">添加</button>
                   <button class="btn btn-xs" @click="showAddPrompt = false; newPromptText = ''">取消</button>
                 </div>
-              </div>
+              </button>
               <button v-else class="quick-prompt-card add-card" @click="showAddPrompt = true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 <span>添加常用问题</span>
               </button>
-            </div>
-            <div class="quick-prompts-footer">
-              <button class="btn btn-xs" @click="resetPrompts()">恢复默认</button>
             </div>
           </div>
         </div>
@@ -1263,36 +1313,55 @@ const sortedKbTypes = computed(() => {
 
 /* Quick prompts */
 .quick-prompts-area {
-  padding: var(--space-8) var(--space-6);
+  padding: var(--space-6) var(--space-6) var(--space-4);
   text-align: center;
 }
-.quick-prompts-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
+.quick-prompts-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
   margin-bottom: var(--space-4);
 }
-.quick-prompts-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
+.quick-prompts-header-icon {
+  color: var(--accent);
+  display: flex;
+  margin-bottom: var(--space-1);
+}
+.quick-prompts-header-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.quick-prompts-header-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.quick-prompts-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 560px;
+  margin: 0 auto;
 }
 .quick-prompt-card {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  background: var(--bg-elev-1);
+  background: var(--bg-elev-2);
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-md);
+  box-shadow: inset 3px 0 0 var(--accent);
   cursor: pointer;
-  transition: border-color var(--t-fast), background var(--t-fast);
-  min-height: 44px;
+  transition: all var(--t-fast);
+  text-align: left;
 }
 .quick-prompt-card:hover {
-  border-color: var(--border-primary);
-  background: var(--bg-elev-2);
+  border-color: var(--accent);
+  background: var(--bg-elev-3);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 .quick-prompt-card.editing {
   cursor: default;
@@ -1301,37 +1370,60 @@ const sortedKbTypes = computed(() => {
   gap: var(--space-2);
   padding: var(--space-3);
   border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
-.quick-prompt-text {
-  flex: 1;
-  font-size: 13px;
-  color: var(--text-primary);
-  text-align: left;
-  line-height: 1.4;
-}
-.quick-prompt-edit,
-.quick-prompt-delete {
+.quick-prompt-icon {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  margin-top: 1px;
+  color: var(--accent);
+  opacity: 0.7;
+}
+.quick-prompt-card:hover .quick-prompt-icon {
+  opacity: 1;
+}
+.quick-prompt-text {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  white-space: normal;
+  word-break: break-word;
+}
+.quick-prompt-hover-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+  margin-top: 1px;
+}
+.quick-prompt-card:hover .quick-prompt-hover-actions {
+  opacity: 1;
+}
+.quick-prompt-edit,
+.quick-prompt-delete {
+  display: flex;
+  align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--t-fast), color var(--t-fast);
-  margin-left: 2px;
+  transition: color var(--t-fast), background var(--t-fast);
 }
-.quick-prompt-card:hover .quick-prompt-edit,
-.quick-prompt-card:hover .quick-prompt-delete {
-  opacity: 1;
+.quick-prompt-edit:hover {
+  color: var(--accent);
+  background: var(--bg-elev-3);
 }
-.quick-prompt-edit:hover { color: var(--accent); }
-.quick-prompt-delete:hover { color: var(--signal-red, #ff6b6b); }
+.quick-prompt-delete:hover {
+  color: var(--signal-red, #ff6b6b);
+  background: var(--bg-elev-3);
+}
 .quick-prompt-actions {
   display: flex;
   gap: var(--space-2);
@@ -1339,16 +1431,59 @@ const sortedKbTypes = computed(() => {
 }
 .quick-prompt-card.add-card {
   justify-content: center;
-  gap: var(--space-2);
+  align-items: center;
   color: var(--text-tertiary);
-  border-style: dashed;
+  border: 1px dashed var(--border-faint);
+  border-radius: var(--radius-md);
   font-size: 13px;
+  min-height: 44px;
 }
 .quick-prompt-card.add-card:hover {
-  color: var(--text-secondary);
-  border-color: var(--border-primary);
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-elev-2);
+  box-shadow: none;
 }
-.quick-prompts-footer {
+
+/* Message actions */
+.msg-body {
+  flex: 1;
+  min-width: 0;
+}
+.msg-actions {
+  display: flex;
+  gap: 2px;
   margin-top: var(--space-2);
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.chat-message:hover .msg-actions {
+  opacity: 1;
+}
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.msg-action-btn:hover {
+  color: var(--accent);
+  background: var(--bg-elev-2);
+}
+.msg-edit-row {
+  margin-bottom: var(--space-2);
+}
+.msg-edit-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  justify-content: flex-end;
 }
 </style>
