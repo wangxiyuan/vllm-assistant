@@ -811,6 +811,29 @@ a.item-title:hover { color: var(--amber-bright); }
     background: var(--signal-purple-glow);
     color: var(--signal-purple);
 }
+.ref-state {
+    display: inline-flex;
+    align-items: center;
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 1px 4px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.ref-state-open {
+    color: var(--signal-green);
+    background: var(--signal-green-glow);
+}
+.ref-state-closed {
+    color: var(--signal-red);
+    background: var(--signal-red-glow);
+}
+.ref-state-merged {
+    color: var(--signal-purple);
+    background: var(--signal-purple-glow);
+}
 .ref-remove {
     margin-left: 2px;
     cursor: pointer;

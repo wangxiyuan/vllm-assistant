@@ -119,7 +119,7 @@ onMounted(() => {
   todoStore.loadTasks()
 })
 
-const statusFilters = ['all', 'todo', 'in_progress', 'done']
+const statusFilters = ['todo', 'in_progress', 'done', 'all']
 const priorityFilters = ['all', 'P0', 'P1', 'P2', 'P3']
 
 const sources = [
@@ -214,6 +214,7 @@ async function generateInsight(task: any) {
               <span v-for="(ref, idx) in (task.related_refs || []).slice(0, 2)" :key="idx" class="ref-badge ref-badge-sm" :title="ref.title || (ref.repo + '#' + ref.number)">
                 <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
                 <span>{{ ref.repo }}#{{ ref.number }}</span>
+                <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state">{{ ref.state }}</span>
               </span>
               <span v-if="(task.related_refs || []).length > 2" class="kanban-tag">+{{ task.related_refs.length - 2 }}</span>
               <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
@@ -246,6 +247,7 @@ async function generateInsight(task: any) {
               <span v-for="(ref, idx) in (task.related_refs || []).slice(0, 3)" :key="idx" class="ref-badge" :title="ref.title || (ref.repo + '#' + ref.number)">
                 <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
                 <span>{{ ref.repo }}#{{ ref.number }}</span>
+                <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state">{{ ref.state }}</span>
               </span>
               <span v-if="(task.related_refs || []).length > 3" class="kanban-tag">+{{ task.related_refs.length - 3 }}</span>
               <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
@@ -427,6 +429,7 @@ async function generateInsight(task: any) {
                   <span v-for="(ref, idx) in todoStore.selectedTask.related_refs" :key="idx" class="ref-badge clickable" @click.stop="openUrl(ref.url)" :title="ref.title || (ref.repo + '#' + ref.number)">
                     <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
                     <span>{{ ref.repo }}#{{ ref.number }}</span>
+                    <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state">{{ ref.state }}</span>
                   </span>
                 </div>
               </div>
@@ -510,15 +513,11 @@ async function generateInsight(task: any) {
               </div>
 
               <!-- Save / Cancel -->
-              <div class="detail-action-bar" style="border-top:1px solid var(--border-faint);padding-top:var(--space-3);margin-bottom:var(--space-4);">
-                <div class="action-bar-secondary">
-                  <button class="btn" @click="todoStore.cancelEditTask()">取消</button>
-                </div>
-                <div class="action-bar-primary">
-                  <button class="btn btn-primary" @click="todoStore.saveTask()" :disabled="!todoStore.editTaskForm.title?.trim()">
-                    {{ todoStore.taskSaving ? '保存中…' : '保存修改' }}
-                  </button>
-                </div>
+              <div class="edit-task-actions">
+                <button class="btn" @click="todoStore.cancelEditTask()">取消</button>
+                <button class="btn btn-primary" @click="todoStore.saveTask()" :disabled="!todoStore.editTaskForm.title?.trim()">
+                  {{ todoStore.taskSaving ? '保存中…' : '保存' }}
+                </button>
               </div>
             </template>
 
@@ -572,14 +571,8 @@ async function generateInsight(task: any) {
                           <option value="done">已完成</option>
                           <option value="cancelled">已取消</option>
                         </select>
-                        <button class="card-action-btn" @click.stop="todoStore.saveSubtask()" title="保存">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                        </button>
-                        <button class="card-action-btn" @click.stop="todoStore.cancelEditSubtask()" title="取消">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                        </button>
                       </div>
-                      <div v-if="todoStore.editingSubtaskId === st.id" style="margin-top:var(--space-1);">
+                      <div v-if="todoStore.editingSubtaskId === st.id">
                         <div class="ref-input-row">
                           <input class="input input-sm" type="text" v-model="editSubtaskRefInput"
                                  placeholder="关联 PR/Issue，如 vllm#123" @keyup.enter="addEditSubtaskRef()" />
@@ -594,6 +587,10 @@ async function generateInsight(task: any) {
                             <span class="ref-remove" @click="todoStore.editSubtaskForm.related_refs.splice(idx, 1)" style="cursor:pointer;margin-left:3px;opacity:0.6;">&times;</span>
                           </span>
                         </div>
+                      </div>
+                      <div class="subtask-edit-actions">
+                        <button class="btn btn-sm btn-ghost" @click="todoStore.cancelEditSubtask()">取消</button>
+                        <button class="btn btn-sm btn-primary" @click="todoStore.saveSubtask()">保存</button>
                       </div>
                     </div>
                   </template>
@@ -625,6 +622,7 @@ async function generateInsight(task: any) {
                           <span v-for="(ref, idx) in st.related_refs.slice(0, 3)" :key="idx" class="ref-badge clickable" @click.stop="openUrl(ref.url)" :title="ref.title || (ref.repo + '#' + ref.number)" style="font-size:10px;padding:1px 4px;">
                             <span class="ref-type" :class="'ref-type-' + ref.type" style="font-size:9px;">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
                             <span>{{ ref.repo }}#{{ ref.number }}</span>
+                            <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state" style="font-size:8px;padding:0 3px;">{{ ref.state }}</span>
                           </span>
                           <span v-if="st.related_refs.length > 3" class="badge badge-subtask" style="font-size:10px;">+{{ st.related_refs.length - 3 }}</span>
                         </span>
@@ -659,6 +657,7 @@ async function generateInsight(task: any) {
                           <span v-for="(ref, idx) in st.related_refs.slice(0, 3)" :key="idx" class="ref-badge clickable" @click.stop="openUrl(ref.url)" :title="ref.title || (ref.repo + '#' + ref.number)" style="font-size:10px;padding:1px 4px;">
                             <span class="ref-type" :class="'ref-type-' + ref.type" style="font-size:9px;">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
                             <span>{{ ref.repo }}#{{ ref.number }}</span>
+                            <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state" style="font-size:8px;padding:0 3px;">{{ ref.state }}</span>
                           </span>
                           <span v-if="st.related_refs.length > 3" class="badge badge-subtask" style="font-size:10px;">+{{ st.related_refs.length - 3 }}</span>
                         </span>
@@ -718,3 +717,22 @@ async function generateInsight(task: any) {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.subtask-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-faint);
+  margin-top: var(--space-1);
+}
+.edit-task-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-faint);
+  margin-bottom: var(--space-4);
+}
+</style>

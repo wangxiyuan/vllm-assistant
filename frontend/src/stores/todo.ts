@@ -8,7 +8,7 @@ export const useTodoStore = defineStore('todo', () => {
   const tasks = ref<TodoTask[]>([])
   const todoStats = ref({ by_status: { todo: 0, in_progress: 0, done: 0 }, by_priority: { P0: 0, P1: 0, P2: 0, P3: 0 } })
   const loading = ref(false)
-  const filterStatus = ref('all')
+  const filterStatus = ref('todo')
   const filterPriority = ref('all')
   const sortBy = ref('created')
   const sortOrder = ref('desc')

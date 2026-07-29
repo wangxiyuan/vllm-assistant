@@ -28,6 +28,7 @@ class ItemResponse(BaseModel):
 class MyPRResponse(BaseModel):
     """用户PR响应"""
     pr_number: int
+    author: Optional[str] = None
     title: str
     state: str
     branch: Optional[str] = None

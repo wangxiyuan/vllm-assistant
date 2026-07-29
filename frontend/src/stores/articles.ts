@@ -136,7 +136,7 @@ export const useArticlesStore = defineStore('articles', () => {
     }
     editorTagInput.value = ''
     articleViewOpen.value = false
-    selectedArticle.value = null
+    // 保留 selectedArticle，关闭编辑器后可以恢复详情视图
     editorOpen.value = true
     editorSubView.value = 'editor'
     previewHtml.value = ''
@@ -148,6 +148,10 @@ export const useArticlesStore = defineStore('articles', () => {
     editorOpen.value = false
     editorSubView.value = 'editor'
     formSnapshot.value = null
+    // 编辑模式关闭后，恢复文章详情视图
+    if (editorMode.value === 'edit' && selectedArticle.value) {
+      articleViewOpen.value = true
+    }
   }
 
   function addEditorTag() {
@@ -243,9 +247,15 @@ export const useArticlesStore = defineStore('articles', () => {
 
   function closePreview() {
     editorSubView.value = 'editor'
-    previewHtml.value = ''
-    previewRefs.value = []
-    articleToc.value = []
+  }
+
+  async function switchPreviewTab() {
+    if (editorSubView.value === 'preview') return
+    if (!previewHtml.value) {
+      await previewArticle()
+    } else {
+      editorSubView.value = 'preview'
+    }
   }
 
   async function viewArticle(article: Article) {
@@ -379,7 +389,7 @@ export const useArticlesStore = defineStore('articles', () => {
     articleStatsText, formDirty, repoOptions,
     loadArticles, openNewArticle, openEditArticle, closeEditor,
     addEditorTag, removeEditorTag, saveArticle, deleteArticle,
-    previewArticle, closePreview,
+    previewArticle, closePreview, switchPreviewTab,
     viewArticle, closeArticleView, scrollToHeading,
     validateArticle, closeValidation,
     openInsertRef, closeInsertRef, loadCachedFiles, searchCacheFiles, confirmInsertRef,

@@ -201,28 +201,24 @@ from app.api.community import router as community_router
 from app.api.pr_center import router as pr_center_router
 from app.api.ai_assistant import router as ai_assistant_router
 from app.api.watchlist import router as watchlist_router
-from app.api.my_stats import router as my_stats_router
 from app.api.personal_todo import router as personal_todo_router
 from app.api.intelligence import router as intelligence_router
 from app.api.articles import router as articles_router
 from app.api.sync import router as sync_router
 from app.api.model_anatomy import router as model_anatomy_router
 from app.api.users import router as users_router
-from app.api.contributions import router as contributions_router
 from app.api.ai_agent import router as ai_agent_router
 
 app.include_router(community_router, prefix="/api/community", tags=["Community Pulse"])
 app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command Center"])
 app.include_router(ai_assistant_router, prefix="/api/ai-assistant", tags=["AI Assistant"])
 app.include_router(watchlist_router, prefix="/api/watchlist", tags=["Watchlist"])
-app.include_router(my_stats_router, prefix="/api/my-stats", tags=["My Stats"])
 app.include_router(personal_todo_router, prefix="/api/personal-todo", tags=["Personal Todo"])
 app.include_router(intelligence_router, prefix="/api/intelligence", tags=["Intelligence Reports"])
 app.include_router(articles_router, prefix="/api/articles", tags=["Articles"])
 app.include_router(sync_router, prefix="/api/sync", tags=["Sync"])
 app.include_router(model_anatomy_router, prefix="/api/anatomy", tags=["Model Anatomy"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
-app.include_router(contributions_router, prefix="/api/contributions", tags=["Contributions"])
 app.include_router(ai_agent_router, prefix="/api/ai-agent", tags=["AI Agent"])
 
 

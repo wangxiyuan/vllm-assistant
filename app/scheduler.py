@@ -17,7 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import Config
 from app.database import SessionLocal
-from app.models import Item, MyPR, Area, UserIssue, User
+from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask
 from app.services.github_client import GitHubClient, DEFAULT_PER_PAGE
 from app.services.area_mapper import AreaMapper
 
@@ -664,6 +664,57 @@ def _upsert_user_pr(db, detail: dict, github_client: GitHubClient,
         ))
 
 
+def _refresh_personal_task_refs():
+    """刷新所有 personal_tasks（含子任务）中 related_refs 的 state 字段
+
+    历史数据中 related_refs 可能缺少 state 字段（open/closed/merged），
+    此定时任务逐个查询 GitHub API 补全。
+    """
+    import requests
+    from app.config import Config as AppConfig
+
+    headers = AppConfig.get_github_headers()
+    db = SessionLocal()
+    try:
+        tasks = db.query(PersonalTask).filter(
+            PersonalTask.related_refs.isnot(None),
+        ).all()
+        updated = 0
+        for task in tasks:
+            refs = task.related_refs or []
+            changed = False
+            for ref in refs:
+                if ref.get("state") or not ref.get("number"):
+                    continue
+                number = ref["number"]
+                repo_path = f"vllm-project/{ref.get('repo', 'vllm')}"
+                if ref.get("type") == "pr":
+                    url = f"https://api.github.com/repos/{repo_path}/pulls/{number}"
+                else:
+                    url = f"https://api.github.com/repos/{repo_path}/issues/{number}"
+                try:
+                    resp = requests.get(url, headers=headers, timeout=10)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        state = data.get("state", "unknown")
+                        if ref["type"] == "pr" and state == "closed" and data.get("merged", False):
+                            state = "merged"
+                        ref["state"] = state
+                        changed = True
+                except Exception:
+                    continue
+            if changed:
+                task.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                updated += 1
+        db.commit()
+        if updated:
+            logger.info(f"Refreshed state for {updated} personal tasks' refs (including subtasks)")
+    except Exception:
+        logger.exception("Failed to refresh personal task refs")
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """启动定时调度器
 
@@ -734,6 +785,15 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # 个人任务关联引用状态刷新（每 6 小时一次）
+    scheduler.add_job(
+        _refresh_personal_task_refs,
+        trigger=IntervalTrigger(hours=6),
+        id="refresh_personal_task_refs",
+        name="Refresh Personal Task Ref States",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(f"Scheduler started with interval {Config.POLLING_INTERVAL} minutes")
 
@@ -747,6 +807,7 @@ def start_scheduler():
             sync_user_prs()
             if Config.REPOS:
                 sync_all_repos_job()
+            _refresh_personal_task_refs()
         except Exception:
             logger.exception("Initial sync failed (will retry on schedule)")
     threading.Thread(target=_initial_sync, daemon=True, name="initial-sync").start()

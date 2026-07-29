@@ -130,6 +130,7 @@ class MyPR(Base):
         return {
             "pr_number": self.pr_number,
             "github_id": self.github_id,
+            "author": self.github_id or "",
             "title": self.title,
             "state": self.state,
             "branch": self.branch,

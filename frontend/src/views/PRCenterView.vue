@@ -44,25 +44,7 @@ function onContributorChange() {
       </div>
     </div>
 
-    <!-- Stats overview -->
-    <div v-if="prStore.myStats" class="stats-row">
-      <div class="stat-card">
-        <div class="stat-value">{{ (prStore.myStats.summary?.open_prs || 0) + (prStore.myStats.summary?.merged_prs || 0) }}</div>
-        <div class="stat-label">PRs</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ prStore.myStats.summary?.open_issues || 0 }}</div>
-        <div class="stat-label">Issues</div>
-      </div>
-      <div v-if="prStore.myStats.monthly?.created" class="stat-card stat-chart">
-        <div class="monthly-bars">
-          <div v-for="(count, month) in prStore.myStats.monthly.created" :key="month" class="month-bar-wrap">
-            <div class="month-bar" :style="{ height: Math.round(count / Math.max(...Object.values(prStore.myStats.monthly.created), 1) * 100) + '%' }"></div>
-            <div class="month-label">{{ prStore.formatMonthLabel(month) }}</div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- Stats overview -- removed PR/Issue/BarChart cards -->
 
     <!-- Tabs -->
     <div class="tab-bar" style="margin-bottom:var(--space-5)">
@@ -99,7 +81,10 @@ function onContributorChange() {
           </div>
           <h4 class="pr-title">{{ pr.title }}</h4>
           <div class="pr-meta">
-            <span>{{ pr.author }}</span>
+            <span class="meta-item">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+              {{ pr.author }}
+            </span>
             <span>{{ pr.branch }}</span>
             <span>{{ timeAgo(pr.created_at) }}</span>
           </div>
@@ -138,7 +123,10 @@ function onContributorChange() {
           </div>
           <h4 class="pr-title">{{ issue.title }}</h4>
           <div class="pr-meta">
-            <span>{{ issue.author }}</span>
+            <span class="meta-item">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+              {{ issue.author }}
+            </span>
             <span>{{ timeAgo(issue.created_at) }}</span>
           </div>
         </div>

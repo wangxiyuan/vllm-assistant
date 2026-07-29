@@ -449,6 +449,11 @@
     color: var(--text-tertiary);
     flex-wrap: wrap;
 }
+.pr-meta .meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
 .pr-number {
     font-family: var(--font-mono);
     font-size: var(--text-base);
@@ -464,47 +469,6 @@
     background: var(--signal-yellow-glow);
     color: var(--signal-yellow);
     border-color: rgba(242, 204, 96, 0.35);
-}
-.stats-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: var(--space-4);
-    margin-bottom: var(--space-5);
-}
-.stat-chart {
-    grid-column: span 2;
-}
-.monthly-bars {
-    display: flex;
-    align-items: flex-end;
-    gap: 4px;
-    height: 80px;
-    padding-top: 8px;
-}
-.month-bar-wrap {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 2px;
-    min-width: 0;
-    height: 100%;
-}
-.month-bar {
-    width: 100%;
-    max-width: 28px;
-    min-height: 2px;
-    background: var(--amber);
-    border-radius: 2px 2px 0 0;
-    transition: height 0.3s;
-    flex-shrink: 0;
-}
-.month-label {
-    font-family: var(--font-mono);
-    font-size: 8px;
-    color: var(--text-tertiary);
-    white-space: nowrap;
 }
 .checkbox-group {
     display: flex;

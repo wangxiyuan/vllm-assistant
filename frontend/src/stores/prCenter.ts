@@ -4,14 +4,12 @@ import { api } from '@/api/client'
 import { useAppStore } from './app'
 import { useWatchlistStore } from './watchlist'
 import { issueType } from '@/utils/helpers'
-import type { PR, Issue, PRDetails, Stats } from '@/utils/types'
+import type { PR, Issue, PRDetails } from '@/utils/types'
 
 export const usePRCenterStore = defineStore('prCenter', () => {
   // PR list
   const myPrs = ref<PR[]>([])
   const myIssues = ref<Issue[]>([])
-  const myStats = ref<Stats | null>(null)
-  const statsLoading = ref(false)
   const contributionTab = ref<'prs' | 'issues'>('prs')
   const prState = ref('open')
   const myIssuesState = ref('open')
@@ -158,35 +156,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     }
   }
 
-  async function loadMyStats() {
-    statsLoading.value = true
-    try {
-      const githubId = selectedContributor.value?.github_id
-      const url = githubId
-        ? `/api/my-stats?github_id=${encodeURIComponent(githubId)}`
-        : '/api/my-stats'
-      myStats.value = await api(url)
-    } catch (e: any) {
-      useAppStore().showToast('加载数据失败', e.message, 'error')
-    } finally {
-      statsLoading.value = false
-    }
-  }
-
-  function switchContributor(githubId: string) {
-    if (githubId) {
-      selectedContributor.value = useAppStore().areas.reduce((acc: any, _a) => acc, null) // Will be fixed
-      // Actually use users store
-      selectedContributorGithubId.value = githubId || ''
-    } else {
-      selectedContributor.value = null
-      selectedContributorGithubId.value = ''
-    }
-    loadAllContribData()
-  }
-
   function loadAllContribData() {
-    loadMyStats()
     loadMyPRs()
     loadMyIssues()
   }
@@ -492,25 +462,8 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   const prDetailTab = ref<'details' | 'summary' | 'review'>('details')
   const issueDetailTab = ref<'details' | 'summary'>('details')
 
-  // Chart helpers
-  function monthBarHeight(count: number, allMonthly: Record<string, number>) {
-    const max = Math.max(...Object.values(allMonthly), 1)
-    return Math.round((count / max) * 100)
-  }
-
-  function formatMonthLabel(month: string) {
-    if (!month) return ''
-    const [year, mon] = month.split('-')
-    const all = Object.keys(myStats.value?.monthly?.created || {})
-    const sameYearMonths = all.filter(m => m.startsWith(year + '-'))
-    if (sameYearMonths[0] === month) {
-      return year.slice(2) + '/' + mon
-    }
-    return mon
-  }
-
   return {
-    myPrs, myIssues, myStats, statsLoading, contributionTab, prState,
+    myPrs, myIssues, contributionTab, prState,
     myIssuesState, myIssuesType, filterConflicts, filterCIFail,
     selectedContributor, selectedContributorGithubId,
     selectedPR, prDetails, prLoadError, loadingDetails,
@@ -526,10 +479,9 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     openPRCount, mergedPRCount, closedPRCount, allPRCount,
     openIssueCount, closedIssueCount, allIssueCount,
     switchPRState, switchContributionTab, switchMyIssuesState, switchMyIssuesType,
-    loadMyPRs, loadMyIssues, loadMyStats, switchContributor, loadAllContribData,
+    loadMyPRs, loadMyIssues, loadAllContribData,
     openPR, closePR, openIssue, closeIssue,
     loadPRDiff, toggleFileDiff,
     generateSummary, generateReview, translateBody,
-    monthBarHeight, formatMonthLabel,
   }
 })

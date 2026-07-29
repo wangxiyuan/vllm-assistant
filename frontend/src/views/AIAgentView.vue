@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, nextTick, watchEffect, computed } from 'vue'
+import { onMounted, onBeforeUnmount, ref, nextTick, watch, computed } from 'vue'
 import { useAIAgentStore, KNOWLEDGE_TYPE_LABELS, KNOWLEDGE_TYPE_ORDER } from '@/stores/aiAgent'
 import { useAppStore } from '@/stores/app'
 import { renderMarkdown } from '@/composables/useMarkdown'
@@ -168,8 +168,9 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleOutsideClick)
 })
 
-watchEffect(() => {
-  if (agentStore.streamingContent || agentStore.messages.length) {
+// 流式输出时自动滚动到底部
+watch(() => agentStore.streamingContent, () => {
+  if (agentStore.streamingContent) {
     nextTick(() => {
       if (chatContainer.value) {
         chatContainer.value.scrollTop = chatContainer.value.scrollHeight
@@ -183,6 +184,11 @@ async function send() {
   if (!text) return
   inputText.value = ''
   await agentStore.sendMessage(text)
+  nextTick(() => {
+    if (chatContainer.value) {
+      chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+    }
+  })
 }
 
 // Knowledge base

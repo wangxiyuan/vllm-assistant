@@ -174,17 +174,6 @@ export interface Model {
   updated_at?: string
 }
 
-export interface Stats {
-  totalPRs: number
-  totalIssues: number
-  monthly?: {
-    created: Record<string, number>
-    merged: Record<string, number>
-  }
-  by_repo?: Record<string, any>
-  [key: string]: any
-}
-
 export interface PRDetails {
   pr: {
     body: string

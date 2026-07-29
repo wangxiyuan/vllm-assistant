@@ -122,21 +122,25 @@ watch(
         </div>
         <div class="editor-actions">
           <button class="btn btn-sm" @click="articlesStore.closeEditor()">取消</button>
-          <button v-if="articlesStore.editorSubView === 'editor'" class="btn btn-sm" @click="articlesStore.previewArticle()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            预览 <span class="text-tertiary">(Ctrl+P)</span>
-          </button>
-          <button v-else class="btn btn-sm" @click="articlesStore.closePreview()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-            返回编辑
-          </button>
           <button class="btn btn-primary btn-sm" @click="articlesStore.saveArticle()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             保存 <span style="opacity:0.7">(Ctrl+S)</span>
           </button>
         </div>
       </div>
-      <div v-if="articlesStore.editorSubView === 'editor'" class="editor-body">
+      <div class="editor-tab-bar tab-bar" style="margin-bottom:var(--space-4)">
+        <button class="tab" :class="{ active: articlesStore.editorSubView === 'editor' }"
+                @click="articlesStore.editorSubView = 'editor'">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          编辑
+        </button>
+        <button class="tab" :class="{ active: articlesStore.editorSubView === 'preview' }"
+                @click="articlesStore.switchPreviewTab()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          预览 <span class="text-tertiary">(Ctrl+P)</span>
+        </button>
+      </div>
+      <div v-show="articlesStore.editorSubView === 'editor'" class="editor-body">
         <div class="form-group">
           <input type="text" class="input input-lg" v-model="articlesStore.form.title" placeholder="文章标题" />
         </div>
@@ -172,12 +176,15 @@ watch(
           <textarea class="textarea editor-textarea" v-model="articlesStore.form.content"
                     placeholder="支持 Markdown 格式…&#10;使用 `vllm/engine/core.py:10-20` 格式引用代码片段&#10;使用 `vllm-ascend/ascend/backend.py:30` 引用其他仓库" @keydown="(e: any) => {
                       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); articlesStore.saveArticle() }
-                      if ((e.ctrlKey || e.metaKey) && e.key === 'p') { e.preventDefault(); articlesStore.previewArticle() }
+                      if ((e.ctrlKey || e.metaKey) && e.key === 'p') { e.preventDefault(); articlesStore.switchPreviewTab() }
                     }"></textarea>
         </div>
       </div>
-      <div v-if="articlesStore.editorSubView === 'preview'" class="editor-preview">
-        <div class="preview-content" v-html="articlesStore.previewHtml"></div>
+      <div v-show="articlesStore.editorSubView === 'preview'" class="editor-preview">
+        <div v-if="!articlesStore.previewHtml" class="empty-state is-compact" style="padding:var(--space-10) 0;">
+          <p>点击「预览」生成预览内容</p>
+        </div>
+        <div v-else class="preview-content" v-html="articlesStore.previewHtml"></div>
       </div>
     </template>
 

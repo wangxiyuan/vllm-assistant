@@ -423,7 +423,7 @@ def resolve_ref(req: ResolveRefRequest, db: Session = Depends(get_db)):
     输入格式：
     - "vllm#123" — 指定仓库 + 编号
     - "123" — 纯编号，用默认仓库 (vllm-project/vllm)
-    返回：{repo, number, type, url, title} 或 404 错误。
+    返回：{repo, number, type, state, url, title} 或 404 错误。
     """
     from app.services.github_client import GitHubClient
 
@@ -456,10 +456,14 @@ def resolve_ref(req: ResolveRefRequest, db: Session = Depends(get_db)):
         resp = requests.get(f"{base_api_url}/pulls/{number}", headers=headers, timeout=10)
         if resp.status_code == 200:
             pr_data = resp.json()
+            pr_state = pr_data.get("state", "unknown")
+            if pr_state == "closed" and pr_data.get("merged", False):
+                pr_state = "merged"
             return {
                 "repo": repo,
                 "number": number,
                 "type": "pr",
+                "state": pr_state,
                 "url": f"https://github.com/{repo_path}/pull/{number}",
                 "title": pr_data.get("title", ""),
             }
@@ -475,6 +479,7 @@ def resolve_ref(req: ResolveRefRequest, db: Session = Depends(get_db)):
                 "repo": repo,
                 "number": number,
                 "type": "issue",
+                "state": issue_data.get("state", "unknown"),
                 "url": f"https://github.com/{repo_path}/issues/{number}",
                 "title": issue_data.get("title", ""),
             }
