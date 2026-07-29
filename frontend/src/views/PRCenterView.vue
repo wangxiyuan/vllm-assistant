@@ -8,6 +8,7 @@ import { useWatchlistStore } from '@/stores/watchlist'
 import { useRouter } from 'vue-router'
 import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
 import { ciLabel, ciBadgeClass, prStateLabel, issueStateLabel, issueType, issueTypeLabel } from '@/utils/helpers'
+import Icon from '@/components/common/Icon.vue'
 
 const prStore = usePRCenterStore()
 const usersStore = useUsersStore()
@@ -170,13 +171,13 @@ function onContributorChange() {
                     @click="prStore.prDetailTab = 'summary'">
               AI 总结
               <span v-if="prStore.aiSummaryLoading" class="badge badge-loading">…</span>
-              <span v-else-if="prStore.aiSummary" class="badge badge-done">✓</span>
+              <span v-else-if="prStore.aiSummary" class="badge badge-done"><Icon name="check" :size="10" /></span>
             </button>
             <button class="tab" :class="{ active: prStore.prDetailTab === 'review' }"
                     @click="prStore.prDetailTab = 'review'">
               AI Review
               <span v-if="prStore.aiReviewLoading" class="badge badge-loading">…</span>
-              <span v-else-if="prStore.aiReview" class="badge badge-done">✓</span>
+              <span v-else-if="prStore.aiReview" class="badge badge-done"><Icon name="check" :size="10" /></span>
             </button>
           </div>
           <div class="drawer-body">
@@ -291,7 +292,7 @@ function onContributorChange() {
                     @click="prStore.issueDetailTab = 'summary'">
               AI 总结
               <span v-if="prStore.aiSummaryLoading" class="badge badge-loading">…</span>
-              <span v-else-if="prStore.aiSummary" class="badge badge-done">✓</span>
+              <span v-else-if="prStore.aiSummary" class="badge badge-done"><Icon name="check" :size="10" /></span>
             </button>
           </div>
           <div class="drawer-body">

@@ -1,7 +1,8 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/api/client'
 import { useAppStore } from './app'
+import { categoryColor } from '@/utils/helpers'
 import type { Operator, Model } from '@/utils/types'
 
 export const useAnatomyStore = defineStore('anatomy', () => {
@@ -32,8 +33,9 @@ export const useAnatomyStore = defineStore('anatomy', () => {
   const categoryManagerLoading = ref(false)
   const categoryList = ref<any[]>([])
   const editingCategory = ref<any>(null)
-  const categoryForm = ref({ name: '', display_name: '', description: '', sort_order: 0 })
+  const categoryForm = ref({ name: '', display_name: '', description: '' })
   const categoryFormMode = ref<'create' | 'edit'>('create')
+  const showCategoryForm = ref(false)
 
   // Models
   const models = ref<Model[]>([])
@@ -62,10 +64,31 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     { value: 'other', label: 'Other' },
   ]
 
-  const _categoryColors = [
-    'var(--signal-blue)', 'var(--signal-green)', 'var(--signal-purple)',
-    'var(--signal-cyan)', 'var(--amber)', 'var(--signal-red)', 'var(--signal-yellow)', 'var(--text-tertiary)',
-  ]
+  const collapsedCategories = ref<Set<string>>(new Set(
+    JSON.parse(localStorage.getItem('anatomy-op-collapsed-cats') || '[]')
+  ))
+
+  function toggleCategoryCollapse(name: string) {
+    const next = new Set(collapsedCategories.value)
+    if (next.has(name)) {
+      next.delete(name)
+    } else {
+      next.add(name)
+    }
+    collapsedCategories.value = next
+    localStorage.setItem('anatomy-op-collapsed-cats', JSON.stringify([...next]))
+  }
+
+  const modelListCollapsed = ref(localStorage.getItem('anatomy-model-list-collapsed') === '1')
+  function toggleModelListCollapse() {
+    modelListCollapsed.value = !modelListCollapsed.value
+    localStorage.setItem('anatomy-model-list-collapsed', modelListCollapsed.value ? '1' : '0')
+  }
+
+  // Auto-reload when filter or search changes
+  watch([operatorFilterCategory, operatorSearch], () => {
+    loadOperators()
+  })
 
   // Operator actions
   async function loadOperators() {
@@ -225,17 +248,15 @@ export const useAnatomyStore = defineStore('anatomy', () => {
   async function loadCategories() {
     try {
       const data: any = await api('/api/anatomy/operators/categories')
-      const colors = _categoryColors
-      operatorCategoryOptions.value = (data.categories || []).map((c: any, i: number) => ({
-        value: c.name, label: c.display_name, color: colors[i % colors.length],
+      operatorCategoryOptions.value = (data.categories || []).map((c: any) => ({
+        value: c.name, label: c.display_name, color: categoryColor(c.name),
       }))
     } catch (_) {}
   }
 
   function openCategoryManager() {
     showCategoryManager.value = true
-    categoryForm.value = { name: '', display_name: '', description: '', sort_order: 0 }
-    categoryFormMode.value = 'create'
+    showCategoryForm.value = false
     loadCategoryList()
   }
 
@@ -253,8 +274,23 @@ export const useAnatomyStore = defineStore('anatomy', () => {
 
   function openEditCategory(cat: any) {
     categoryFormMode.value = 'edit'
-    categoryForm.value = { name: cat.name, display_name: cat.display_name, description: cat.description || '', sort_order: cat.sort_order || 0 }
+    categoryForm.value = { name: cat.name, display_name: cat.display_name, description: cat.description || '' }
     editingCategory.value = cat
+    showCategoryForm.value = true
+  }
+
+  function openNewCategory() {
+    categoryForm.value = { name: '', display_name: '', description: '' }
+    categoryFormMode.value = 'create'
+    editingCategory.value = null
+    showCategoryForm.value = true
+  }
+
+  function cancelEditCategory() {
+    categoryForm.value = { name: '', display_name: '', description: '' }
+    categoryFormMode.value = 'create'
+    editingCategory.value = null
+    showCategoryForm.value = false
   }
 
   async function saveCategory() {
@@ -269,9 +305,10 @@ export const useAnatomyStore = defineStore('anatomy', () => {
       }
       await loadCategoryList()
       await loadCategories()
-      categoryForm.value = { name: '', display_name: '', description: '', sort_order: 0 }
+      categoryForm.value = { name: '', display_name: '', description: '' }
       categoryFormMode.value = 'create'
       editingCategory.value = null
+      showCategoryForm.value = false
     } catch (e: any) {
       useAppStore().showToast('保存分类失败', e.message, 'error')
     }
@@ -287,6 +324,25 @@ export const useAnatomyStore = defineStore('anatomy', () => {
       await loadCategories()
     } catch (e: any) {
       useAppStore().showToast('调整排序失败', e.message, 'error')
+    }
+  }
+
+  async function reorderCategories(fromIdx: number, toIdx: number) {
+    const list = [...categoryList.value]
+    const [moved] = list.splice(fromIdx, 1)
+    list.splice(toIdx, 0, moved)
+    categoryList.value = list
+    const updates = list.map((c, i) => ({ id: c.id, sort_order: i + 1 }))
+    try {
+      for (const u of updates) {
+        await api(`/api/anatomy/operators/categories/${u.id}`, {
+          method: 'PUT', body: JSON.stringify({ sort_order: u.sort_order }),
+        })
+      }
+      await loadCategories()
+    } catch (e: any) {
+      useAppStore().showToast('排序失败', e.message, 'error')
+      await loadCategoryList()
     }
   }
 
@@ -576,11 +632,14 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     selectedModel, showModelDetail, modelDetailLoading,
     showModelEditor, modelEditorMode, modelForm, editingArchitecture,
     modelTagInput, modelFormSnapshot, modelCategoryOptions,
+    collapsedCategories, toggleCategoryCollapse,
+    modelListCollapsed, toggleModelListCollapse,
     loadOperators, operatorById, viewOperatorDetail, closeOperatorDetail,
     editFromDetail, openNewOperator, openEditOperator, closeOperatorEditor,
     addOperatorTag, removeOperatorTag, validateParamsSchema, saveOperator, deleteOperator,
-    loadCategories, openCategoryManager, loadCategoryList, openEditCategory,
-    saveCategory, moveCategory, deleteCategory,
+    loadCategories, openCategoryManager, loadCategoryList, openEditCategory, cancelEditCategory, openNewCategory,
+    showCategoryForm,
+    saveCategory, moveCategory, reorderCategories, deleteCategory,
     loadModels, viewModel, closeModelDetail,
     openNewModel, openEditModel, closeModelEditor,
     addModelTag, removeModelTag,

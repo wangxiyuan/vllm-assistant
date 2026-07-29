@@ -4,6 +4,7 @@ import { useAIAgentStore, KNOWLEDGE_TYPE_LABELS, KNOWLEDGE_TYPE_ORDER } from '@/
 import { useAppStore } from '@/stores/app'
 import { renderMarkdown } from '@/composables/useMarkdown'
 import { api } from '@/api/client'
+import Icon from '@/components/common/Icon.vue'
 
 const agentStore = useAIAgentStore()
 const appStore = useAppStore()
@@ -455,22 +456,22 @@ const sortedKbTypes = computed(() => {
             <div class="msg-content">
               <details v-if="agentStore.streamingSteps.length" class="agent-process" open>
                 <summary class="agent-process-summary">
-                  <span class="agent-process-icon">⚙</span>
+                  <span class="agent-process-icon"><Icon name="gear" :size="12" /></span>
                   <span>处理过程 ({{ stepCountSummary }})</span>
                 </summary>
                 <div class="agent-process-body">
                   <div v-for="(step, i) in visibleSteps" :key="i" class="agent-step" :class="'step-' + step.type">
                     <div v-if="step.type === 'thinking'" class="step-thinking">
-                      <span class="step-icon">💭</span>
+                      <span class="step-icon"><Icon name="brain" :size="12" /></span>
                       <span class="step-text" v-html="renderMarkdown(step.thinking)"></span>
                     </div>
                     <div v-else-if="step.type === 'tool_call'" class="step-tool-call">
-                      <span class="step-icon">🔧</span>
+                      <span class="step-icon"><Icon name="wrench" :size="12" /></span>
                       <span class="step-text">
                         调用工具 <code>{{ step.tool.name }}</code>
                         <span v-if="step.tool.args && hasArgs(step.tool.args)" class="step-tool-args">({{ formatArgs(step.tool.args) }})</span>
-                        <span v-if="step.tool.result !== undefined" class="step-tool-done"> ✓</span>
-                        <span v-else-if="agentStore.streaming" class="step-tool-pending"> ⏳</span>
+                        <span v-if="step.tool.result !== undefined" class="step-tool-done"><Icon name="check" :size="11" /></span>
+                        <span v-else-if="agentStore.streaming" class="step-tool-pending"><Icon name="hourglass" :size="11" /></span>
                       </span>
                     </div>
                   </div>
@@ -513,7 +514,7 @@ const sortedKbTypes = computed(() => {
             发送
           </button>
           <button v-else class="btn btn-stop" @click="agentStore.stopGenerating()" title="停止生成">
-            <span class="stop-icon">■</span>
+            <Icon name="stop" :size="11" />
             停止
           </button>
         </div>

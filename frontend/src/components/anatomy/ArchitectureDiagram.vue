@@ -67,6 +67,47 @@ const hoveredNode = ref<LayoutNode | null>(null)
 const tooltipPos = ref({ x: 0, y: 0 })
 const wrapperEl = ref<HTMLElement | null>(null)
 
+// ── Zoom & Pan state ──
+const zoom = ref(1)
+const panX = ref(0)
+const panY = ref(0)
+const isPanning = ref(false)
+const panStart = ref({ x: 0, y: 0, panX: 0, panY: 0 })
+
+function zoomIn() {
+  zoom.value = Math.min(2, zoom.value + 0.15)
+}
+function zoomOut() {
+  zoom.value = Math.max(0.4, zoom.value - 0.15)
+}
+function resetView() {
+  zoom.value = 1
+  panX.value = 0
+  panY.value = 0
+}
+function onWheel(e: WheelEvent) {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault()
+    const delta = e.deltaY > 0 ? -0.1 : 0.1
+    zoom.value = Math.max(0.4, Math.min(2, zoom.value + delta))
+  }
+}
+function onPanStart(e: MouseEvent) {
+  // Only start panning when dragging on empty area (not on a node)
+  const target = e.target as Element
+  if (target.closest('.arch-node')) return
+  isPanning.value = true
+  panStart.value = { x: e.clientX, y: e.clientY, panX: panX.value, panY: panY.value }
+}
+function onPanMove(e: MouseEvent) {
+  if (!isPanning.value) return
+  panX.value = panStart.value.panX + (e.clientX - panStart.value.x)
+  panY.value = panStart.value.panY + (e.clientY - panStart.value.y)
+}
+function onPanEnd() {
+  isPanning.value = false
+}
+
 function toggleBlock(index: number) {
   if (collapsedBlocks.has(index)) {
     collapsedBlocks.delete(index)
@@ -220,16 +261,25 @@ function computeArrow(from: LayoutNode | { x: number; y: number; width: number; 
 }
 
 // ── Hover handlers ──
-// Tooltip is teleported to <body> and uses position:fixed, so we store
-// viewport coordinates directly (no offset from the wrapper).
 function onNodeHover(node: LayoutNode, event: MouseEvent) {
   if (node.type === 'operator') {
     hoveredNode.value = node
-    tooltipPos.value = {
-      x: event.clientX,
-      y: event.clientY,
-    }
+    updateTooltipPos(event.clientX, event.clientY)
   }
+}
+
+function updateTooltipPos(clientX: number, clientY: number) {
+  const tw = 360
+  const th = 160
+  let x = clientX + 14
+  let y = clientY - th - 14
+  if (x + tw > window.innerWidth - 8) {
+    x = clientX - tw - 14
+  }
+  if (y < 8) {
+    y = clientY + 14
+  }
+  tooltipPos.value = { x, y }
 }
 
 function onNodeLeave() {
@@ -238,11 +288,20 @@ function onNodeLeave() {
 
 function onSvgMouseMove(event: MouseEvent) {
   if (hoveredNode.value) {
-    tooltipPos.value = {
-      x: event.clientX,
-      y: event.clientY,
-    }
+    updateTooltipPos(event.clientX, event.clientY)
   }
+}
+
+// Combined wrapper mousemove: pan + tooltip tracking
+function onWrapperMouseMove(event: MouseEvent) {
+  onPanMove(event)
+  onSvgMouseMove(event)
+}
+
+// Combined wrapper mouseleave: stop panning + clear hover
+function onWrapperMouseLeave() {
+  onPanEnd()
+  onNodeLeave()
 }
 
 // ── Click handler ──
@@ -263,8 +322,22 @@ function repeatBadgeWidth(count: number | undefined): number {
   <div
     ref="wrapperEl"
     class="arch-wrapper"
-    @mousemove="onSvgMouseMove"
+    :class="{ 'is-panning': isPanning }"
+    @mousemove="onWrapperMouseMove"
+    @mouseup="onPanEnd"
+    @mouseleave="onWrapperMouseLeave"
+    @wheel="onWheel"
   >
+    <!-- Zoom toolbar -->
+    <div v-if="layout.nodes.length > 0" class="arch-toolbar">
+      <button class="arch-tool-btn" @click="zoomOut" title="缩小">−</button>
+      <span class="arch-zoom-label">{{ Math.round(zoom * 100) }}%</span>
+      <button class="arch-tool-btn" @click="zoomIn" title="放大">+</button>
+      <button class="arch-tool-btn" @click="resetView" title="重置">⟲</button>
+    </div>
+
+    <div class="arch-canvas" :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})`, transformOrigin: '0 0' }"
+         @mousedown="onPanStart">
     <svg
       v-if="layout.nodes.length > 0"
       class="arch-svg"
@@ -394,17 +467,20 @@ function repeatBadgeWidth(count: number | undefined): number {
             rx="3"
             class="arch-collapse-bg"
           />
-          <text
-            :x="node.x + node.width - 17"
-            :y="node.y + 19"
-            class="arch-collapse-icon"
-            text-anchor="middle"
-          >
-            {{ node.collapsed ? '▶' : '▼' }}
-          </text>
+          <path
+            v-if="node.collapsed"
+            :d="`M ${node.x + node.width - 19} ${node.y + 12} l 0 6 l 5 -3 z`"
+            class="arch-collapse-icon-path"
+          />
+          <path
+            v-else
+            :d="`M ${node.x + node.width - 22} ${node.y + 13} l 6 0 l -3 5 z`"
+            class="arch-collapse-icon-path"
+          />
         </g>
       </g>
     </svg>
+    </div><!-- /arch-canvas -->
 
     <div
       v-if="layout.nodes.length === 0"
@@ -458,16 +534,64 @@ function repeatBadgeWidth(count: number | undefined): number {
   background: var(--bg-base);
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-md);
-  overflow: auto;
+  overflow: hidden;
   padding: 8px;
-  max-height: 560px;
+  min-height: 300px;
+  max-height: 70vh;
+}
+.arch-wrapper.is-panning {
+  cursor: grabbing;
+}
+
+.arch-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-elev-3);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+.arch-tool-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  font-size: 14px;
+  font-family: var(--font-mono);
+  transition: all var(--t-fast);
+}
+.arch-tool-btn:hover {
+  background: var(--bg-elev-4);
+  color: var(--amber);
+}
+.arch-zoom-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 0 4px;
+  min-width: 36px;
+  text-align: center;
+}
+
+.arch-canvas {
+  width: 100%;
+  height: 100%;
+  transition: transform 0.05s linear;
 }
 
 .arch-svg {
   display: block;
-  /* Cap the rendered height so the diagram never dominates the panel.
-     The viewBox aspect ratio is preserved via preserveAspectRatio. */
-  max-height: 520px;
   margin: 0 auto;
 }
 
@@ -565,11 +689,8 @@ function repeatBadgeWidth(count: number | undefined): number {
   stroke: var(--amber-dim);
 }
 
-.arch-collapse-icon {
+.arch-collapse-icon-path {
   fill: var(--amber);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  dominant-baseline: central;
 }
 
 .arch-empty {
@@ -595,8 +716,6 @@ function repeatBadgeWidth(count: number | undefined): number {
   box-shadow: var(--shadow-lg);
   line-height: 1.6;
   max-width: 360px;
-  /* Offset above-right of the cursor (which is at left/top) */
-  transform: translate(14px, calc(-100% - 14px));
 }
 
 .arch-tooltip-title {

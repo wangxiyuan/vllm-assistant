@@ -7,6 +7,7 @@ import { useUsersStore } from '@/stores/users'
 import { useTodoStore } from '@/stores/todo'
 import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
 import { timeAgo, statusLabel, sourceLabel, priorityClass, statusClass } from '@/utils/helpers'
+import Icon from '@/components/common/Icon.vue'
 
 const watchlistStore = useWatchlistStore()
 const prStore = usePRCenterStore()
@@ -83,7 +84,7 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
         <div class="item-meta">
           <span v-if="w.assignee_id" class="badge badge-assignee">{{ usersStore.userName(w.assignee_id) }}</span>
           <span>{{ timeAgo(w.added_at) }} 加入</span>
-          <span v-if="w.note" class="watchlist-note">📝 {{ w.note }}</span>
+          <span v-if="w.note" class="watchlist-note watchlist-note-icon"><Icon name="note" :size="11" /> {{ w.note }}</span>
         </div>
         <div v-if="w.linked_tasks && w.linked_tasks.length > 0" class="item-meta linked-tasks-row" style="margin-top:4px;">
           <span class="linked-tasks-label">关联任务：</span>
@@ -218,13 +219,13 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
                     @click="prStore.prDetailTab = 'summary'">
               AI 总结
               <span v-if="prStore.aiSummaryLoading" class="badge badge-loading">…</span>
-              <span v-else-if="prStore.aiSummary" class="badge badge-done">✓</span>
+              <span v-else-if="prStore.aiSummary" class="badge badge-done"><Icon name="check" :size="10" /></span>
             </button>
             <button class="tab" :class="{ active: prStore.prDetailTab === 'review' }"
                     @click="prStore.prDetailTab = 'review'">
               AI Review
               <span v-if="prStore.aiReviewLoading" class="badge badge-loading">…</span>
-              <span v-else-if="prStore.aiReview" class="badge badge-done">✓</span>
+              <span v-else-if="prStore.aiReview" class="badge badge-done"><Icon name="check" :size="10" /></span>
             </button>
           </div>
           <div class="drawer-body">
@@ -345,7 +346,7 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
                     @click="prStore.issueDetailTab = 'summary'">
               AI 总结
               <span v-if="prStore.aiSummaryLoading" class="badge badge-loading">…</span>
-              <span v-else-if="prStore.aiSummary" class="badge badge-done">✓</span>
+              <span v-else-if="prStore.aiSummary" class="badge badge-done"><Icon name="check" :size="10" /></span>
             </button>
           </div>
           <div class="drawer-body">

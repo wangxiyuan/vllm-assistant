@@ -304,7 +304,7 @@ export const useArticlesStore = defineStore('articles', () => {
         body: JSON.stringify({ deep_check: deep }),
       })
       validationResult.value = data
-      const msg = data.invalid_refs > 0 ? `${data.invalid_refs} 个引用失效` : '全部引用有效 ✓'
+      const msg = data.invalid_refs > 0 ? `${data.invalid_refs} 个引用失效` : '全部引用有效'
       useAppStore().showToast('验证完成', msg, data.invalid_refs > 0 ? 'warning' : 'success')
       await loadArticles()
     } catch (e: any) {
@@ -368,9 +368,9 @@ export const useArticlesStore = defineStore('articles', () => {
   function refStatusText(article: Article): string {
     if (!article.code_refs_count) return '无引用'
     if (article.outdated_refs_count && article.outdated_refs_count > 0) {
-      return `⚠ ${article.valid_refs_count}/${article.code_refs_count} 有效`
+      return `${article.valid_refs_count}/${article.code_refs_count} 有效`
     }
-    return `✓ ${article.code_refs_count} 引用全部有效`
+    return `${article.code_refs_count} 引用全部有效`
   }
 
   function refStatusClass(article: Article): string {

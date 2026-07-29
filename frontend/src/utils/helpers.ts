@@ -122,3 +122,25 @@ export const sources = [
   { value: 'team', label: '产品反馈' },
   { value: 'community', label: '社区反馈' },
 ]
+
+const _categoryColorPalette = [
+  'var(--signal-blue)', 'var(--signal-green)', 'var(--signal-purple)',
+  'var(--signal-cyan)', 'var(--amber)', 'var(--signal-red)',
+  'var(--signal-yellow)', 'var(--text-tertiary)',
+]
+
+export function categoryColor(name: string): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0
+  }
+  return _categoryColorPalette[hash % _categoryColorPalette.length]
+}
+
+export function modelCategoryLabel(value: string): string {
+  const map: Record<string, string> = {
+    dense: 'Dense', moe: 'MoE', hybrid: 'Hybrid',
+    state_space: 'State Space', other: 'Other',
+  }
+  return map[value] || value
+}

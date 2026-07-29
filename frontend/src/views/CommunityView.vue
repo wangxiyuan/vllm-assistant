@@ -7,6 +7,7 @@ import { useWatchlistStore } from '@/stores/watchlist'
 import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
 import { issueType, issueTypeLabel, issueStateLabel, prStateLabel, timeAgo, exactTime } from '@/utils/helpers'
 import type { Issue, PR } from '@/utils/types'
+import Icon from '@/components/common/Icon.vue'
 
 const communityStore = useCommunityStore()
 const appStore = useAppStore()
@@ -180,13 +181,13 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
                     @click="prStore.prDetailTab = 'summary'">
               AI 总结
               <span v-if="prStore.aiSummaryLoading" class="badge badge-loading">…</span>
-              <span v-else-if="prStore.aiSummary" class="badge badge-done">✓</span>
+              <span v-else-if="prStore.aiSummary" class="badge badge-done"><Icon name="check" :size="10" /></span>
             </button>
             <button class="tab" :class="{ active: prStore.prDetailTab === 'review' }"
                     @click="prStore.prDetailTab = 'review'">
               AI Review
               <span v-if="prStore.aiReviewLoading" class="badge badge-loading">…</span>
-              <span v-else-if="prStore.aiReview" class="badge badge-done">✓</span>
+              <span v-else-if="prStore.aiReview" class="badge badge-done"><Icon name="check" :size="10" /></span>
             </button>
           </div>
           <div class="drawer-body">
@@ -307,7 +308,7 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
                     @click="prStore.issueDetailTab = 'summary'">
               AI 总结
               <span v-if="prStore.aiSummaryLoading" class="badge badge-loading">…</span>
-              <span v-else-if="prStore.aiSummary" class="badge badge-done">✓</span>
+              <span v-else-if="prStore.aiSummary" class="badge badge-done"><Icon name="check" :size="10" /></span>
             </button>
           </div>
           <div class="drawer-body">

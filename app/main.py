@@ -50,14 +50,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to start scheduler; service will run without background sync")
 
-    # 异步初始化预置算子
-    try:
-        task = asyncio.create_task(_init_preset_operators())
-        _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
-    except Exception:
-        logger.exception("Failed to schedule preset operator initialization")
-
     # 后台异步初始化代码仓库（学习文章功能）
     if Config.REPOS:
         task = asyncio.create_task(_init_repo_caches())
@@ -88,20 +80,6 @@ async def _init_repo_caches():
             await manager.async_ensure_cloned(repo_name, clone_url, branch="main")
         except Exception:
             logger.exception(f"Failed to clone repo {repo_name}")
-
-
-async def _init_preset_operators():
-    """异步初始化预置算子（不阻塞服务启动）"""
-    from app.database import SessionLocal
-    from app.api.model_anatomy import init_preset_operators
-
-    db = SessionLocal()
-    try:
-        init_preset_operators(db)
-    except Exception:
-        logger.exception("Failed to initialize preset operators")
-    finally:
-        db.close()
 
 
 async def _init_knowledge_base():

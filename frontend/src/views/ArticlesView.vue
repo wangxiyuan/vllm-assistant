@@ -4,6 +4,7 @@ import { useArticlesStore } from '@/stores/articles'
 import { useAppStore } from '@/stores/app'
 import { useUsersStore } from '@/stores/users'
 import { timeAgo } from '@/utils/helpers'
+import Icon from '@/components/common/Icon.vue'
 
 const articlesStore = useArticlesStore()
 const appStore = useAppStore()
@@ -103,7 +104,7 @@ watch(
               {{ article.status === 'published' ? '已发布' : article.status === ('archived' as string) ? '已归档' : '草稿' }}
             </span>
             <span v-if="article.area" class="article-area">{{ appStore.areaName(article.area) }}</span>
-            <span v-if="article.user_name" class="article-author">✍️ {{ article.user_name }}</span>
+            <span v-if="article.user_name" class="article-author article-author-icon"><Icon name="pen" :size="11" /> {{ article.user_name }}</span>
             <span>{{ timeAgo(article.updated_at) }}</span>
             <span :class="articlesStore.refStatusClass(article)">{{ articlesStore.refStatusText(article) }}</span>
           </div>
@@ -286,7 +287,8 @@ watch(
           <div v-for="detail in (articlesStore.validationResult.details || [])" :key="detail.file_path + detail.line_start" class="dedup-item">
             <div :class="detail.is_valid ? 'text-success' : 'text-danger'">
               <span>{{ detail.repo + '/' + detail.file_path + ':' + detail.line_start + '-' + detail.line_end }}</span>
-              <span>{{ detail.is_valid ? ' ✓' : ' ✗ ' + detail.reason }}</span>
+              <span class="ref-check-icon" :class="detail.is_valid ? 'is-valid' : 'is-invalid'"><Icon :name="detail.is_valid ? 'check' : 'x'" :size="11" /></span>
+              <span v-if="!detail.is_valid"> {{ detail.reason }}</span>
             </div>
             <div v-if="detail.message" class="text-tertiary">{{ detail.message }}</div>
           </div>
@@ -296,7 +298,7 @@ watch(
       <div v-if="articlesStore.articleDetailLoading" class="detail-loading">加载中…</div>
       <div v-else>
         <div class="article-detail-meta">
-          <span v-if="articlesStore.selectedArticle?.user_name" class="article-author">✍️ {{ articlesStore.selectedArticle?.user_name }}</span>
+          <span v-if="articlesStore.selectedArticle?.user_name" class="article-author article-author-icon"><Icon name="pen" :size="11" /> {{ articlesStore.selectedArticle?.user_name }}</span>
           <span v-if="articlesStore.selectedArticle?.area" class="article-area">{{ appStore.areaName(articlesStore.selectedArticle?.area) }}</span>
           <span class="article-date">{{ timeAgo(articlesStore.selectedArticle?.updated_at) }}</span>
         </div>

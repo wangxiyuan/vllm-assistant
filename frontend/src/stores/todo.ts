@@ -213,8 +213,10 @@ export const useTodoStore = defineStore('todo', () => {
         body: JSON.stringify(updates),
       })
       selectedTaskDetails.value = result
+      selectedTask.value = { ...selectedTask.value!, ...result }
       const idx = tasks.value.findIndex(t => t.id === result.id)
       if (idx >= 0) tasks.value[idx] = { ...tasks.value[idx], ...result }
+      if ('status' in updates || 'priority' in updates) loadTasks()
       editingTask.value = false
       useAppStore().showToast('已保存', '任务已更新', 'success')
     } catch (e: any) {
@@ -273,6 +275,7 @@ export const useTodoStore = defineStore('todo', () => {
       const idx = tasks.value.findIndex(t => t.id === task.id)
       if (idx >= 0) tasks.value[idx] = { ...tasks.value[idx], ...result }
       if (selectedTaskDetails.value?.id === task.id) selectedTaskDetails.value = result
+      if (selectedTask.value?.id === task.id) selectedTask.value = { ...selectedTask.value, ...result }
       useAppStore().showToast(newStatus === 'done' ? '已完成' : '已恢复', '', 'success')
     } catch (e: any) {
       useAppStore().showToast('操作失败', e.message, 'error')

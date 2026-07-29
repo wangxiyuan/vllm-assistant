@@ -8,6 +8,7 @@ import { useIntelStore } from '@/stores/intel'
 import { useRouter } from 'vue-router'
 import { statusLabel, sourceLabel, priorityClass, statusClass } from '@/utils/helpers'
 import { renderMarkdown } from '@/composables/useMarkdown'
+import Icon from '@/components/common/Icon.vue'
 
 const todoStore = useTodoStore()
 const appStore = useAppStore()
@@ -54,11 +55,18 @@ function onColumnDragOver(e: DragEvent) {
   e.preventDefault()
 }
 
-function onColumnDragEnter(priority: string) {
+function onColumnDragEnter(e: DragEvent, priority: string) {
+  // Accept enter from child elements too (dragenter bubbles)
+  e.preventDefault()
   dragOverPriority.value = priority
 }
 
-function onColumnDragLeave() {
+function onColumnDragLeave(e: DragEvent) {
+  // Only clear when the pointer truly leaves the column (relatedTarget is outside)
+  const related = e.relatedTarget as Node | null
+  if (related && e.currentTarget && e.currentTarget.contains(related)) {
+    return
+  }
   dragOverPriority.value = null
 }
 
@@ -190,10 +198,10 @@ async function generateInsight(task: any) {
       <div class="kanban-board">
         <div v-for="(items, priority) in todoStore.tasksByPriority" :key="priority" class="kanban-column"
              :class="{ 'drag-over': dragOverPriority === priority }"
-             @dragover="onColumnDragOver"
-             @dragenter="onColumnDragEnter(priority)"
-             @dragleave="onColumnDragLeave"
-             @drop="onColumnDrop($event, priority)">
+              @dragover="onColumnDragOver"
+              @dragenter="onColumnDragEnter($event, priority)"
+              @dragleave="onColumnDragLeave($event)"
+              @drop="onColumnDrop($event, priority)">
           <h3 class="kanban-column-title" :class="priorityClass(priority)">{{ priority }}</h3>
           <div v-for="task in items" :key="task.id" class="kanban-card"
                draggable="true"
@@ -209,8 +217,8 @@ async function generateInsight(task: any) {
             <div class="kanban-card-footer">
               <span v-if="task.assignee_id" class="badge badge-assignee">{{ usersStore.userName(task.assignee_id) }}</span>
               <span v-if="task.area" class="kanban-tag">{{ task.area }}</span>
-              <span v-if="task.due_date" class="kanban-tag" :class="{ 'overdue': task.due_date < todoStore.todayISO && task.status !== 'done' }">📅 {{ task.due_date }}</span>
-              <span v-if="task.subtask_count && task.subtask_count > 0" class="kanban-tag">{{ task.subtask_done_count || 0 }}/{{ task.subtask_count }} 📋</span>
+              <span v-if="task.due_date" class="kanban-tag kanban-tag-icon" :class="{ 'overdue': task.due_date < todoStore.todayISO && task.status !== 'done' }"><Icon name="calendar" :size="11" /> {{ task.due_date }}</span>
+              <span v-if="task.subtask_count && task.subtask_count > 0" class="kanban-tag kanban-tag-icon">{{ task.subtask_done_count || 0 }}/{{ task.subtask_count }} <Icon name="checklist" :size="11" /></span>
               <span v-for="(ref, idx) in (task.related_refs || []).slice(0, 2)" :key="idx" class="ref-badge ref-badge-sm" :title="ref.title || (ref.repo + '#' + ref.number)">
                 <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
                 <span>{{ ref.repo }}#{{ ref.number }}</span>
@@ -218,8 +226,8 @@ async function generateInsight(task: any) {
               </span>
               <span v-if="(task.related_refs || []).length > 2" class="kanban-tag">+{{ task.related_refs.length - 2 }}</span>
               <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
-              <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success">✓ 无重复</span>
-              <span v-if="task.has_ai_insight" class="kanban-tag is-info">🔍 有洞察</span>
+              <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success kanban-tag-icon"><Icon name="check" :size="11" /> 无重复</span>
+              <span v-if="task.has_ai_insight" class="kanban-tag is-info kanban-tag-icon"><Icon name="search" :size="11" /> 有洞察</span>
             </div>
           </div>
         </div>
@@ -242,8 +250,8 @@ async function generateInsight(task: any) {
               <span>{{ sourceLabel(task.source) }}</span>
               <span v-if="task.assignee_id" class="badge badge-assignee">{{ usersStore.userName(task.assignee_id) }}</span>
               <span v-if="task.area" class="kanban-tag">{{ task.area }}</span>
-              <span v-if="task.due_date" class="kanban-tag" :class="{ 'overdue': task.due_date < todoStore.todayISO && task.status !== 'done' }">📅 {{ task.due_date }}</span>
-              <span v-if="task.subtask_count && task.subtask_count > 0" class="kanban-tag">{{ task.subtask_done_count || 0 }}/{{ task.subtask_count }} 📋</span>
+              <span v-if="task.due_date" class="kanban-tag kanban-tag-icon" :class="{ 'overdue': task.due_date < todoStore.todayISO && task.status !== 'done' }"><Icon name="calendar" :size="11" /> {{ task.due_date }}</span>
+              <span v-if="task.subtask_count && task.subtask_count > 0" class="kanban-tag kanban-tag-icon">{{ task.subtask_done_count || 0 }}/{{ task.subtask_count }} <Icon name="checklist" :size="11" /></span>
               <span v-for="(ref, idx) in (task.related_refs || []).slice(0, 3)" :key="idx" class="ref-badge" :title="ref.title || (ref.repo + '#' + ref.number)">
                 <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
                 <span>{{ ref.repo }}#{{ ref.number }}</span>
@@ -251,8 +259,8 @@ async function generateInsight(task: any) {
               </span>
               <span v-if="(task.related_refs || []).length > 3" class="kanban-tag">+{{ task.related_refs.length - 3 }}</span>
               <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
-              <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success">✓ 无重复</span>
-              <span v-if="task.has_ai_insight" class="kanban-tag is-info">🔍 有洞察</span>
+              <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success kanban-tag-icon"><Icon name="check" :size="11" /> 无重复</span>
+              <span v-if="task.has_ai_insight" class="kanban-tag is-info kanban-tag-icon"><Icon name="search" :size="11" /> 有洞察</span>
             </div>
           </div>
         </div>
