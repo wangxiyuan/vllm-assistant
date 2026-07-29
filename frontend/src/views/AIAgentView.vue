@@ -29,7 +29,6 @@ const MODAL_PAGE_SIZE = 50
 const exportMenuOpen = ref(false)
 const exportBtnRef = ref<HTMLElement | null>(null)
 const exportMenuStyle = ref<Record<string, string>>({})
-const cursorHtml = '<span class="cursor-blink">▊</span>'
 
 // 过程步骤展示：只显示最近 N 条，太长时折叠更早的，避免页面被刷屏
 const MAX_VISIBLE_STEPS = 12
@@ -43,10 +42,13 @@ const hiddenStepCount = computed(() => {
   return Math.max(0, total - MAX_VISIBLE_STEPS)
 })
 const stepCountSummary = computed(() => {
-  const total = agentStore.streamingSteps.length
-  const tools = agentStore.streamingSteps.filter(s => s.type === 'tool_call').length
-  if (total === tools) return `${tools} 次工具调用`
-  return `${total} 步 / ${tools} 次工具`
+  const steps = agentStore.streamingSteps
+  const tools = steps.filter(s => s.type === 'tool_call').length
+  const rounds = new Set(steps.filter(s => s.round != null).map(s => s.round)).size
+  const maxRound = steps.reduce((m, s) => Math.max(m, s.round || 0), 0)
+  const currentRound = maxRound || 1
+  if (tools === 0) return `${steps.length} 步`
+  return `第 ${currentRound} 轮 / ${tools} 次工具`
 })
 // 当前 session 是不是正在被生成中那个：用于决定流式气泡 / 停止按钮 / 输入框禁用状态
 const isStreamingHere = computed(() =>
@@ -271,8 +273,8 @@ onBeforeUnmount(() => {
 })
 
 // 流式输出时自动滚动到底部
-watch(() => agentStore.streamingContent, () => {
-  if (agentStore.streamingContent) {
+watch(() => agentStore.streamingFinal, () => {
+  if (agentStore.streaming) {
     nextTick(() => {
       if (chatContainer.value) {
         chatContainer.value.scrollTop = chatContainer.value.scrollHeight
@@ -573,13 +575,13 @@ const sortedKbTypes = computed(() => {
           <div v-if="isStreamingHere" class="chat-message msg-assistant msg-streaming">
             <div class="msg-avatar">AI</div>
             <div class="msg-content">
-              <details v-if="agentStore.streamingSteps.length" class="agent-process" open>
-                <summary class="agent-process-summary">
+              <div v-if="agentStore.streamingSteps.length" class="agent-process" open>
+                <div class="agent-process-summary">
                   <span class="agent-process-icon"><Icon name="gear" :size="12" /></span>
                   <span>处理过程 ({{ stepCountSummary }})</span>
-                </summary>
+                </div>
                 <div class="agent-process-body">
-                  <div v-for="(step, i) in visibleSteps" :key="i" class="agent-step" :class="'step-' + step.type">
+                  <div v-for="(step, i) in visibleSteps" :key="step._key || i" class="agent-step" :class="'step-' + step.type">
                     <div v-if="step.type === 'thinking'" class="step-thinking">
                       <span class="step-icon"><Icon name="brain" :size="12" /></span>
                       <span class="step-text" v-html="renderMarkdown(step.thinking)"></span>
@@ -600,10 +602,11 @@ const sortedKbTypes = computed(() => {
                     </span>
                   </div>
                 </div>
-              </details>
+              </div>
 
               <div class="agent-final">
-                <div v-if="agentStore.streamingFinal" class="agent-final-text" v-html="renderMarkdown(agentStore.streamingFinal) + cursorHtml"></div>
+                <div v-if="agentStore.streamingFinal" class="agent-final-text" v-html="renderMarkdown(agentStore.streamingFinal)"></div>
+                <span v-if="agentStore.streamingFinal" class="cursor-blink">▊</span>
                 <div v-else class="agent-thinking-indicator">
                   <span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
                   <span>AI 思考中</span>

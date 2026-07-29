@@ -144,7 +144,7 @@ class AgentRunner:
                 if assistant_message.get("tool_calls"):
                     # 工具调用之前的文本视为思考过程，多次 thinking 用分隔线区分
                     prefix = "\n\n---\n\n" if round_num > 0 else ""
-                    yield {"type": EVENT_THINKING, "data": prefix + text_content}
+                    yield {"type": EVENT_THINKING, "data": prefix + text_content, "round": round_num + 1}
                 else:
                     # 没有工具调用，是最终回答
                     yield {"type": EVENT_TOKEN, "data": text_content}
@@ -161,6 +161,7 @@ class AgentRunner:
                             "name": tc["function"]["name"],
                             "args": self.llm.safe_json_loads(tc["function"]["arguments"]),
                         },
+                        "round": round_num + 1,
                     }
 
                 # 执行所有 tool_calls（带去重缓存 + 收尾提醒）
@@ -189,7 +190,7 @@ class AgentRunner:
                         logger.info("Agent tool %s done, result keys=%s", tool_name, list(result.keys()) if isinstance(result, dict) else type(result).__name__)
 
                     # 发出 tool_result 事件
-                    yield {"type": EVENT_TOOL_RESULT, "data": {"name": tool_name, "result": result}}
+                    yield {"type": EVENT_TOOL_RESULT, "data": {"name": tool_name, "result": result}, "round": round_num + 1}
 
                     # 将 tool 结果加入消息列表
                     full_messages.append({

@@ -100,7 +100,7 @@ async def chat(request: ChatRequest, fastapi_request: Request):
 
         # 如果传了 session_id，先存 user 消息
         if request.session_id:
-            _save_user_message(request.session_id, request.messages)
+            _sync_and_save_user_message(request.session_id, request.messages)
 
         try:
             assistant_content = None
@@ -149,24 +149,56 @@ async def chat(request: ChatRequest, fastapi_request: Request):
     )
 
 
-def _save_user_message(session_id: str, messages: List[dict]):
-    """将 user 消息存入数据库"""
+def _sync_and_save_user_message(session_id: str, messages: List[dict]):
+    """同步 DB 消息与前端历史：截断+插入保持与前端一致"""
     from app.database import SessionLocal
-    from app.models import AIChatMessage
+    from app.models import AIChatMessage, AIChatSession
 
     db = SessionLocal()
     try:
-        for m in messages:
-            if m.get("role") == "user":
-                db.add(AIChatMessage(
-                    session_id=session_id,
-                    role="user",
-                    content=m["content"],
-                ))
+        user_msgs = [m for m in messages if m.get("role") == "user"]
+
+        existing = (
+            db.query(AIChatMessage)
+            .filter(AIChatMessage.session_id == session_id)
+            .order_by(AIChatMessage.id)
+            .all()
+        )
+        existing_users = [m for m in existing if m.role == "user"]
+
+        if not user_msgs:
+            return
+
+        # 找到 DB 中需要保留的截止点：与前端 user 消息数对齐
+        if len(existing_users) >= len(user_msgs):
+            cutoff_user = existing_users[len(user_msgs) - 1]
+            # 用户编辑了同一条消息 → 更新内容
+            if cutoff_user.content != user_msgs[-1]["content"]:
+                cutoff_user.content = user_msgs[-1]["content"]
+            # 删除该 user 之后的所有消息（老的 assistant 回复等）
+            deleted = db.query(AIChatMessage).filter(
+                AIChatMessage.session_id == session_id,
+                AIChatMessage.id > cutoff_user.id,
+            ).delete()
+            db.flush()
+            session = db.query(AIChatSession).filter(AIChatSession.id == session_id).first()
+            if session:
+                session.message_count = max(0, (session.message_count or 0) - deleted)
+        else:
+            # 新的 user 消息：前端比 DB 多，只插入最后一条
+            last_user = user_msgs[-1]
+            db.add(AIChatMessage(
+                session_id=session_id,
+                role="user",
+                content=last_user["content"],
+            ))
+            session = db.query(AIChatSession).filter(AIChatSession.id == session_id).first()
+            if session:
+                session.message_count = (session.message_count or 0) + 1
         db.commit()
     except Exception:
         db.rollback()
-        logger.exception("Failed to save user message")
+        logger.exception("Failed to sync/save user message")
     finally:
         db.close()
 
@@ -187,9 +219,7 @@ def _save_assistant_message(session_id: str, content: str):
         session = db.query(AIChatSession).filter(AIChatSession.id == session_id).first()
         if session:
             from datetime import datetime, timezone
-            session.message_count = db.query(AIChatMessage).filter(
-                AIChatMessage.session_id == session_id
-            ).count()
+            session.message_count = (session.message_count or 0) + 1
             session.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
             # 自动生成标题（取第一条 user 消息前 20 字）
             if session.title == "新对话":

@@ -45,6 +45,8 @@ export interface AgentStep {
   type: 'thinking' | 'tool_call' | 'tool_result'
   thinking?: string
   tool?: { name: string; args?: any; result?: any }
+  round?: number
+  _key?: number
 }
 
 // Human-readable labels for knowledge source types
@@ -77,6 +79,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
   // 拆分：过程步骤 vs 最终回答文本
   const streamingSteps = ref<AgentStep[]>([])
   const streamingFinal = ref('')
+  let _stepSeq = 0
   const error = ref('')
 
   // 模块级 AbortController：sendMessage 写、stopGenerating 读 + abort
@@ -213,6 +216,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
     activeStreamingSessionId.value = sessionId
     streamingSteps.value = []
     streamingFinal.value = ''
+    _stepSeq = 0
 
     const controller = new AbortController()
     abortController = controller
@@ -276,13 +280,15 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
               streamingSteps.value = streamingSteps.value.filter(
                 s => s.type !== 'thinking'
               )
-              streamingSteps.value.push({ type: 'thinking', thinking: t })
+              streamingSteps.value.push({ type: 'thinking', thinking: t, round: event.round, _key: ++_stepSeq })
               break
             }
             case 'tool_call':
               streamingSteps.value.push({
                 type: 'tool_call',
                 tool: { name: event.data.name, args: event.data.args },
+                round: event.round,
+                _key: ++_stepSeq,
               })
               break
             case 'tool_result': {
@@ -290,6 +296,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
               for (const s of steps) {
                 if (s.type === 'tool_call' && s.tool.result === undefined) {
                   s.tool.result = event.data.result
+                  s.round = event.round
                   break
                 }
               }
