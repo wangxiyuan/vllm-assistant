@@ -116,9 +116,11 @@ export const useAppStore = defineStore('app', () => {
     cancelText: '取消',
     danger: false,
     resolve: null,
+    showKnowledgeSyncCheckbox: false,
+    knowledgeSyncChecked: true,
   })
 
-  function showConfirm(opts: ConfirmOptions = {}): Promise<boolean> {
+  function showConfirm(opts: ConfirmOptions = {}): Promise<{ confirmed: boolean; syncDeleteKnowledge: boolean }> {
     return new Promise((resolve) => {
       confirmDialog.value = {
         show: true,
@@ -128,19 +130,21 @@ export const useAppStore = defineStore('app', () => {
         cancelText: opts.cancelText || '取消',
         danger: opts.danger || false,
         resolve,
+        showKnowledgeSyncCheckbox: opts.showKnowledgeSyncCheckbox || false,
+        knowledgeSyncChecked: opts.knowledgeSyncChecked !== false,
       }
     })
   }
 
   function confirmOk() {
     const r = confirmDialog.value.resolve
-    if (r) r(true)
+    if (r) r({ confirmed: true, syncDeleteKnowledge: confirmDialog.value.knowledgeSyncChecked })
     confirmDialog.value.show = false
   }
 
   function confirmCancel() {
     const r = confirmDialog.value.resolve
-    if (r) r(false)
+    if (r) r({ confirmed: false, syncDeleteKnowledge: false })
     confirmDialog.value.show = false
   }
 

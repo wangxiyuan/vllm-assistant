@@ -83,13 +83,13 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   async function toggleWatch(number: number, type: string, title: string, url: string, extra?: any) {
     const key = _watchKey(number, type)
     if (watchlistSet.value.has(key)) {
-      const ok = await useAppStore().showConfirm({
+      const result = await useAppStore().showConfirm({
         title: '取消关注',
         message: `确认将 #${number} 移出特别关注？`,
         confirmText: '确认移出',
         danger: true,
       })
-      if (!ok) return
+      if (!result.confirmed) return
       try {
         await api(`/api/watchlist/${type}/${number}`, { method: 'DELETE' })
         watchlistSet.value.delete(key)

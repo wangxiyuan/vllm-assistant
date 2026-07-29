@@ -218,6 +218,39 @@ class MemoryService:
         finally:
             db.close()
 
+    def forget_by_source_ref_prefix(self, source_ref_prefix: str) -> int:
+        """按 source_ref 前缀批量标记知识条目为 stale。
+
+        Args:
+            source_ref_prefix: source_ref 前缀，如 "article123" 或 "conv/session-id/"
+
+        Returns:
+            标记为 stale 的条目数
+        """
+        db = SessionLocal()
+        try:
+            count = (
+                db.query(AIMemory)
+                .filter(
+                    AIMemory.source_ref.like(f"{source_ref_prefix}%"),
+                    AIMemory.is_stale == False,
+                )
+                .update(
+                    {"is_stale": True, "updated_at": datetime.now(timezone.utc).replace(tzinfo=None)},
+                    synchronize_session=False,
+                )
+            )
+            db.commit()
+            if count > 0:
+                logger.info(f"Marked {count} memories as stale by source_ref prefix: {source_ref_prefix}")
+            return count
+        except Exception:
+            logger.exception("Failed to forget knowledge by source_ref prefix")
+            db.rollback()
+            return 0
+        finally:
+            db.close()
+
     def update(self, memory_id: int, **kwargs) -> bool:
         """更新知识条目的字段
 

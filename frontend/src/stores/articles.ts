@@ -195,11 +195,24 @@ export const useArticlesStore = defineStore('articles', () => {
 
   async function deleteArticle(article: Article) {
     if (deletingArticle.value) return
-    if (!confirm(`确定删除文章「${article.title}」？此操作不可撤销。`)) return
+    const appStore = useAppStore()
+    const result = await appStore.showConfirm({
+      title: '删除文章',
+      message: `确定删除文章「${article.title}」？此操作不可撤销。`,
+      confirmText: '删除',
+      danger: true,
+      showKnowledgeSyncCheckbox: true,
+    })
+    if (!result.confirmed) return
     deletingArticle.value = true
     const backup = { ...article }
     try {
       await api(`/api/articles/${article.id}`, { method: 'DELETE' })
+      if (result.syncDeleteKnowledge) {
+        try {
+          await api(`/api/ai-agent/memories/by-source?source_ref_prefix=article::${article.id}`, { method: 'DELETE' })
+        } catch (_) {}
+      }
       if (selectedArticle.value?.id === article.id) closeArticleView()
       await loadArticles()
       useAppStore().showUndoToast('文章已删除', article.title, async () => {

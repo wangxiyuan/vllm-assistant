@@ -2,6 +2,10 @@
 import { useAppStore } from '@/stores/app'
 
 const appStore = useAppStore()
+
+function toggleKnowledgeSync() {
+  appStore.confirmDialog.knowledgeSyncChecked = !appStore.confirmDialog.knowledgeSyncChecked
+}
 </script>
 
 <template>
@@ -13,6 +17,16 @@ const appStore = useAppStore()
         </div>
         <div class="modal-body">
           <p class="modal-desc" style="padding:0;">{{ appStore.confirmDialog.message }}</p>
+          <div v-if="appStore.confirmDialog.showKnowledgeSyncCheckbox" class="knowledge-sync-checkbox" style="margin-top: 12px;">
+            <label class="checkbox-label">
+              <input
+                type="checkbox"
+                :checked="appStore.confirmDialog.knowledgeSyncChecked"
+                @change="toggleKnowledgeSync"
+              />
+              <span>是否同步删除知识库内容</span>
+            </label>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn" @click="appStore.confirmCancel()">{{ appStore.confirmDialog.cancelText }}</button>

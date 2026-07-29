@@ -109,6 +109,7 @@ async def chat(request: ChatRequest, fastapi_request: Request):
                 tools=request.tools,
                 stream=request.stream,
                 system_prompt=request.system_prompt,
+                session_id=request.session_id,
             )
             async for event in chat_iter:
                 # 客户端断开检测：用户删对话 / 关页面 / 点停止按钮都会触发
@@ -176,14 +177,10 @@ def _sync_and_save_user_message(session_id: str, messages: List[dict]):
             if cutoff_user.content != user_msgs[-1]["content"]:
                 cutoff_user.content = user_msgs[-1]["content"]
             # 删除该 user 之后的所有消息（老的 assistant 回复等）
-            deleted = db.query(AIChatMessage).filter(
+            db.query(AIChatMessage).filter(
                 AIChatMessage.session_id == session_id,
                 AIChatMessage.id > cutoff_user.id,
             ).delete()
-            db.flush()
-            session = db.query(AIChatSession).filter(AIChatSession.id == session_id).first()
-            if session:
-                session.message_count = max(0, (session.message_count or 0) - deleted)
         else:
             # 新的 user 消息：前端比 DB 多，只插入最后一条
             last_user = user_msgs[-1]
@@ -192,9 +189,12 @@ def _sync_and_save_user_message(session_id: str, messages: List[dict]):
                 role="user",
                 content=last_user["content"],
             ))
-            session = db.query(AIChatSession).filter(AIChatSession.id == session_id).first()
-            if session:
-                session.message_count = (session.message_count or 0) + 1
+        # 用 count 同步 message_count
+        session = db.query(AIChatSession).filter(AIChatSession.id == session_id).first()
+        if session:
+            session.message_count = db.query(AIChatMessage).filter(
+                AIChatMessage.session_id == session_id
+            ).count()
         db.commit()
     except Exception:
         db.rollback()
@@ -219,7 +219,6 @@ def _save_assistant_message(session_id: str, content: str):
         session = db.query(AIChatSession).filter(AIChatSession.id == session_id).first()
         if session:
             from datetime import datetime, timezone
-            session.message_count = (session.message_count or 0) + 1
             session.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
             # 自动生成标题（取第一条 user 消息前 20 字）
             if session.title == "新对话":
@@ -392,6 +391,25 @@ async def create_memory(request: MemoryCreateRequest):
     if mem_id:
         return {"id": mem_id, "status": "created"}
     raise HTTPException(status_code=500, detail="Failed to create memory")
+
+
+@router.delete("/memories/by-source")
+async def delete_memories_by_source(request: Request):
+    """按 source_ref 前缀删除知识条目（标记为 stale）
+
+    用于删除文章/报告/会话时同步清理关联的知识库内容。
+    使用 :: 代替 # 传递（URL 中 # 会被当做 fragment 截断）。
+    """
+    source_ref_prefix = request.query_params.get("source_ref_prefix", "")
+    if not source_ref_prefix:
+        raise HTTPException(status_code=422, detail="source_ref_prefix is required")
+    prefix = source_ref_prefix.replace("::", "#")
+
+    from app.services.memory_service import MemoryService
+
+    mem = MemoryService()
+    count = mem.forget_by_source_ref_prefix(prefix)
+    return {"status": "deleted", "count": count}
 
 
 @router.delete("/memories/{memory_id}")

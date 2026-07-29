@@ -14,6 +14,8 @@ export interface ConfirmOptions {
   confirmText?: string
   cancelText?: string
   danger?: boolean
+  showKnowledgeSyncCheckbox?: boolean
+  knowledgeSyncChecked?: boolean
 }
 
 export interface ConfirmDialogState {
@@ -23,7 +25,9 @@ export interface ConfirmDialogState {
   confirmText: string
   cancelText: string
   danger: boolean
-  resolve: ((value: boolean) => void) | null
+  resolve: ((value: { confirmed: boolean; syncDeleteKnowledge: boolean }) => void) | null
+  showKnowledgeSyncCheckbox: boolean
+  knowledgeSyncChecked: boolean
 }
 
 export interface Area {

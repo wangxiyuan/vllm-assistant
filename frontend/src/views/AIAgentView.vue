@@ -391,13 +391,13 @@ function fallbackCopy(text: string) {
 }
 
 async function deleteEntry(entry: any) {
-  const confirmed = await appStore.showConfirm({
+  const result = await appStore.showConfirm({
     title: '删除知识条目',
     message: `确定删除这条知识吗？\n\n${entry.content.slice(0, 100)}...`,
     confirmText: '删除',
     danger: true,
   })
-  if (!confirmed) return
+  if (!result.confirmed) return
   try {
     await api(`/api/ai-agent/memories/${entry.id}`, { method: 'DELETE' })
     appStore.showToast('已删除', '', 'info')

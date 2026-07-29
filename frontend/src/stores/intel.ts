@@ -162,16 +162,22 @@ export const useIntelStore = defineStore('intel', () => {
 
   async function deleteReport(report: IntelReport) {
     const appStore = useAppStore()
-    const confirmed = await appStore.showConfirm({
+    const result = await appStore.showConfirm({
       title: '删除报告',
       message: `确认删除报告 "${report.title}"？此操作不可撤销。`,
       confirmText: '删除',
       danger: true,
+      showKnowledgeSyncCheckbox: true,
     })
-    if (!confirmed) return
+    if (!result.confirmed) return
     const backup = { ...report }
     try {
       await api(`/api/intelligence/reports/${report.id}`, { method: 'DELETE' })
+      if (result.syncDeleteKnowledge) {
+        try {
+          await api(`/api/ai-agent/memories/by-source?source_ref_prefix=intelligence_report::${report.id}`, { method: 'DELETE' })
+        } catch (_) {}
+      }
       reports.value = reports.value.filter(r => r.id !== report.id)
       if (selectedReport.value?.id === report.id) closeReport()
       appStore.showUndoToast('已删除', report.title, async () => {
@@ -205,12 +211,12 @@ export const useIntelStore = defineStore('intel', () => {
 
   async function regenerateReport(report: IntelReport) {
     const appStore = useAppStore()
-    const confirmed = await appStore.showConfirm({
+    const result = await appStore.showConfirm({
       title: '重新生成报告',
       message: `确认重新生成报告 "${report.title}"？`,
       confirmText: '重新生成',
     })
-    if (!confirmed) return
+    if (!result.confirmed) return
     try {
       const payload: any = {
         report_id: report.id,

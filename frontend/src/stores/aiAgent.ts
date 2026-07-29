@@ -147,19 +147,25 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
 
   async function deleteSession(sessionId: string) {
     const appStore = useAppStore()
-    const confirmed = await appStore.showConfirm({
+    const result = await appStore.showConfirm({
       title: '删除会话',
       message: '确定删除这个会话？此操作不可撤销。',
       confirmText: '删除',
       danger: true,
+      showKnowledgeSyncCheckbox: true,
     })
-    if (!confirmed) return
+    if (!result.confirmed) return
     // 删的是当前正在流式生成的会话 → 立刻 abort，丢掉过程状态
     if (currentSessionId.value === sessionId && streaming.value) {
       stopGenerating()
     }
     try {
       await api(`/api/ai-agent/sessions/${sessionId}`, { method: 'DELETE' })
+      if (result.syncDeleteKnowledge) {
+        try {
+          await api(`/api/ai-agent/memories/by-source?source_ref_prefix=conv/${sessionId}/`, { method: 'DELETE' })
+        } catch (_) {}
+      }
       if (currentSessionId.value === sessionId) {
         currentSessionId.value = null
         messages.value = []
@@ -184,12 +190,12 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
     await _doStream(messages.value)
   }
 
-  function editUserMessage(msgIndex: number, newContent: string) {
+  async function editUserMessage(msgIndex: number, newContent: string) {
     if (msgIndex < 0 || msgIndex >= messages.value.length) return
     if (messages.value[msgIndex].role !== 'user') return
     messages.value[msgIndex].content = newContent.trim()
     messages.value = messages.value.slice(0, msgIndex + 1)
-    _doStream(messages.value)
+    await _doStream(messages.value)
   }
 
   async function _doStream(pendingMessages: ChatMessage[]) {
@@ -338,6 +344,11 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
       streamingSteps.value = []
       streaming.value = false
       await loadSessions()
+      // 前端自己维护当前 session 的消息数，不依赖后端 count
+      if (sessionId) {
+        const s = sessions.value.find(s => s.id === sessionId)
+        if (s) s.message_count = messages.value.length
+      }
     }
   }
 

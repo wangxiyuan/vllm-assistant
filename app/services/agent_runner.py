@@ -66,6 +66,7 @@ class AgentRunner:
         tools: Optional[List[str]] = None,
         stream: bool = True,
         system_prompt: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> AsyncIterator[dict]:
         """streaming 对话。返回事件流，每个事件是 dict。
 
@@ -218,7 +219,7 @@ class AgentRunner:
             # 没有 tool_calls，对话结束
             # 自动存储新知识
             if text_content:
-                self._auto_remember(messages, text_content)
+                self._auto_remember(messages, text_content, session_id)
 
             yield {"type": EVENT_DONE, "data": None}
             return
@@ -238,7 +239,7 @@ class AgentRunner:
             _, final_text = await self.llm.chat_stream(**kwargs_final)
             if final_text:
                 yield {"type": EVENT_TOKEN, "data": final_text}
-                self._auto_remember(messages, final_text)
+                self._auto_remember(messages, final_text, session_id)
         except Exception as e:
             logger.exception("Failed to force final answer after max rounds")
             yield {"type": EVENT_ERROR, "data": f"工具调用超限且收尾失败: {e}"}
@@ -477,7 +478,7 @@ class AgentRunner:
                     yield snippet
             i = j if j > i else i + 1
 
-    def _auto_remember(self, messages: List[dict], response_content: str) -> None:
+    def _auto_remember(self, messages: List[dict], response_content: str, session_id: Optional[str] = None) -> None:
         """自动存储对话中的新知识
 
         从最后一条 user message 和 AI 的最终回答中提取有价值的对话知识。
@@ -492,8 +493,11 @@ class AgentRunner:
         if len(response_content) > 200 and not any(
             kw in response_content[:50] for kw in ["好的", "明白", "可以", "没问题", "抱歉"]
         ):
+            import hashlib
+            source_ref = f"conv/{session_id}/{hashlib.md5(user_msg.encode()).hexdigest()[:12]}" if session_id else None
             self.memory_service.remember(
                 content=f"## 用户问题\n{user_msg}\n\n## AI 回答\n{response_content}",
                 source_type="conversation",
                 tags=["auto", "conversation"],
+                source_ref=source_ref,
             )
