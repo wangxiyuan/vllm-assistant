@@ -4,6 +4,7 @@ vLLM Assistant - FastAPI 主应用
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from starlette.staticfiles import StaticFiles as StarletteStaticFiles
 
@@ -50,8 +51,34 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to start scheduler; service will run without background sync")
 
-    # 后台异步初始化代码仓库（学习文章功能）
-    if Config.REPOS:
+    # 种子数据：首次启动时从 REPOS env 导入到 DB（在 yield 前同步执行，确保 API 可见）
+    from app.database import SessionLocal
+    from app.models import RepoCache
+    from app.services.repo_manager import RepoManager
+
+    db = SessionLocal()
+    try:
+        existing_count = db.query(RepoCache).filter(RepoCache.status == "active").count()
+        if existing_count == 0 and Config.REPOS:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            for repo_name, clone_url in Config.REPOS.items():
+                local_path = str(RepoManager.CACHE_DIR / repo_name)
+                db.add(RepoCache(
+                    repo=repo_name,
+                    clone_url=clone_url,
+                    local_path=local_path,
+                    branch="main",
+                    status="active",
+                    created_at=now,
+                    updated_at=now,
+                ))
+            db.commit()
+            logger.info(f"Seeded {len(Config.REPOS)} repos from REPOS env to DB")
+        has_repos = db.query(RepoCache).filter(RepoCache.status == "active").count() > 0
+    finally:
+        db.close()
+
+    if has_repos:
         task = asyncio.create_task(_init_repo_caches())
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
@@ -71,13 +98,29 @@ async def lifespan(app: FastAPI):
 
 
 async def _init_repo_caches():
-    """后台异步 clone/pull 所有代码仓库（不阻塞服务启动）"""
+    """后台异步 clone/pull 所有代码仓库（不阻塞服务启动）
+
+    种子数据已在 lifespan 同步阶段写入 DB，这里只从 DB 读取并 clone。
+    """
+    from app.database import SessionLocal
+    from app.models import RepoCache
     from app.services.repo_manager import RepoManager
 
+    db = SessionLocal()
+    try:
+        repos = db.query(RepoCache).filter(RepoCache.status == "active").all()
+        repos_to_clone = [(r.repo, r.clone_url, r.branch or "main") for r in repos]
+    finally:
+        db.close()
+
+    if not repos_to_clone:
+        logger.info("No active repos to clone")
+        return
+
     manager = RepoManager()
-    for repo_name, clone_url in Config.REPOS.items():
+    for repo_name, clone_url, branch in repos_to_clone:
         try:
-            await manager.async_ensure_cloned(repo_name, clone_url, branch="main")
+            await manager.async_ensure_cloned(repo_name, clone_url, branch=branch)
         except Exception:
             logger.exception(f"Failed to clone repo {repo_name}")
 
@@ -91,9 +134,21 @@ async def _init_knowledge_base():
     from app.services.memory_service import MemoryService
 
     try:
-        # 等待所有 repo 都同步到缓存（最多等 300 秒）
+        # 从 DB 获取活跃仓库列表
+        from app.database import SessionLocal
+        from app.models import RepoCache
+        db = SessionLocal()
+        try:
+            active_repos = db.query(RepoCache).filter(RepoCache.status == "active").all()
+            expected_repos = {r.repo for r in active_repos}
+        finally:
+            db.close()
+
+        # 也检查 Config.REPOS（env 种子数据可能还没被 clone）
         if Config.REPOS:
-            expected_repos = set(Config.REPOS.keys())
+            expected_repos |= set(Config.REPOS.keys())
+
+        if expected_repos:
             logger.info(f"Waiting for repos {expected_repos} before building knowledge base...")
             for _ in range(60):
                 from app.database import SessionLocal
@@ -185,6 +240,7 @@ from app.api.articles import router as articles_router
 from app.api.sync import router as sync_router
 from app.api.model_anatomy import router as model_anatomy_router
 from app.api.users import router as users_router
+from app.api.repos import router as repos_router
 from app.api.ai_agent import router as ai_agent_router
 
 app.include_router(community_router, prefix="/api/community", tags=["Community Pulse"])
@@ -197,6 +253,7 @@ app.include_router(articles_router, prefix="/api/articles", tags=["Articles"])
 app.include_router(sync_router, prefix="/api/sync", tags=["Sync"])
 app.include_router(model_anatomy_router, prefix="/api/anatomy", tags=["Model Anatomy"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
+app.include_router(repos_router, prefix="/api/repos", tags=["Repos"])
 app.include_router(ai_agent_router, prefix="/api/ai-agent", tags=["AI Agent"])
 
 

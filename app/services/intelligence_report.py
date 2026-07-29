@@ -27,33 +27,62 @@ MAX_TOOL_ROUNDS = 10
 class IntelligenceReportGenerator:
     """洞察报告生成器（Agent 模式）"""
 
-    SOURCE_CONFIG = {
-        "vllm": {
-            "display_name": "vLLM 社区",
-            "repos": ["vllm-project/vllm"],
-            "type": "github",
-        },
-        "vllm-ascend": {
-            "display_name": "vLLM-Ascend",
-            "repos": ["vllm-project/vllm-ascend"],
-            "type": "github",
-        },
-        "sglang": {
-            "display_name": "sglang",
-            "repos": ["sgl-project/sglang"],
-            "type": "github",
-        },
-        "academic": {
+    @staticmethod
+    def _get_source_config(db=None) -> Dict[str, dict]:
+        """动态构建来源配置
+
+        从 RepoCache 读取已配置的仓库作为 GitHub 类型来源，
+        加上固定的 academic/news 来源。
+        """
+        config = {}
+
+        # 从 RepoCache 动态构建 GitHub 类型来源
+        if db is not None:
+            try:
+                from app.models import RepoCache
+                repos = db.query(RepoCache).filter(
+                    RepoCache.status == "active"
+                ).all()
+                for r in repos:
+                    # 从 clone_url 解析 owner/repo
+                    clone_url = r.clone_url
+                    if clone_url.endswith('.git'):
+                        clone_url = clone_url[:-4]
+                    parts = clone_url.rstrip('/').split('/')
+                    if len(parts) >= 2:
+                        owner_repo = f"{parts[-2]}/{parts[-1]}"
+                    else:
+                        owner_repo = f"{Config.GITHUB_OWNER}/{Config.GITHUB_REPO}"
+
+                    config[r.repo] = {
+                        "display_name": r.repo,
+                        "repos": [owner_repo],
+                        "type": "github",
+                    }
+            except Exception:
+                logger.warning("Failed to load repos from RepoCache", exc_info=True)
+
+        # 如果没有配置任何仓库，使用默认值
+        if not config:
+            config["vllm"] = {
+                "display_name": "vLLM 社区",
+                "repos": ["vllm-project/vllm"],
+                "type": "github",
+            }
+
+        # 固定来源
+        config["academic"] = {
             "display_name": "学术动态",
             "type": "manual",
             "description": "用户手动提供的学术论文信息",
-        },
-        "news": {
+        }
+        config["news"] = {
             "display_name": "新闻动态",
             "type": "web",
             "description": "行业新闻、版本发布信息",
-        },
-    }
+        }
+
+        return config
 
     # OpenAI function calling 的工具定义（引用 tools/registry 中的 schema）
     # 不再单独定义，复用已注册的工具 schema
@@ -72,9 +101,10 @@ class IntelligenceReportGenerator:
             "search_memory",
         ])
 
-    def __init__(self):
+    def __init__(self, db=None):
         self.client = get_github_client()
         self.llm: Optional[LLMClient] = None
+        self.db = db  # 用于动态构建来源配置
 
     def _get_llm(self) -> LLMClient:
         if self.llm is None:
@@ -94,12 +124,14 @@ class IntelligenceReportGenerator:
         AI 通过 function calling 自主搜索 GitHub issue/PR、读取正文和评论，
         多轮迭代后生成结构化的 Markdown 报告。
         """
-        effective_sources = self._resolve_sources(sources, excluded_sources)
+        effective_sources = self._resolve_sources(sources, excluded_sources, source_config)
+
+        source_config = self._get_source_config(self.db)
 
         # 构建可用仓库列表
         github_repos = []
         for s in effective_sources:
-            cfg = self.SOURCE_CONFIG.get(s)
+            cfg = source_config.get(s)
             if not cfg:
                 continue
             if cfg.get("type") == "github":
@@ -107,7 +139,7 @@ class IntelligenceReportGenerator:
 
         # 构建 system prompt
         system_prompt = self._build_system_prompt(
-            task_title, task_description, effective_sources, extra_prompt, github_repos
+            task_title, task_description, effective_sources, extra_prompt, github_repos, source_config
         )
 
         # Agent 循环
@@ -128,7 +160,7 @@ class IntelligenceReportGenerator:
             tools_unsupported = any(kw in err_str for kw in ("tool", "function_call", "not support", "unrecognized"))
             if tools_unsupported:
                 logger.warning(f"Agent mode failed (likely tools unsupported), falling back to single-shot: {e}")
-                report_content = self._single_shot_report(llm, task_title, task_description, effective_sources, extra_prompt, github_repos)
+                report_content = self._single_shot_report(llm, task_title, task_description, effective_sources, extra_prompt, github_repos, source_config)
             else:
                 raise
 
@@ -296,7 +328,9 @@ class IntelligenceReportGenerator:
                         "搜索关键词用英文效果更好，如 `vLLM latest news`、`LLM inference framework`。"
                         "如果搜索结果中有感兴趣的文章，可以进一步调用 extract_web_content 提取正文。"
                     )
-                    parts.append("同时调用 get_github_releases 获取 vllm-project/vllm 的最近 release。")
+                    parts.append(
+                        f"同时调用 get_github_releases 获取 {github_repos[0] if github_repos else 'vllm-project/vllm'} 的最近 release。"
+                    )
                 return "\n".join(parts)
             return ""  # 后续搜索轮让 AI 自由发挥
 
@@ -328,15 +362,16 @@ class IntelligenceReportGenerator:
     def _single_shot_report(
         self, llm: LLMClient, task_title: str, task_description: str,
         effective_sources: List[str], extra_prompt: str, github_repos: List[str],
+        source_config: dict,
     ) -> str:
         """回退模式：先批量搜索 GitHub + arXiv + web + releases，再让 AI 一次性生成报告"""
         sections = []
         for source in effective_sources:
             try:
-                cfg = self.SOURCE_CONFIG.get(source, {})
+                cfg = source_config.get(source, {})
                 if cfg.get("type") == "github":
-                    items = self._search_github_for_report(source, task_title, task_description)
-                    sections.append(self._format_github_section(source, items))
+                    items = self._search_github_for_report(source, task_title, task_description, source_config)
+                    sections.append(self._format_github_section(source, items, source_config))
                 elif source == "academic":
                     # 先用 LLM 将中文关键词翻译成英文
                     en_keywords = self._translate_keywords_to_en(task_title + " " + task_description)
@@ -374,18 +409,26 @@ class IntelligenceReportGenerator:
                     else:
                         news_lines.append("  (web 搜索未配置或不可用，以下仅展示 GitHub release 信息)")
 
-                    # 2. 获取 vllm releases
-                    releases = self._tool_get_github_releases({"repo": "vllm-project/vllm", "per_page": 5})
-                    if releases.get("results"):
+                    # 2. 获取所有 GitHub 仓库的 releases
+                    # 从动态配置中收集所有 GitHub 仓库
+                    source_config = self._get_source_config(self.db)
+                    all_releases = []
+                    for s, cfg in source_config.items():
+                        if cfg.get("type") == "github":
+                            for repo in cfg.get("repos", []):
+                                releases = self._tool_get_github_releases({"repo": repo, "per_page": 3})
+                                if releases.get("results"):
+                                    all_releases.extend(releases["results"])
+                    if all_releases:
                         news_lines.append("")
                         news_lines.append("版本发布:")
-                        for r in releases["results"][:5]:
+                        for r in all_releases[:5]:
                             news_lines.append(f"- {r['tag']} ({r.get('published_at', '')})")
                             news_lines.append(f"  {r.get('body', '')[:200]}")
                     sections.append("\n".join(news_lines))
             except Exception:
                 logger.exception(f"Failed to collect data from source '{source}' in single-shot mode")
-                display_name = self.SOURCE_CONFIG.get(source, {}).get("display_name", source)
+                display_name = source_config.get(source, {}).get("display_name", source)
                 sections.append(f"{display_name}: 数据收集失败")
 
         sections_text = "\n\n".join(sections)
@@ -406,9 +449,9 @@ class IntelligenceReportGenerator:
 
         return llm.chat_sync(prompt, max_tokens=Config.LLM_MAX_TOKENS, temperature=0.7)
 
-    def _search_github_for_report(self, source: str, task_title: str, task_description: str) -> List[dict]:
+    def _search_github_for_report(self, source: str, task_title: str, task_description: str, source_config: dict) -> List[dict]:
         """回退模式用：搜索 GitHub issue/PR"""
-        cfg = self.SOURCE_CONFIG.get(source, {})
+        cfg = source_config.get(source, {})
         repos = cfg.get("repos", [])
         keywords = self._extract_keywords(task_title + " " + task_description)
         all_items = []
@@ -497,9 +540,9 @@ class IntelligenceReportGenerator:
         # 降级：返回直接提取的英文关键词
         return en_keywords or text[:100]
 
-    def _format_github_section(self, source: str, items: List[dict]) -> str:
+    def _format_github_section(self, source: str, items: List[dict], source_config: dict) -> str:
         """回退模式用：格式化 GitHub 搜索结果"""
-        display_name = self.SOURCE_CONFIG.get(source, {}).get("display_name", source)
+        display_name = source_config.get(source, {}).get("display_name", source)
         if not items:
             return f"{display_name}: 暂无相关动态"
         lines = [f"{display_name}:"]
@@ -520,11 +563,12 @@ class IntelligenceReportGenerator:
         effective_sources: List[str],
         extra_prompt: str,
         github_repos: List[str],
+        source_config: dict,
     ) -> str:
         """构建 system prompt，注入知识库相关记忆"""
         source_descriptions = []
         for s in effective_sources:
-            cfg = self.SOURCE_CONFIG.get(s, {})
+            cfg = source_config.get(s, {})
             name = cfg.get("display_name", s)
             if cfg.get("type") == "github":
                 repos = ", ".join(cfg.get("repos", []))
@@ -768,8 +812,9 @@ class IntelligenceReportGenerator:
 
     def _get_allowed_repos(self) -> list:
         """获取所有允许的 GitHub 仓库列表"""
+        source_config = self._get_source_config(self.db)
         repos = []
-        for cfg in self.SOURCE_CONFIG.values():
+        for cfg in source_config.values():
             repos.extend(cfg.get("repos", []))
         return repos
 
@@ -950,11 +995,14 @@ class IntelligenceReportGenerator:
         return get_declared_tool_props(tool_name)
 
     def _resolve_sources(
-        self, sources: List[str], excluded_sources: Optional[List[str]] = None
+        self, sources: List[str], excluded_sources: Optional[List[str]] = None,
+        source_config: Optional[dict] = None,
     ) -> List[str]:
         """解析最终使用的来源列表"""
+        if source_config is None:
+            source_config = self._get_source_config(self.db)
         # 只保留已知的 source
-        result = [s for s in sources if s in self.SOURCE_CONFIG]
+        result = [s for s in sources if s in source_config]
         if excluded_sources:
             result = [s for s in result if s not in excluded_sources]
         return result

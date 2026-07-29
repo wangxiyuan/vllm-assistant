@@ -3,6 +3,7 @@ SQLite数据库管理模块
 仅负责 engine、Session、Base、get_db 工厂。
 模型定义在 app/models.py（DESIGN.md 312 行要求拆分）。
 """
+import logging
 import os
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Config
 from app.models import Base
+
+logger = logging.getLogger(__name__)
 
 os.makedirs(Config.DB_PATH.parent, exist_ok=True)
 
@@ -153,8 +156,42 @@ def _ensure_fts_triggers():
         for sql in triggers:
             conn.execute(DDL(sql))
 
+
+def _ensure_repo_caches_schema():
+    """确保 repo_caches 表包含 status, created_at, updated_at 列（向后兼容迁移）"""
+    from sqlalchemy import inspect, DDL
+
+    with engine.connect() as conn:
+        try:
+            existing_cols = {c["name"] for c in inspect(conn).get_columns("repo_caches")}
+        except Exception:
+            # 表可能还不存在，create_all 会处理
+            return
+
+        migrations = {
+            "status": "ALTER TABLE repo_caches ADD COLUMN status VARCHAR(20) DEFAULT 'active'",
+            "created_at": "ALTER TABLE repo_caches ADD COLUMN created_at TIMESTAMP",
+            "updated_at": "ALTER TABLE repo_caches ADD COLUMN updated_at TIMESTAMP",
+        }
+
+        for col_name, ddl in migrations.items():
+            if col_name not in existing_cols:
+                try:
+                    conn.execute(DDL(ddl))
+                    conn.commit()
+                except Exception as e:
+                    logger.warning(f"Failed to add column {col_name} to repo_caches: {e}")
+
+        # 为已有记录设置默认值（status 和 created_at）
+        cols_after = {c["name"] for c in inspect(conn).get_columns("repo_caches")}
+        if "status" in cols_after:
+            conn.execute(text("UPDATE repo_caches SET status = 'active' WHERE status IS NULL"))
+            conn.commit()
+
+
 _ensure_indexes()
 _ensure_fts_triggers()
+_ensure_repo_caches_schema()
 
 
 def get_db():

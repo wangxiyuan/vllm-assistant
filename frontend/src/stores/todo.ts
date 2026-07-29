@@ -36,6 +36,10 @@ export const useTodoStore = defineStore('todo', () => {
 
   // Insight
   const insightGenLoading = ref(false)
+  const showInsightSourceModal = ref(false)
+  const insightSourceTask = ref<TodoTask | null>(null)
+  const insightSourceSelected = ref<string[]>([])
+  const insightSourceSaving = ref(false)
 
   // Subtasks
   const subtasks = ref<TodoTask[]>([])
@@ -518,15 +522,15 @@ export const useTodoStore = defineStore('todo', () => {
     return reportId
   }
 
-  async function generateInsightFromTask(task: TodoTask) {
-    if (insightGenLoading.value) return
+  async function generateInsightFromTask(task: TodoTask, sources?: string[]) {
+    if (insightGenLoading.value || insightSourceSaving.value) return
     insightGenLoading.value = true
     try {
       const result: any = await api('/api/ai-agent/reports/generate', {
         method: 'POST',
         body: JSON.stringify({
           task_id: task.id,
-          sources: ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'],
+          sources: sources || ['academic', 'news'],
         }),
       }, { timeout: 30000 })
       useAppStore().showToast('报告生成中', result.message || '请稍后在洞察面板查看', 'success', 6000)
@@ -540,11 +544,53 @@ export const useTodoStore = defineStore('todo', () => {
     return null
   }
 
+  function openInsightSourceModal(task: TodoTask) {
+    insightSourceTask.value = task
+    insightSourceSelected.value = []
+    // 默认勾选仓库 + 学术/新闻
+    api('/api/repos').then((data: any) => {
+      const repos = data.repos || []
+      insightSourceSelected.value = [...repos.map((r: any) => r.repo), 'academic', 'news']
+    }).catch(() => {
+      insightSourceSelected.value = ['academic', 'news']
+    })
+    showInsightSourceModal.value = true
+  }
+
+  function toggleInsightSource(source: string) {
+    const idx = insightSourceSelected.value.indexOf(source)
+    if (idx >= 0) {
+      insightSourceSelected.value.splice(idx, 1)
+    } else {
+      insightSourceSelected.value.push(source)
+    }
+  }
+
+  function isInsightSourceSelected(source: string): boolean {
+    return insightSourceSelected.value.includes(source)
+  }
+
+  async function confirmGenerateInsight() {
+    if (insightSourceSaving.value || !insightSourceTask.value) return
+    if (insightSourceSelected.value.length === 0) {
+      useAppStore().showToast('请选择来源', '至少选择一个数据来源', 'error')
+      return
+    }
+    insightSourceSaving.value = true
+    try {
+      await generateInsightFromTask(insightSourceTask.value, insightSourceSelected.value)
+      showInsightSourceModal.value = false
+    } finally {
+      insightSourceSaving.value = false
+    }
+  }
+
   return {
     tasks, todoStats, loading, filterStatus, filterPriority, sortBy, sortOrder,
     useKanban, showAddModal, newTask, newTaskLoading,
     selectedTask, selectedTaskDetails, taskDrawerLoading, editingTask, editTaskForm,
     dedupLoading, dedupResult, insightGenLoading,
+    showInsightSourceModal, insightSourceTask, insightSourceSelected, insightSourceSaving,
     subtasks, subtasksLoading, showSubtaskForm, newSubtask,
     editingSubtaskId, editSubtaskForm,
     tasksByPriority, todoCount, inProgressCount, doneCount,
@@ -553,6 +599,7 @@ export const useTodoStore = defineStore('todo', () => {
     openTask, closeTask, loadTaskDetails,
     startEditTask, cancelEditTask, saveTask,
     runDedupCheck, moveTaskPriority, openTaskInsight, generateInsightFromTask,
+    openInsightSourceModal, toggleInsightSource, isInsightSourceSelected, confirmGenerateInsight,
     loadSubtasks, createSubtask, toggleSubtaskDone, deleteSubtask,
     startEditSubtask, cancelEditSubtask, saveSubtask,
     resolveRefLoading, resolveRef, addRef, removeRef,

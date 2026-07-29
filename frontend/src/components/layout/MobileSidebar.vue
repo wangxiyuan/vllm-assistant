@@ -3,11 +3,13 @@ import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useUsersStore } from '@/stores/users'
+import { useReposStore } from '@/stores/repos'
 
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
 const usersStore = useUsersStore()
+const reposStore = useReposStore()
 
 interface NavItem {
   name: string
@@ -103,6 +105,16 @@ function navigate(name: string) {
               <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
             </svg>
             <span>用户管理</span>
+          </button>
+          <button class="nav-item" @click="reposStore.openManager(); appStore.mobileMenuOpen = false">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="13" r="3" />
+              <path d="M4 19.5v-4.38a7 7 0 0 1 6-6.93V6.5" />
+              <path d="M20 19.5v-4.38a7 7 0 0 0-6-6.93V6.5" />
+              <path d="M12 3v3.5" />
+              <line x1="3" y1="21" x2="21" y2="21" />
+            </svg>
+            <span>仓库管理</span>
           </button>
         </nav>
       </div>

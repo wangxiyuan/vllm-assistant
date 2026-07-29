@@ -1,9 +1,23 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, computed } from 'vue'
 import { useIntelStore } from '@/stores/intel'
+import { useReposStore } from '@/stores/repos'
 import { renderMarkdown } from '@/composables/useMarkdown'
 
 const intelStore = useIntelStore()
+const reposStore = useReposStore()
+
+const intelSourceOptions = computed(() => {
+  const repoOptions = reposStore.repos.map(r => ({
+    value: r.repo,
+    label: r.repo + ' 社区',
+  }))
+  return [
+    ...repoOptions,
+    { value: 'academic', label: '学术动态' },
+    { value: 'news', label: '新闻动态' },
+  ]
+})
 
 onMounted(() => {
   intelStore.loadReports()
@@ -16,7 +30,7 @@ onMounted(() => {
     <div class="view-header">
       <h2 class="view-title">洞察面板</h2>
       <div class="view-actions">
-        <button class="btn btn-primary btn-sm" @click="intelStore.showModal = true; intelStore.loadIntelTasks()">
+        <button class="btn btn-primary btn-sm" @click="intelStore.openModal()">
           + 生成报告
         </button>
       </div>
@@ -53,7 +67,7 @@ onMounted(() => {
       </div>
       <div v-if="intelStore.reports.length === 0 && !intelStore.loading" class="empty-state">
         <p>暂无报告</p>
-        <button class="btn btn-primary btn-sm" @click="intelStore.showModal = true">生成第一份报告</button>
+        <button class="btn btn-primary btn-sm" @click="intelStore.openModal()">生成第一份报告</button>
       </div>
     </div>
 
@@ -82,13 +96,7 @@ onMounted(() => {
             <div class="form-group">
               <label class="form-label">数据来源</label>
               <div class="checkbox-group">
-                <label v-for="opt in [
-                  { value: 'vllm', label: 'vLLM 社区' },
-                  { value: 'vllm-ascend', label: 'vLLM-Ascend' },
-                  { value: 'sglang', label: 'sglang' },
-                  { value: 'academic', label: '学术动态' },
-                  { value: 'news', label: '新闻动态' },
-                ]" :key="opt.value" class="checkbox-label">
+                <label v-for="opt in intelSourceOptions" :key="opt.value" class="checkbox-label">
                   <input type="checkbox" :checked="intelStore.isSourceSelected(opt.value)"
                          @change="intelStore.toggleSource(opt.value)" />
                   {{ opt.label }}

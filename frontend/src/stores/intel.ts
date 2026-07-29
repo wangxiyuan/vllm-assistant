@@ -11,7 +11,7 @@ export const useIntelStore = defineStore('intel', () => {
   const intelForm = ref({
     task_id: '',
     title: '',
-    sources: ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'] as string[],
+    sources: [] as string[],
     excluded_sources: [] as string[],
     extra_prompt: '',
   })
@@ -42,6 +42,23 @@ export const useIntelStore = defineStore('intel', () => {
       const data: any = await api('/api/personal-todo/tasks?' + params)
       intelTasks.value = data.tasks || []
     } catch (_) {}
+  }
+
+  function openModal() {
+    showModal.value = true
+    loadIntelTasks()
+    // 初始化默认来源：从仓库列表和固定来源中填充
+    if (intelForm.value.sources.length === 0) {
+      const defaultSources = ['academic', 'news']
+      // 通过 API 获取仓库列表
+      api('/api/repos').then((data: any) => {
+        const repos = data.repos || []
+        const repoNames = repos.map((r: any) => r.repo)
+        intelForm.value.sources = [...repoNames, ...defaultSources]
+      }).catch(() => {
+        intelForm.value.sources = [...defaultSources]
+      })
+    }
   }
 
   function toggleSource(source: string) {
@@ -282,7 +299,7 @@ export const useIntelStore = defineStore('intel', () => {
   }
 
   function intelSourceLabel(source: string): string {
-    const map: Record<string, string> = { vllm: 'vLLM', 'vllm-ascend': 'vLLM-Ascend', sglang: 'sglang', academic: '学术', news: '新闻' }
+    const map: Record<string, string> = { academic: '学术', news: '新闻' }
     return map[source] || source
   }
 
@@ -293,7 +310,7 @@ export const useIntelStore = defineStore('intel', () => {
   return {
     reports, loading, showModal, intelForm, genLoading, intelTasks,
     selectedReport, reportDetails, reportModalLoading, pollingTimer,
-    loadReports, loadIntelTasks, toggleSource, isSourceSelected,
+    loadReports, loadIntelTasks, openModal, toggleSource, isSourceSelected,
     generateReport, pollReportStatus, viewReport, closeReport,
     deleteReport, regenerateReport, copyReportMarkdown,
     intelSourceLabel, intelSourceClass,

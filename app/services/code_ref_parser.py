@@ -11,15 +11,32 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from app.config import Config
-
 
 class CodeRefParser:
     """解析 Markdown 中的代码引用，支持多仓库"""
 
     def __init__(self):
-        # 从配置中获取所有仓库名，构建正则前缀
-        self.repo_names = sorted(Config.REPOS.keys(), key=len, reverse=True)
+        # 从 DB 获取所有活跃仓库名，构建正则前缀
+        self._refresh_repo_names()
+        self._build_pattern()
+
+    def _refresh_repo_names(self):
+        """从 DB 重新加载活跃仓库列表"""
+        from app.database import SessionLocal
+        from app.models import RepoCache
+        db = SessionLocal()
+        try:
+            names = [r.repo for r in db.query(RepoCache).filter(
+                RepoCache.status == "active"
+            ).all()]
+            self.repo_names = sorted(names, key=len, reverse=True)
+        finally:
+            db.close()
+        if not self.repo_names:
+            self.repo_names = ["vllm"]  # 默认值
+
+    def _build_pattern(self):
+        """构建正则表达式"""
         prefix_pattern = "|".join(re.escape(n) for n in self.repo_names)
 
         # 匹配格式（反引号必须成对出现，避免误匹配）：

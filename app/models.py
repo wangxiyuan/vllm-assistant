@@ -518,6 +518,24 @@ class RepoCache(Base):
     branch = Column(String(50), default="main")
     last_synced_at = Column(DateTime)
     commit_sha = Column(String(40))
+    status = Column(String(20), default="active")  # active / deleted
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                        onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "repo": self.repo,
+            "clone_url": self.clone_url,
+            "local_path": self.local_path,
+            "branch": self.branch or "main",
+            "last_synced_at": _iso_utc(self.last_synced_at),
+            "commit_sha": self.commit_sha,
+            "status": self.status or "active",
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }
 
 
 class User(Base):

@@ -44,11 +44,13 @@ class AddByNumberRequest(BaseModel):
     """通过 issue/PR 编号手动添加到特别关注
 
     item_type 可选（不传则自动从 GitHub 推断是 issue 还是 PR）。
+    repo 必填，指定仓库名称（如 vllm、sglang），从 RepoCache 中查找。
     """
     number: int
     item_type: str = ""  # 'issue' or 'pr'，留空自动推断
     note: str = ""  # 用户备注
     assignee_id: Optional[int] = None  # 责任人
+    repo: str  # 仓库名称（如 vllm、sglang），必填
 
     @model_validator(mode="after")
     def validate_number(self):
@@ -161,12 +163,47 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
 
     自动填充 title/url/state/area/issue_type 等元信息。
     item_type 可选：不传则自动从 GitHub 推断是 issue 还是 PR。
+    repo 可选：不传则使用 Config 中的默认仓库。
     用 def（非 async）避免同步 GitHub API 调用阻塞事件循环。
     """
     if req.number <= 0:
         raise HTTPException(status_code=400, detail="number must be positive")
 
+    # 解析仓库的 owner/name
+    # 从 RepoCache 中查找指定仓库
+    from app.models import RepoCache
+    repo_cache = db.query(RepoCache).filter(
+        RepoCache.repo == req.repo,
+        RepoCache.status == "active",
+    ).first()
+    if not repo_cache:
+        raise HTTPException(status_code=400, detail=f"Repo '{req.repo}' not found")
+    # 从 clone_url 解析 owner/name，如 https://github.com/owner/repo.git
+    clone_url = repo_cache.clone_url
+    if clone_url.endswith('.git'):
+        clone_url = clone_url[:-4]
+    # 提取 owner/repo 路径
+    parts = clone_url.rstrip('/').split('/')
+    if len(parts) >= 2:
+        repo_owner = parts[-2]
+        repo_name = parts[-1]
+    else:
+        repo_owner = Config.GITHUB_OWNER
+        repo_name = Config.GITHUB_REPO
+
     client = GitHubClient()
+    # 暂存原始 base_url，构建临时 base_url
+    original_base_url = client.base_url
+    temp_base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+    client.base_url = temp_base_url
+
+    # 生成 repo 特定的 URL
+    def _repo_pulls_url(number: int) -> str:
+        return f"https://github.com/{repo_owner}/{repo_name}/pull/{number}"
+
+    def _repo_issues_url(number: int) -> str:
+        return f"https://github.com/{repo_owner}/{repo_name}/issues/{number}"
+
     title = ""
     url = ""
     state = ""
@@ -182,7 +219,7 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
                 raise HTTPException(status_code=404, detail=f"PR #{req.number} not found")
             title = pr.get("title", "")
             state = "merged" if pr.get("merged_at") else pr.get("state", "open")
-            url = pr.get("html_url", Config.get_pulls_url(req.number))
+            url = pr.get("html_url", _repo_pulls_url(req.number))
             try:
                 mapper = AreaMapper()
                 files = client.get_pull_files(req.number) or []
@@ -201,7 +238,7 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
                 raise HTTPException(status_code=404, detail=f"Issue #{req.number} not found")
             title = issue.get("title", "")
             state = issue.get("state", "open")
-            url = issue.get("html_url", Config.get_issues_url(req.number))
+            url = issue.get("html_url", _repo_issues_url(req.number))
             issue_type = _classify_issue_type(title) or "other"
             try:
                 mapper = AreaMapper()
@@ -216,7 +253,7 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
                 item_type = "pr"
                 title = pr.get("title", "")
                 state = "merged" if pr.get("merged_at") else pr.get("state", "open")
-                url = pr.get("html_url", Config.get_pulls_url(req.number))
+                url = pr.get("html_url", _repo_pulls_url(req.number))
                 try:
                     mapper = AreaMapper()
                     files = client.get_pull_files(req.number) or []
@@ -238,12 +275,12 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
                     item_type = "pr"
                     title = issue.get("title", "")
                     state = "merged" if issue.get("pull_request", {}).get("merged_at") else issue.get("state", "open")
-                    url = issue.get("html_url", Config.get_pulls_url(req.number))
+                    url = issue.get("html_url", _repo_pulls_url(req.number))
                 else:
                     item_type = "issue"
                     title = issue.get("title", "")
                     state = issue.get("state", "open")
-                    url = issue.get("html_url", Config.get_issues_url(req.number))
+                    url = issue.get("html_url", _repo_issues_url(req.number))
                     issue_type = _classify_issue_type(title) or "other"
                 try:
                     mapper = AreaMapper()
@@ -256,6 +293,9 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
     except Exception as e:
         logger.exception("Error fetching item from GitHub")
         raise HTTPException(status_code=502, detail=f"Failed to fetch from GitHub: {e}")
+    finally:
+        # 恢复原始 base_url
+        client.base_url = original_base_url
 
     # 幂等：已存在则直接返回
     existing = db.query(Watchlist).filter(

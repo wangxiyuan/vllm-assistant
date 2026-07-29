@@ -190,3 +190,15 @@ export interface IssueDetails {
   body: string
   [key: string]: any
 }
+
+export interface RepoConfig {
+  id: number
+  repo: string
+  clone_url: string
+  branch: string
+  last_synced_at: string | null
+  commit_sha: string | null
+  status: string
+  created_at: string
+  updated_at: string
+}

@@ -757,8 +757,16 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # 学习文章 - 代码仓库同步（仅在配置了 REPOS 时启用）
-    if Config.REPOS:
+    # 学习文章 - 代码仓库同步（只要有活跃仓库就启用）
+    from app.database import SessionLocal
+    from app.models import RepoCache
+    db = SessionLocal()
+    try:
+        has_active_repos = db.query(RepoCache).filter(RepoCache.status == "active").count() > 0
+    finally:
+        db.close()
+
+    if has_active_repos:
         scheduler.add_job(
             sync_all_repos_job,
             trigger=IntervalTrigger(minutes=Config.CODE_SYNC_INTERVAL),
@@ -805,7 +813,14 @@ def start_scheduler():
             sync_areas()
             sync_community_data()
             sync_user_prs()
-            if Config.REPOS:
+            from app.database import SessionLocal
+            from app.models import RepoCache
+            db = SessionLocal()
+            try:
+                has_repos = db.query(RepoCache).filter(RepoCache.status == "active").count() > 0
+            finally:
+                db.close()
+            if has_repos:
                 sync_all_repos_job()
             _refresh_personal_task_refs()
         except Exception:
@@ -875,22 +890,30 @@ def sync_all_repos_job():
         return
     _running_jobs.add(job_id)
     try:
+        from app.database import SessionLocal
+        from app.models import RepoCache
         from app.services.repo_manager import RepoManager
 
-        if not Config.REPOS:
-            logger.warning("No REPOS configured, skipping code sync")
+        db = SessionLocal()
+        try:
+            active_repos = db.query(RepoCache).filter(RepoCache.status == "active").all()
+        finally:
+            db.close()
+
+        if not active_repos:
+            logger.warning("No active repos in DB, skipping code sync")
             return
 
         manager = RepoManager()
         has_changes = False
-        for repo_name in Config.REPOS:
+        for repo_record in active_repos:
             try:
-                result = manager.pull_and_sync(repo_name)
-                logger.info(f"Repo {repo_name} synced: {result}")
+                result = manager.pull_and_sync(repo_record.repo)
+                logger.info(f"Repo {repo_record.repo} synced: {result}")
                 if result.get("created", 0) > 0 or result.get("updated", 0) > 0:
                     has_changes = True
             except Exception:
-                logger.exception(f"Error syncing repo {repo_name}")
+                logger.exception(f"Error syncing repo {repo_record.repo}")
 
         # 对所有受影响文件做行号越界检查
         try:

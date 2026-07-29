@@ -1,15 +1,8 @@
 import { marked } from 'marked'
-import hljs from 'highlight.js'
 import { esc } from '@/utils/helpers'
 
 marked.setOptions({
   gfm: true,
-  highlight(code: string, lang: string): string {
-    if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(code, { language: lang }).value
-    }
-    return hljs.highlightAuto(code).value
-  },
 })
 
 export function renderMarkdown(text: string): string {

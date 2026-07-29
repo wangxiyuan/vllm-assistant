@@ -304,7 +304,20 @@ class AgentRunner:
         )
 
         # 构建已配置仓库列表，让 AI 知道它能操作哪些项目
-        configured_repos = list(Config.REPOS.keys())
+        from app.database import SessionLocal
+        from app.models import RepoCache
+        db = SessionLocal()
+        try:
+            configured_repos = [r.repo for r in db.query(RepoCache).filter(
+                RepoCache.status == "active"
+            ).all()]
+        finally:
+            db.close()
+        # 也检查 Config.REPOS（向后兼容 env 配置）
+        if Config.REPOS:
+            for name in Config.REPOS:
+                if name not in configured_repos:
+                    configured_repos.append(name)
         repo_list_text = ""
         if configured_repos:
             repo_names = "、".join(configured_repos)

@@ -5,6 +5,7 @@ import { usePRCenterStore } from '@/stores/prCenter'
 import { useAppStore } from '@/stores/app'
 import { useUsersStore } from '@/stores/users'
 import { useTodoStore } from '@/stores/todo'
+import { useReposStore } from '@/stores/repos'
 import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
 import { timeAgo, statusLabel, sourceLabel, priorityClass, statusClass } from '@/utils/helpers'
 import Icon from '@/components/common/Icon.vue'
@@ -14,6 +15,7 @@ const prStore = usePRCenterStore()
 const appStore = useAppStore()
 const usersStore = useUsersStore()
 const todoStore = useTodoStore()
+const reposStore = useReposStore()
 
 onMounted(() => {
   watchlistStore.loadWatchlist()
@@ -121,6 +123,13 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
             </button>
           </div>
           <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label form-label-required">项目</label>
+              <select class="select" v-model="watchlistStore.manualAddRepo">
+                <option value="" disabled>请选择项目</option>
+                <option v-for="r in reposStore.repos" :key="r.id" :value="r.repo">{{ r.repo }}</option>
+              </select>
+            </div>
             <div class="form-group">
               <label class="form-label form-label-required">Issue/PR 编号</label>
               <input type="number" class="input" v-model.number="watchlistStore.manualAddNumber"

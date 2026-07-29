@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/app'
 import { timeAgo } from '@/utils/helpers'
 import { useUsersStore } from '@/stores/users'
 import { useIntelStore } from '@/stores/intel'
+import { useReposStore } from '@/stores/repos'
 import { useRouter } from 'vue-router'
 import { statusLabel, sourceLabel, priorityClass, statusClass } from '@/utils/helpers'
 import { renderMarkdown } from '@/composables/useMarkdown'
@@ -14,7 +15,20 @@ const todoStore = useTodoStore()
 const appStore = useAppStore()
 const usersStore = useUsersStore()
 const intelStore = useIntelStore()
+const reposStore = useReposStore()
 const router = useRouter()
+
+const insightSourceOptions = computed(() => {
+  const repoOptions = reposStore.repos.map(r => ({
+    value: r.repo,
+    label: r.repo + ' 社区',
+  }))
+  return [
+    ...repoOptions,
+    { value: 'academic', label: '学术动态' },
+    { value: 'news', label: '新闻动态' },
+  ]
+})
 
 // Edit form ref input
 const editRefInput = ref('')
@@ -148,8 +162,7 @@ async function openInsight(task: any) {
 }
 
 async function generateInsight(task: any) {
-  await todoStore.generateInsightFromTask(task)
-  router.push({ name: 'intelligence' })
+  await todoStore.openInsightSourceModal(task)
 }
 </script>
 
@@ -724,6 +737,39 @@ async function generateInsight(task: any) {
       </div>
     </Teleport>
   </div>
+
+  <!-- Insight Source Selection Modal -->
+  <Teleport to="body">
+    <div v-if="todoStore.showInsightSourceModal" class="modal-backdrop" @click="todoStore.showInsightSourceModal = false">
+      <div class="modal" @click.stop>
+        <div class="modal-header">
+          <h3>选择数据来源</h3>
+          <button class="modal-close" @click="todoStore.showInsightSourceModal = false" title="关闭">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">生成洞察报告的数据来源</label>
+            <div class="checkbox-group">
+              <label v-for="opt in insightSourceOptions" :key="opt.value" class="checkbox-label">
+                <input type="checkbox" :checked="todoStore.isInsightSourceSelected(opt.value)"
+                       @change="todoStore.toggleInsightSource(opt.value)" />
+                {{ opt.label }}
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" @click="todoStore.showInsightSourceModal = false">取消</button>
+          <button class="btn btn-primary" :disabled="todoStore.insightSourceSaving"
+                  @click="todoStore.confirmGenerateInsight()">
+            {{ todoStore.insightSourceSaving ? '生成中…' : '确认生成' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>

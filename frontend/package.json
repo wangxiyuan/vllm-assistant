@@ -9,11 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.5.0",
-    "vue-router": "^4.4.0",
-    "pinia": "^2.1.0",
     "marked": "^12.0.0",
-    "highlight.js": "^11.9.0"
+    "pinia": "^2.1.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.4.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.0",

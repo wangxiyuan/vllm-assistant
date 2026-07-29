@@ -128,11 +128,9 @@ echo ""
 # 构建前端（Vue 3 SPA）
 print_info "构建前端..."
 cd frontend
-if [ ! -d "node_modules" ]; then
-    print_info "安装前端依赖..."
-    npm install
-fi
-npm run build 2>/dev/null && {
+print_info "安装前端依赖..."
+npm install
+npm run build && {
     print_success "前端构建成功"
 } || {
     print_warning "前端构建失败，请检查 frontend/ 目录"

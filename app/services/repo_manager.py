@@ -4,8 +4,10 @@
 
 多仓库管理：clone、pull、同步到 LocalCodeCache
 """
+import asyncio
 import hashlib
 import logging
+import shutil
 import subprocess as _subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +16,27 @@ from typing import Dict, List, Optional
 from app.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def get_active_repos() -> Dict[str, dict]:
+    """从 DB 查询所有活跃仓库，返回 {repo_name: {clone_url, branch, ...}}"""
+    from app.database import SessionLocal
+    from app.models import RepoCache
+
+    db = SessionLocal()
+    try:
+        records = db.query(RepoCache).filter(RepoCache.status == "active").all()
+        return {
+            r.repo: {
+                "clone_url": r.clone_url,
+                "branch": r.branch or "main",
+                "local_path": r.local_path,
+                "id": r.id,
+            }
+            for r in records
+        }
+    finally:
+        db.close()
 
 
 class RepoManager:
@@ -32,9 +55,8 @@ class RepoManager:
         """
         异步确保仓库已 clone（不阻塞服务启动）。
         已存在则 git pull --ff-only，不存在则 git clone --depth 1。
-        clone/pull 完成后自动同步到 LocalCodeCache。
+        clone/pull 完成后自动同步到 LocalCodeCache 并更新 RepoCache。
         """
-        import asyncio
 
         local_path = self.get_local_path(repo_name)
         if local_path.exists():
@@ -62,12 +84,28 @@ class RepoManager:
                 raise RuntimeError(f"Failed to clone {repo_name}: {stderr.decode()}")
             logger.info(f"git clone succeeded for {repo_name}")
 
+        # 获取当前 commit SHA
+        commit_sha = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "rev-parse", "HEAD",
+                cwd=str(local_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                commit_sha = stdout.decode().strip()
+        except Exception:
+            pass
+
         # clone/pull 完成后同步到 LocalCodeCache
         try:
             from app.database import SessionLocal
             db = SessionLocal()
             try:
                 stats = self._sync_to_cache(repo_name, local_path, db)
+                self._upsert_repo_cache(db, repo_name, clone_url, branch, commit_sha)
                 db.commit()
                 logger.info(f"Synced {repo_name} to cache: {stats}")
             except Exception:
@@ -83,23 +121,47 @@ class RepoManager:
         同步单个仓库：git pull → 更新 LocalCodeCache。
         串行执行（SQLite 不支持并发写）。
         """
+        from app.database import SessionLocal
+        from app.models import RepoCache
+
         local_path = self.get_local_path(repo_name)
         if not local_path.exists():
             return {"status": "not_cloned", "repo": repo_name}
 
+        # 获取 repo 的 branch 和 clone_url
+        db = SessionLocal()
+        repo_record = db.query(RepoCache).filter(
+            RepoCache.repo == repo_name, RepoCache.status == "active"
+        ).first()
+        branch = repo_record.branch if repo_record else "main"
+        clone_url = repo_record.clone_url if repo_record else ""
+        db.close()
+
         # git pull
         result = _subprocess.run(
-            ["git", "pull", "--ff-only", "origin", "main"],
+            ["git", "pull", "--ff-only", "origin", branch],
             cwd=str(local_path), capture_output=True, text=True,
         )
         if result.returncode != 0:
             return {"status": "pull_failed", "repo": repo_name, "error": result.stderr}
 
+        # 获取当前 commit SHA
+        commit_sha = None
+        try:
+            sha_result = _subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(local_path), capture_output=True, text=True,
+            )
+            if sha_result.returncode == 0:
+                commit_sha = sha_result.stdout.strip()
+        except Exception:
+            pass
+
         # 同步到 LocalCodeCache
-        from app.database import SessionLocal
         db = SessionLocal()
         try:
             stats = self._sync_to_cache(repo_name, local_path, db)
+            self._upsert_repo_cache(db, repo_name, clone_url, branch, commit_sha)
             db.commit()
             return {"status": "ok", "repo": repo_name, **stats}
         except Exception:
@@ -193,3 +255,77 @@ class RepoManager:
             db.commit()
         finally:
             db.close()
+
+    def _upsert_repo_cache(self, db, repo_name: str, clone_url: str,
+                           branch: str, commit_sha: Optional[str]):
+        """写入或更新 RepoCache 记录"""
+        from app.models import RepoCache
+
+        local_path = str(self.get_local_path(repo_name))
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        record = db.query(RepoCache).filter(RepoCache.repo == repo_name).first()
+        if record:
+            record.clone_url = clone_url
+            record.local_path = local_path
+            record.branch = branch
+            record.last_synced_at = now
+            if commit_sha:
+                record.commit_sha = commit_sha
+            record.updated_at = now
+        else:
+            db.add(RepoCache(
+                repo=repo_name,
+                clone_url=clone_url,
+                local_path=local_path,
+                branch=branch,
+                last_synced_at=now,
+                commit_sha=commit_sha,
+                status="active",
+                created_at=now,
+                updated_at=now,
+            ))
+
+    def delete_local_repo(self, repo_name: str) -> bool:
+        """删除本地仓库目录"""
+        local_path = self.get_local_path(repo_name)
+        if local_path.exists():
+            try:
+                shutil.rmtree(str(local_path))
+                logger.info(f"Deleted local repo directory: {local_path}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to delete local repo {repo_name}: {e}")
+                return False
+        return True
+
+    def checkout_branch(self, repo_name: str, branch: str) -> bool:
+        """切换仓库分支"""
+        local_path = self.get_local_path(repo_name)
+        if not local_path.exists():
+            return False
+        try:
+            # fetch then checkout
+            _subprocess.run(
+                ["git", "fetch", "origin", branch],
+                cwd=str(local_path), capture_output=True, text=True,
+            )
+            result = _subprocess.run(
+                ["git", "checkout", branch],
+                cwd=str(local_path), capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                # 尝试创建并跟踪远程分支
+                result = _subprocess.run(
+                    ["git", "checkout", "-b", branch, f"origin/{branch}"],
+                    cwd=str(local_path), capture_output=True, text=True,
+                )
+            if result.returncode == 0:
+                logger.info(f"Checked out branch '{branch}' for {repo_name}")
+                return True
+            else:
+                logger.error(f"Failed to checkout branch '{branch}' for {repo_name}: {result.stderr}")
+                return False
+        except Exception as e:
+            logger.exception(f"Error checking out branch for {repo_name}: {e}")
+            return False

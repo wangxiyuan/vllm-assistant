@@ -576,7 +576,7 @@ def _generate_report_background(
 
     db = SessionLocal()
     try:
-        generator = IntelligenceReportGenerator()
+        generator = IntelligenceReportGenerator(db=db)
         result = generator.generate_report(
             task_title=task_title,
             task_description=task_description,

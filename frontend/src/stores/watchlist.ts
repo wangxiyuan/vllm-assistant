@@ -11,6 +11,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
 
   // Add modal
   const showAddModal = ref(false)
+  const manualAddRepo = ref('')  // 选中的仓库名称，空字符串表示默认仓库
   const manualAddType = ref('issue')
   const manualAddNumber = ref('')
   const manualAddLoading = ref(false)
@@ -124,6 +125,10 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       useAppStore().showToast('编号无效', '请输入正确的 issue/PR 编号', 'error')
       return
     }
+    if (!manualAddRepo.value) {
+      useAppStore().showToast('请选择项目', '请先选择一个仓库项目', 'error')
+      return
+    }
     if (manualAddLoading.value) return
     const prKey = _watchKey(num, 'pr')
     const issueKey = _watchKey(num, 'issue')
@@ -136,9 +141,10 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     try {
       const note = manualAddNote.value.trim()
       const assignee_id = manualAddAssigneeId.value
+      const repo = manualAddRepo.value
       const item: any = await api('/api/watchlist/add-by-number', {
         method: 'POST',
-        body: JSON.stringify({ number: num, note, assignee_id }),
+        body: JSON.stringify({ number: num, note, assignee_id, repo }),
       }, { timeout: 30000 })
       const key = _watchKey(item.number, item.item_type)
       watchlistSet.value.add(key)
@@ -168,6 +174,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       }
       await loadWatchlist()
       useAppStore().showToast('已加入关注', `#${num} 已加入特别关注`, 'success')
+      manualAddRepo.value = ''
       manualAddNumber.value = ''
       manualAddNote.value = ''
       manualAddAssigneeId.value = null
@@ -189,12 +196,14 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   }
 
   function openAddModal() {
+    manualAddRepo.value = ''
     showAddModal.value = true
     loadManualAddTaskList()
   }
 
   function closeAddModal() {
     showAddModal.value = false
+    manualAddRepo.value = ''
   }
 
   async function loadManualAddTaskList() {
@@ -344,7 +353,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
 
   return {
     watchlist, watchlistSet, watchlistTab, watchlistAssigneeFilter, filteredWatchlist,
-    showAddModal, manualAddType, manualAddNumber, manualAddLoading,
+    showAddModal, manualAddRepo, manualAddType, manualAddNumber, manualAddLoading,
     manualAddNote, manualAddAssigneeId, manualAddLinkTaskMode,
     manualAddTaskSearchQuery, manualAddTaskSearchResults, manualAddTaskSearchLoading,
     manualAddTaskOpen, manualAddNewTaskTitle, manualAddNewTaskPriority,
