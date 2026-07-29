@@ -54,6 +54,79 @@ const isStreamingHere = computed(() =>
   agentStore.currentSessionId === agentStore.activeStreamingSessionId
 )
 
+const isComposing = ref(false)
+
+const STORAGE_KEY = 'ai-agent-quick-prompts'
+const DEFAULT_PROMPTS = [
+  '帮我分析这个项目的架构',
+  '最近有哪些新的 PR？',
+  '帮我查一下知识库中关于 vLLM 的信息',
+  '总结一下我关注的仓库动态',
+]
+
+function loadQuickPrompts(): string[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) {
+      const arr = JSON.parse(raw)
+      if (Array.isArray(arr)) return arr as string[]
+    }
+  } catch (_) {}
+  return [...DEFAULT_PROMPTS]
+}
+
+function saveQuickPrompts() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(quickPrompts.value))
+}
+
+const quickPrompts = ref<string[]>(loadQuickPrompts())
+const editingPromptIdx = ref<number | null>(null)
+const editingPromptText = ref('')
+const showAddPrompt = ref(false)
+const newPromptText = ref('')
+
+function usePrompt(text: string) {
+  inputText.value = text
+}
+
+function startEditPrompt(idx: number) {
+  editingPromptIdx.value = idx
+  editingPromptText.value = quickPrompts.value[idx]
+}
+
+function saveEditPrompt() {
+  if (editingPromptIdx.value !== null && editingPromptText.value.trim()) {
+    quickPrompts.value[editingPromptIdx.value] = editingPromptText.value.trim()
+    saveQuickPrompts()
+  }
+  editingPromptIdx.value = null
+  editingPromptText.value = ''
+}
+
+function cancelEditPrompt() {
+  editingPromptIdx.value = null
+  editingPromptText.value = ''
+}
+
+function deletePrompt(idx: number) {
+  quickPrompts.value.splice(idx, 1)
+  saveQuickPrompts()
+}
+
+function addPrompt() {
+  if (newPromptText.value.trim()) {
+    quickPrompts.value.push(newPromptText.value.trim())
+    saveQuickPrompts()
+  }
+  newPromptText.value = ''
+  showAddPrompt.value = false
+}
+
+function resetPrompts() {
+  quickPrompts.value = [...DEFAULT_PROMPTS]
+  saveQuickPrompts()
+}
+
 function hasArgs(args: any): boolean {
   return args && typeof args === 'object' && Object.keys(args).length > 0
 }
@@ -181,6 +254,7 @@ watch(() => agentStore.streamingContent, () => {
 })
 
 async function send() {
+  if (isComposing.value) return
   const text = inputText.value.trim()
   if (!text) return
   inputText.value = ''
@@ -498,18 +572,53 @@ const sortedKbTypes = computed(() => {
             <div class="msg-content">{{ agentStore.error }}</div>
           </div>
 
-          <div v-if="agentStore.messages.length === 0 && !agentStore.streaming" class="empty-state" style="padding:var(--space-9);text-align:center;color:var(--text-tertiary);">
-            <p>开始与 AI Agent 对话</p>
-            <p class="empty-desc">支持 GitHub 查询、代码分析、知识库检索等</p>
+          <div v-if="agentStore.messages.length === 0 && !agentStore.streaming" class="quick-prompts-area">
+            <p class="quick-prompts-title">常用问题</p>
+            <div class="quick-prompts-grid">
+              <template v-for="(prompt, idx) in quickPrompts" :key="idx">
+                <div v-if="editingPromptIdx === idx" class="quick-prompt-card editing">
+                  <input class="input input-sm w-100" v-model="editingPromptText" @keydown.enter.prevent="saveEditPrompt()" @keydown.escape="cancelEditPrompt()" />
+                  <div class="quick-prompt-actions">
+                    <button class="btn btn-xs btn-primary" @click="saveEditPrompt()">保存</button>
+                    <button class="btn btn-xs" @click="cancelEditPrompt()">取消</button>
+                  </div>
+                </div>
+                <div v-else class="quick-prompt-card" @click="usePrompt(prompt)" role="button" tabindex="0">
+                  <span class="quick-prompt-text">{{ prompt }}</span>
+                  <button class="quick-prompt-edit" @click.stop="startEditPrompt(idx)" title="编辑">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                  <button class="quick-prompt-delete" @click.stop="deletePrompt(idx)" title="删除">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+              </template>
+              <div v-if="showAddPrompt" class="quick-prompt-card editing">
+                <input class="input input-sm w-100" v-model="newPromptText" placeholder="输入新的常用问题…" @keydown.enter.prevent="addPrompt()" @keydown.escape="showAddPrompt = false; newPromptText = ''" />
+                <div class="quick-prompt-actions">
+                  <button class="btn btn-xs btn-primary" @click="addPrompt()">添加</button>
+                  <button class="btn btn-xs" @click="showAddPrompt = false; newPromptText = ''">取消</button>
+                </div>
+              </div>
+              <button v-else class="quick-prompt-card add-card" @click="showAddPrompt = true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>添加常用问题</span>
+              </button>
+            </div>
+            <div class="quick-prompts-footer">
+              <button class="btn btn-xs" @click="resetPrompts()">恢复默认</button>
+            </div>
           </div>
         </div>
 
         <div class="chat-input-bar">
-          <input type="text" class="input input-lg chat-input"
-                 v-model="inputText"
-                 placeholder="输入消息…"
-                 @keydown.enter.prevent="send()"
-                 :disabled="isStreamingHere" />
+<input type="text" class="input input-lg chat-input"
+               v-model="inputText"
+               placeholder="输入消息…"
+               @keydown.enter.prevent="send()"
+               @compositionstart="isComposing = true"
+               @compositionend="isComposing = false"
+               :disabled="isStreamingHere" />
           <button v-if="!isStreamingHere" class="btn btn-primary" @click="send()" :disabled="!inputText.trim()">
             发送
           </button>
@@ -1150,5 +1259,96 @@ const sortedKbTypes = computed(() => {
 .export-dropdown-item:hover {
   background: var(--bg-elev-3);
   color: var(--text-primary);
+}
+
+/* Quick prompts */
+.quick-prompts-area {
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+}
+.quick-prompts-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-4);
+}
+.quick-prompts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.quick-prompt-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+  min-height: 44px;
+}
+.quick-prompt-card:hover {
+  border-color: var(--border-primary);
+  background: var(--bg-elev-2);
+}
+.quick-prompt-card.editing {
+  cursor: default;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-color: var(--accent);
+}
+.quick-prompt-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  line-height: 1.4;
+}
+.quick-prompt-edit,
+.quick-prompt-delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t-fast), color var(--t-fast);
+  margin-left: 2px;
+}
+.quick-prompt-card:hover .quick-prompt-edit,
+.quick-prompt-card:hover .quick-prompt-delete {
+  opacity: 1;
+}
+.quick-prompt-edit:hover { color: var(--accent); }
+.quick-prompt-delete:hover { color: var(--signal-red, #ff6b6b); }
+.quick-prompt-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+.quick-prompt-card.add-card {
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  border-style: dashed;
+  font-size: 13px;
+}
+.quick-prompt-card.add-card:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-primary);
+}
+.quick-prompts-footer {
+  margin-top: var(--space-2);
 }
 </style>

@@ -44,7 +44,7 @@ function catColor(name: string): string {
 }
 
 function opsInCategory(catValue: string): any[] {
-  return anatomyStore.operators.filter(o => o.category === catValue)
+  return anatomyStore.allOperators.filter(o => o.category === catValue)
 }
 
 function isCatCollapsed(name: string): boolean {
@@ -149,7 +149,7 @@ function onCatDragEnd() {
           @keydown.enter="anatomyStore.operatorFilterCategory = ''"
           role="button" tabindex="0">
           全部
-          <span class="op-cat-chip-count">{{ anatomyStore.operators.length }}</span>
+          <span class="op-cat-chip-count">{{ anatomyStore.allOperators.length }}</span>
         </button>
         <button v-for="cat in anatomyStore.operatorCategoryOptions" :key="cat.value"
           class="op-cat-chip"

@@ -215,7 +215,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
         },
         signal: controller.signal,
         body: JSON.stringify({
-          messages: [{ role: 'user', content: content.trim() }],
+          messages: messages.value.map(m => ({ role: m.role, content: m.content })),
           session_id: sessionId,
           tools: tools || ['github', 'knowledge', 'code'],
           stream: true,

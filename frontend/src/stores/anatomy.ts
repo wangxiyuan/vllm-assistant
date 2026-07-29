@@ -10,6 +10,7 @@ export const useAnatomyStore = defineStore('anatomy', () => {
 
   // Operators
   const operators = ref<Operator[]>([])
+  const allOperators = ref<Operator[]>([])
   const operatorsLoading = ref(false)
   const operatorFilterCategory = ref('')
   const operatorSearch = ref('')
@@ -105,6 +106,13 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     } finally {
       operatorsLoading.value = false
     }
+  }
+
+  async function loadAllOperators() {
+    try {
+      const data: any = await api('/api/anatomy/operators')
+      allOperators.value = data.operators || []
+    } catch (_) {}
   }
 
   function operatorById(id: number): Operator | undefined {
@@ -614,6 +622,7 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     anatomyTab.value = tab
     if (tab === 'operators') {
       loadOperators()
+      loadAllOperators()
       loadCategories()
     } else {
       loadModels()
@@ -622,7 +631,7 @@ export const useAnatomyStore = defineStore('anatomy', () => {
 
   return {
     anatomyTab,
-    operators, operatorsLoading, operatorFilterCategory, operatorSearch,
+    operators, allOperators, operatorsLoading, operatorFilterCategory, operatorSearch,
     showOperatorDetail, selectedOperator, operatorDetailReadOnly, showOperatorEditor,
     operatorEditorMode, operatorForm, operatorTagInput,
     operatorParamsSchemaValid, operatorParamsSchemaError,
@@ -634,7 +643,7 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     modelTagInput, modelFormSnapshot, modelCategoryOptions,
     collapsedCategories, toggleCategoryCollapse,
     modelListCollapsed, toggleModelListCollapse,
-    loadOperators, operatorById, viewOperatorDetail, closeOperatorDetail,
+    loadOperators, loadAllOperators, operatorById, viewOperatorDetail, closeOperatorDetail,
     editFromDetail, openNewOperator, openEditOperator, closeOperatorEditor,
     addOperatorTag, removeOperatorTag, validateParamsSchema, saveOperator, deleteOperator,
     loadCategories, openCategoryManager, loadCategoryList, openEditCategory, cancelEditCategory, openNewCategory,
