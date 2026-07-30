@@ -91,6 +91,11 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     loadOperators()
   })
 
+  // Auto-reload models when filter or search changes
+  watch([modelFilterCategory, modelSearch], () => {
+    loadModels()
+  })
+
   // Operator actions
   async function loadOperators() {
     operatorsLoading.value = true

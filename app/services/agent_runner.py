@@ -313,11 +313,6 @@ class AgentRunner:
             ).all()]
         finally:
             db.close()
-        # 也检查 Config.REPOS（向后兼容 env 配置）
-        if Config.REPOS:
-            for name in Config.REPOS:
-                if name not in configured_repos:
-                    configured_repos.append(name)
         repo_list_text = ""
         if configured_repos:
             repo_names = "、".join(configured_repos)

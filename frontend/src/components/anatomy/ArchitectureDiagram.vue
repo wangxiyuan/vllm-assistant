@@ -32,6 +32,7 @@ interface LayoutNode {
   index?: number
   repeatCount?: number
   collapsed?: boolean
+  titleY?: number  // title vertical position (above the block)
   // Child node specific
   parentIndex?: number
 }
@@ -53,12 +54,12 @@ const emit = defineEmits<{
 const PADDING = 24
 const NODE_W = 168
 const NODE_H = 44
-const BLOCK_W = 200
-const BLOCK_HEADER_H = 36
+const BLOCK_W = 240
+const TITLE_H = 20  // 重复块标题在框外上方的高度
 const INNER_NODE_W = 156
 const INNER_NODE_H = 40
-const GAP_Y = 28
-const INNER_GAP_Y = 20
+const GAP_X = 32
+const INNER_GAP_Y = 12
 const INNER_PAD = 12
 
 // ── State ──
@@ -145,20 +146,30 @@ function truncate(text: string, maxLen: number): string {
 const layout = computed(() => {
   const nodes: LayoutNode[] = []
   const arrows: Arrow[] = []
-  let y = PADDING
-  // Fixed content width keeps the SVG narrow so width:100% doesn't blow it up.
-  const contentW = BLOCK_W
-  const svgWidth = contentW + PADDING * 2
+  let x = PADDING
 
-  function centerX(width: number): number {
-    return (svgWidth - width) / 2
+  // 先算每个阶段的高度，取最大值作为 SVG 高度，所有阶段垂直居中
+  let svgHeight = NODE_H
+  for (const stage of props.architecture) {
+    if (stage.type === 'repeat_block') {
+      const innerStages = stage.contents?.[0] || []
+      const innerCount = innerStages.length
+      const innerH = innerCount * INNER_NODE_H + (innerCount - 1) * INNER_GAP_Y + INNER_PAD * 2
+      const h = TITLE_H + innerH + PADDING
+      if (h > svgHeight) svgHeight = h
+    }
+  }
+  svgHeight += PADDING * 2
+
+  function centerY(height: number): number {
+    return (svgHeight - height) / 2
   }
 
   for (let i = 0; i < props.architecture.length; i++) {
     const stage = props.architecture[i]
 
     if (stage.type === 'operator') {
-      const x = centerX(NODE_W)
+      const y = centerY(NODE_H)
       const shapeInfo = getShapeInfo(stage.operator_id)
       const prevNode = nodes[nodes.length - 1]
       if (prevNode) {
@@ -178,23 +189,38 @@ const layout = computed(() => {
         inputShape: shapeInfo.inputShape,
         outputShape: shapeInfo.outputShape,
       })
-      y += NODE_H + GAP_Y
+      x += NODE_W + GAP_X
     } else if (stage.type === 'repeat_block') {
       const collapsed = isCollapsed(i)
       const innerStages = stage.contents?.[0] || []
       const innerCount = innerStages.length
 
-      const innerNodes: LayoutNode[] = []
+      // 重复块：标题在框外上方，框内只包含内部子节点
       let innerTotalH = 0
       if (!collapsed && innerCount > 0) {
-        let iy = y + BLOCK_HEADER_H + INNER_PAD
+        innerTotalH = innerCount * INNER_NODE_H + (innerCount - 1) * INNER_GAP_Y + INNER_PAD * 2
+      }
+      const blockH = collapsed ? 0 : innerTotalH
+      const bw = BLOCK_W
+      const by = centerY(blockH + TITLE_H + 8)
+      const prevNode = nodes[nodes.length - 1]
+
+      if (prevNode) {
+        arrows.push(computeArrow(prevNode, { x, y: by, width: bw, height: blockH + TITLE_H + 8 }))
+      }
+
+      // 内部子节点（在块内水平居中）
+      const innerNodes: LayoutNode[] = []
+      if (!collapsed && innerCount > 0) {
+        let iy = by + TITLE_H + 8 + INNER_PAD
+        const innerX = x + (BLOCK_W - INNER_NODE_W) / 2
         for (let j = 0; j < innerCount; j++) {
           const innerOp = innerStages[j]
           const shapeInfo = getShapeInfo(innerOp.operator_id)
           innerNodes.push({
             key: `repeat-${i}-${j}`,
             type: 'operator',
-            x: centerX(INNER_NODE_W),
+            x: innerX,
             y: iy,
             width: INNER_NODE_W,
             height: INNER_NODE_H,
@@ -208,55 +234,48 @@ const layout = computed(() => {
           })
           iy += INNER_NODE_H + INNER_GAP_Y
         }
-        innerTotalH = innerCount * INNER_NODE_H + (innerCount - 1) * INNER_GAP_Y + INNER_PAD * 2
       }
 
-      const blockH = BLOCK_HEADER_H + innerTotalH
-      const bx = centerX(BLOCK_W)
-      const prevNode = nodes[nodes.length - 1]
-      if (prevNode) {
-        arrows.push(computeArrow(prevNode, { x: bx, y, width: BLOCK_W, height: BLOCK_HEADER_H }))
-      }
-
+      // 标题（作为独立节点，不在框内）
+      const titleY = by + TITLE_H / 2 - 2
       nodes.push({
         key: `block-${i}`,
         type: 'repeat_block',
-        x: bx,
-        y,
-        width: BLOCK_W,
+        x,
+        y: by + TITLE_H + 8,
+        width: bw,
         height: blockH,
         name: stage.label || '重复块',
+        titleY,
         index: i,
         repeatCount: stage.repeat_count || 1,
         collapsed,
       })
 
-      if (!collapsed) {
-        for (const inn of innerNodes) {
-          nodes.push(inn)
-        }
+      for (const inn of innerNodes) {
+        nodes.push(inn)
       }
 
-      y += blockH + GAP_Y
+      x += bw + GAP_X
     }
   }
 
   return {
     nodes,
     arrows,
-    svgWidth,
-    svgHeight: y + PADDING,
+    svgWidth: x + PADDING,
+    svgHeight,
   }
 })
 
 function computeArrow(from: LayoutNode | { x: number; y: number; width: number; height: number }, to: { x: number; y: number; width: number; height: number }): Arrow {
-  const x1 = from.x + from.width / 2
-  const y1 = from.y + from.height
-  const x2 = to.x + to.width / 2
-  const y2 = to.y
-  const midY = (y1 + y2) / 2
+  const x1 = from.x + from.width
+  const y1 = from.y + from.height / 2
+  const x2 = to.x
+  const y2 = to.y + to.height / 2
+  const midX = (x1 + x2) / 2
   return {
-    path: `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`,
+    path: `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`,
   }
 }
 
@@ -342,6 +361,8 @@ function repeatBadgeWidth(count: number | undefined): number {
       v-if="layout.nodes.length > 0"
       class="arch-svg"
       :viewBox="`0 0 ${layout.svgWidth} ${layout.svgHeight}`"
+      :width="layout.svgWidth"
+      :height="layout.svgHeight"
       preserveAspectRatio="xMidYMid meet"
     >
       <defs>
@@ -379,9 +400,39 @@ function repeatBadgeWidth(count: number | undefined): number {
         @mouseleave="onNodeLeave"
         @click="onNodeClick(node)"
       >
-        <!-- Repeat block background -->
+        <!-- Repeat block: background + title above -->
         <template v-if="node.type === 'repeat_block'">
+          <!-- Title above the block -->
+          <text
+            :x="node.x + node.width / 2"
+            :y="node.titleY || (node.y - 6)"
+            class="arch-block-title"
+            text-anchor="middle"
+          >
+            {{ node.name }}
+          </text>
+          <!-- Repeat count pill -->
           <rect
+            v-if="node.repeatCount"
+            :x="node.x + node.width - repeatBadgeWidth(node.repeatCount) - 30"
+            :y="(node.titleY || (node.y - 6)) - 8"
+            :width="repeatBadgeWidth(node.repeatCount)"
+            height="16"
+            rx="8"
+            class="arch-repeat-pill"
+          />
+          <text
+            v-if="node.repeatCount"
+            :x="node.x + node.width - repeatBadgeWidth(node.repeatCount) / 2 - 30"
+            :y="(node.titleY || (node.y - 6)) + 2"
+            class="arch-repeat-pill-text"
+            text-anchor="middle"
+          >
+            {{ node.repeatCount }}×
+          </text>
+          <!-- Block background rect (only when not collapsed or has content) -->
+          <rect
+            v-if="node.height > 0"
             :x="node.x"
             :y="node.y"
             :width="node.width"
@@ -390,15 +441,31 @@ function repeatBadgeWidth(count: number | undefined): number {
             rx="7"
             ry="7"
           />
-          <!-- Block header accent line -->
-          <line
-            :x1="node.x + 2"
-            :y1="node.y + 7"
-            :x2="node.x + 2"
-            :y2="node.y + node.height - 7"
-            class="arch-block-accent"
-            stroke-width="2"
-          />
+          <!-- Collapse/expand button -->
+          <g
+            v-if="node.index !== undefined"
+            class="arch-collapse-btn"
+            @click.stop="toggleBlock(node.index!)"
+          >
+            <rect
+              :x="node.x + node.width - 24"
+              :y="(node.titleY || (node.y - 6)) - 8"
+              width="18"
+              height="18"
+              rx="3"
+              class="arch-collapse-bg"
+            />
+            <path
+              v-if="node.collapsed"
+              :d="`M ${node.x + node.width - 17} ${(node.titleY || (node.y - 6)) - 2} l 0 6 l 5 -3 z`"
+              class="arch-collapse-icon-path"
+            />
+            <path
+              v-else
+              :d="`M ${node.x + node.width - 20} ${(node.titleY || (node.y - 6)) - 1} l 6 0 l -3 5 z`"
+              class="arch-collapse-icon-path"
+            />
+          </g>
         </template>
 
         <!-- Operator rect -->
@@ -416,9 +483,11 @@ function repeatBadgeWidth(count: number | undefined): number {
 
         <!-- Operator name -->
         <text
+          v-if="node.type === 'operator'"
           :x="node.x + node.width / 2"
-          :y="node.y + (node.type === 'repeat_block' ? 18 : 17)"
+          :y="node.y + 17"
           class="arch-text-name"
+          text-anchor="middle"
         >
           {{ node.name }}
         </text>
@@ -432,52 +501,6 @@ function repeatBadgeWidth(count: number | undefined): number {
         >
           {{ node.label }}
         </text>
-
-        <!-- Repeat count pill (left side of block header) -->
-        <template v-if="node.type === 'repeat_block'">
-          <rect
-            :x="node.x + 8"
-            :y="node.y + 8"
-            :width="repeatBadgeWidth(node.repeatCount)"
-            height="16"
-            rx="8"
-            class="arch-repeat-pill"
-          />
-          <text
-            :x="node.x + 8 + repeatBadgeWidth(node.repeatCount) / 2"
-            :y="node.y + 18"
-            class="arch-repeat-pill-text"
-            text-anchor="middle"
-          >
-            {{ node.repeatCount }}×
-          </text>
-        </template>
-
-        <!-- Collapse/expand button for repeat block -->
-        <g
-          v-if="node.type === 'repeat_block' && node.index !== undefined"
-          class="arch-collapse-btn"
-          @click.stop="toggleBlock(node.index!)"
-        >
-          <rect
-            :x="node.x + node.width - 26"
-            :y="node.y + 6"
-            width="18"
-            height="18"
-            rx="3"
-            class="arch-collapse-bg"
-          />
-          <path
-            v-if="node.collapsed"
-            :d="`M ${node.x + node.width - 19} ${node.y + 12} l 0 6 l 5 -3 z`"
-            class="arch-collapse-icon-path"
-          />
-          <path
-            v-else
-            :d="`M ${node.x + node.width - 22} ${node.y + 13} l 6 0 l -3 5 z`"
-            class="arch-collapse-icon-path"
-          />
-        </g>
       </g>
     </svg>
     </div><!-- /arch-canvas -->
@@ -586,8 +609,7 @@ function repeatBadgeWidth(count: number | undefined): number {
 
 .arch-canvas {
   width: 100%;
-  height: 100%;
-  transition: transform 0.05s linear;
+  overflow: auto;
 }
 
 .arch-svg {
@@ -624,6 +646,14 @@ function repeatBadgeWidth(count: number | undefined): number {
 .arch-node-clickable:hover .arch-op-bg {
   stroke: var(--amber-dim);
   fill: var(--bg-elev-3);
+}
+
+.arch-block-title {
+  fill: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  dominant-baseline: central;
 }
 
 .arch-block-bg {

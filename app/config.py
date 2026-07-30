@@ -5,7 +5,7 @@
 """
 import os
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -64,9 +64,6 @@ class Config:
     TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 
     # ===== 代码仓库配置 =====
-    # 代码仓库列表：{"vllm": "https://github.com/vllm-project/vllm.git", ...}
-    REPOS: Dict[str, str] = {}
-
     # 代码同步间隔（分钟）
     CODE_SYNC_INTERVAL: int = int(os.getenv("CODE_SYNC_INTERVAL", "30"))
 
@@ -77,22 +74,6 @@ class Config:
     AI_CACHE_MAX_RECORDS: int = int(os.getenv("AI_CACHE_MAX_RECORDS", "1000"))
     # 数据清理间隔（小时）
     CLEANUP_INTERVAL: int = int(os.getenv("CLEANUP_INTERVAL", "24"))
-
-    @classmethod
-    def parse_repos_config(cls) -> None:
-        """从环境变量 REPOS 解析仓库配置"""
-        raw = os.getenv("REPOS", "")
-        if not raw:
-            cls.REPOS = {}
-            return
-
-        repos = {}
-        for part in raw.split(","):
-            part = part.strip()
-            if "=" in part:
-                name, url = part.split("=", 1)
-                repos[name.strip()] = url.strip()
-        cls.REPOS = repos
 
     @classmethod
     def validate(cls) -> bool:
@@ -119,6 +100,3 @@ if _polling_raw:
     Config.POLLING_AREAS = [a.strip() for a in _polling_raw.split(",") if a.strip()]
 else:
     Config.POLLING_AREAS = []
-
-# 解析仓库配置
-Config.parse_repos_config()

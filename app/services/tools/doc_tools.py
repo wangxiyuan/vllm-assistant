@@ -29,7 +29,7 @@ SEARCH_DOCS = {
             "properties": {
                 "project": {
                     "type": "string",
-                    "description": "项目名称，如 'vllm'、'vllm-ascend' 等（由 REPOS 配置决定）",
+                    "description": "项目名称，如 'vllm'、'vllm-ascend' 等（由仓库配置决定）",
                 },
                 "query": {
                     "type": "string",

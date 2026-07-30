@@ -20,16 +20,12 @@ function countModelLayers(arch: any[] | undefined): number {
   let count = 0
   for (const stage of arch) {
     if (stage.type === 'repeat_block') {
-      count += (stage.repeat_count || 1) * (stage.contents?.[0]?.length || 1)
+      count += stage.repeat_count || 1
     } else {
       count++
     }
   }
   return count
-}
-
-const modelIcons: Record<string, string> = {
-  moe: 'puzzle', dense: 'square', hybrid: 'shuffle', state_space: 'wave',
 }
 
 function onOperatorClickFromDiagram(operatorId: number) {
@@ -44,7 +40,7 @@ function catColor(name: string): string {
 }
 
 function opsInCategory(catValue: string): any[] {
-  return anatomyStore.allOperators.filter(o => o.category === catValue)
+  return anatomyStore.operators.filter(o => o.category === catValue)
 }
 
 function isCatCollapsed(name: string): boolean {
@@ -246,9 +242,6 @@ function onCatDragEnd() {
                 <div v-for="m in anatomyStore.models" :key="m.id" class="model-card"
                      :class="{ selected: anatomyStore.selectedModel && anatomyStore.selectedModel.id === m.id }"
                      @click="anatomyStore.viewModel(m)">
-                  <div class="model-card-icon">
-                    <Icon :name="modelIcons[m.category] || 'box'" :size="18" />
-                  </div>
                   <div class="model-card-body">
                     <div class="model-card-title">
                       <span class="model-name">{{ m.display_name }}</span>

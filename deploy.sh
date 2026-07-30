@@ -261,31 +261,6 @@ if grep -q "^VLLM_ASSISTANT_PAT=github_pat_your_token_here" .env 2>/dev/null || 
     fi
 fi
 
-# 可选：询问是否配置 REPOS（仅在首次部署时提示）
-if ! grep -q "^REPOS=" .env 2>/dev/null || grep -q "^REPOS=$" .env 2>/dev/null; then
-    echo ""
-    print_info "是否配置代码仓库列表？（用于学习文章代码引用功能）[y/N]"
-    read -r config_repos
-    if [[ "$config_repos" =~ ^[Yy]$ ]]; then
-        echo "  请输入仓库配置（格式: name=url，多个用逗号分隔）"
-        echo "  示例: vllm=https://github.com/vllm-project/vllm.git"
-        echo "  输入:"
-        read -r repos_value
-        if [ -n "$repos_value" ]; then
-            if grep -q "^REPOS=" .env; then
-                if [[ "$OSTYPE" == "darwin"* ]]; then
-                    sed -i '' "s|^REPOS=.*|REPOS=$repos_value|" .env
-                else
-                    sed -i "s|^REPOS=.*|REPOS=$repos_value|" .env
-                fi
-            else
-                echo "REPOS=$repos_value" >> .env
-            fi
-            print_success "REPOS 已配置"
-        fi
-    fi
-fi
-
 if [ $NEED_CONFIG -eq 1 ]; then
     echo ""
     print_warning "部分必要配置未填写，请编辑 .env 文件补全后重新运行"

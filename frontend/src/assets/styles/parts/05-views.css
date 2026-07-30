@@ -2507,6 +2507,7 @@ pre code.embedded-code.outdated {
     justify-content: center;
     font-size: var(--text-lg);
     flex-shrink: 0;
+    color: var(--text-secondary);
 }
 .model-card-body { flex: 1; min-width: 0; }
 .model-card-body .model-card-title {

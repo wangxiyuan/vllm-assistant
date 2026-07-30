@@ -96,8 +96,8 @@
 1. **Item 表唯一约束**：从 `(type, number)` 改为 `(repo, type, number)`。SQLite 不支持 `DROP CONSTRAINT`，通过重建表实现。
 2. **仓库命名规范**：`RepoCache.repo` 存储短名（如 `vllm`），`Item.repo` 存储完整 `owner/repo` 格式（如 `vllm-project/vllm`）。API 调用时从 `RepoCache` 的 `clone_url` 中提取 owner。
 3. **GitHubClient 改造**：所有方法增加可选 `repo` 参数，传参时动态构建 API URL。
-4. **Area 映射**：仅对主仓库做 CODEOWNERS 映射，其他仓库设 area=None。
-5. **MyPR/UserIssue 表**：暂不加 repo 字段，贡献面板仍以主仓库为主。
+4. **Area 映射（per-repo）**：多仓库后所有仓库地位平等，无特权仓库。`AreaMapper` 改为 per-repo 实例（`_get_area_mapper(repo)` 懒加载缓存），每个仓库独立加载自己的 CODEOWNERS 和领域定义。无 CODEOWNERS 且无领域定义配置的仓库，`area_map` 为空，`map_to_area` 自然返回 `None`--不需要任何短路判定。`vllm-project/vllm` 恰好有 `AREA_DEFINITIONS` 配置所以能映射，这是"有配置"而非"是默认仓库"（详见审查遗漏 #1、#5）。
+5. **MyPR/UserIssue 表**：暂不加 repo 字段，贡献面板当前仅覆盖 `Config` 默认仓库。
 6. **Item 表重建**：现有数据 `repo` 设为 `vllm-project/vllm`（从 `Config.GITHUB_OWNER/Config.GITHUB_REPO` 拼接）。
 
 ### 后端模型改动
@@ -251,8 +251,8 @@ def _sync_single_repo_community(repo: str):
 
 #### 其他调度任务
 
-- `sync_areas()`：只在主仓库执行
-- `sync_user_prs()`：只从主仓库同步（MyPR/UserIssue 暂不加 repo）
+- `sync_areas()`：遍历所有 tracked 仓库，按各自 `AreaMapper` 同步领域定义（无配置的仓库跳过）
+- `sync_user_prs()`：当前仅同步 `Config` 默认仓库（MyPR/UserIssue 暂不加 repo，见遗漏 #6、#7），后续加 repo 后遍历 tracked 仓库
 - `sync_file_change_history_job()`：写入时设置正确的 `repo` 值
 - 暴露 `trigger_sync_for_repo(repo)` 供 toggle 追踪时调用
 
@@ -334,18 +334,55 @@ if repo:
 
 ## 补充：审查发现的遗漏点
 
-### 1. `_map_pr_to_area` 的 files API 没传 repo
+### 1. `_map_pr_to_area` 的 files API 没传 repo + AreaMapper 单例问题
 
-**文件：** `app/scheduler.py:73`
+**文件：** `app/scheduler.py:66`、`app/services/area_mapper.py:223`
 
 ```python
-files = github_client.get_pull_files(pr_number)  # ❌ 没传 repo，永远从主仓库拉
+def _map_pr_to_area(pr_number, github_client, mapper):
+    ...
+    files = github_client.get_pull_files(pr_number)  # ❌ 没传 repo，永远从 Config 默认仓库拉
 ```
 
-`get_pull_files` 内部调用 `_make_request("GET", f"/pulls/{number}/files")`，`self.base_url` 固定指向主仓库。
-多仓库时需改为 `github_client.get_pull_files(pr_number, repo=full_repo)`。
+两个问题叠加：
 
-**影响函数：** `_process_single_pr_item`（第 169 行调用了 `_map_pr_to_area`）、`_fetch_user_pr_detail`（第 630 行也调用了 `_map_pr_to_area`）。
+**(a) `get_pull_files` 没传 repo**：内部调用 `_make_request("GET", f"/pulls/{number}/files")`，`self.base_url` 固定指向 `Config` 里写死的 `vllm-project/vllm`。多仓库时需改为 `github_client.get_pull_files(pr_number, repo=full_repo)`。
+
+**(b) `AreaMapper` 是全局单例**：`_area_mapper`（`scheduler.py:30`）在启动时只从 `Config` 默认仓库加载一次 CODEOWNERS，不会按仓库重载。多仓库后这是错的--每个仓库应有自己的领域定义。
+
+**修复方案（per-repo，去默认仓库中心化）：**
+
+1. `AreaMapper` 改为按仓库实例化，`__init__(self, repo: str)` 接收完整 `owner/repo`，`_load_codeowners` 用 `client.get_codeowners(repo=repo)` 拉该仓库的 CODEOWNERS。
+
+2. 调度器把全局单例 `_area_mapper` 改为 per-repo 缓存：
+```python
+_area_mappers: Dict[str, AreaMapper] = {}
+
+def _get_area_mapper(repo: str) -> AreaMapper:
+    if repo not in _area_mappers:
+        _area_mappers[repo] = AreaMapper(repo)
+    return _area_mappers[repo]
+```
+
+3. `_map_pr_to_area` 增加 `repo` 参数，按仓库取 mapper：
+```python
+def _map_pr_to_area(pr_number, github_client, repo: str):
+    mapper = _get_area_mapper(repo)
+    try:
+        files = github_client.get_pull_files(pr_number, repo=repo)
+    except Exception as e:
+        ...
+    # 用该仓库自己的 mapper.map_to_area 映射；
+    # 若该仓库无 CODEOWNERS 且无领域定义配置，area_map 为空，
+    # map_to_area 自然返回 None，不需要任何短路判定。
+```
+
+**影响函数（全部需补传 repo）：**
+- `_process_single_pr_item`（`scheduler.py:135`）-- 第 169 行调用 `_map_pr_to_area`
+- `_upsert_user_pr`（`scheduler.py:607`）-- 第 630 行调用 `_map_pr_to_area`
+- `_fetch_user_pr_detail`（`scheduler.py:525`）-- 若其内部计算 area 需补传
+
+注意：`_upsert_user_pr` 当前从 `MyPR` 表查 PR，而 `MyPR` 暂无 repo 字段（见遗漏 #6），所以 `sync_user_prs` 路径目前只会处理 `Config` 默认仓库的 PR。待 `MyPR` 加 repo 后此路径才真正多仓库化。
 
 ### 2. `sync_file_change_history_job` 写死 `repo="vllm"`
 
@@ -361,7 +398,7 @@ db.add(FileChangeHistory(..., repo="vllm", ...))
 - **方案 A（推荐）**：给 `MyPR` 表加 `repo` 列，调度器同步用户 PR 时写入
 - **方案 B**：从 `Item` 表按 `number` 反查 `repo`（但不同仓库可能有相同 PR number，不精确）
 
-**推荐方案 A**，因为 `MyPR` 当前仅限主仓库，后续扩展多仓库时也需要 repo 区分。
+**推荐方案 A**，因为 `MyPR` 当前仅限 `Config` 默认仓库，后续扩展多仓库时也需要 repo 区分。
 
 ### 3. `_refresh_personal_task_refs` 的 repo 推断不够精确
 
@@ -388,13 +425,23 @@ if repo:
     q = q.filter(Item.repo == repo)
 ```
 
-### 5. `AreaMapper` 硬编码 vLLM 领域定义
+### 5. `AreaMapper` 硬编码 vLLM 领域定义 + 单例误命中 bug
 
 **文件：** `app/services/area_mapper.py`
 
-`AREA_DEFINITIONS` 和 `label_map`（如 `area/engine` → `engine`）都是 vLLM 特有的标签体系。非 vLLM 仓库的 issue/PR 无法映射 area。
+`AREA_DEFINITIONS` 和 `label_map`（如 `area/engine` -> `engine`）当前是 vLLM 特有的标签体系，作为类属性硬编码。
 
-**设计决策：** 非主仓库的 issue/PR 设 `area=None`，这是预期行为，**不需要改**。后续如果需要支持其他仓库的 area 映射，可以抽象出 per-repo 的 AreaMapper 工厂。
+**单例误命中 bug（必须修）：** 原设计称"非默认仓库设 `area=None`，不需要改"，但代码中**无任何强制置 None 的逻辑**，且根因在于：
+- `AreaMapper` 是全局单例（`_area_mapper`），`__init__` 时只从 `Config` 默认仓库拉一次 CODEOWNERS，不会按仓库重载。
+- `map_to_area` 第二轮（`area_mapper.py:318-324`）用硬编码 `AREA_DEFINITIONS.paths` 做 `startswith` 前缀匹配。其中 `tests/`、`docs/`、`*.md` 等是通用路径，**任何仓库**的文件都可能误命中，从而返回一个错误的 area（如非默认仓库的 `tests/foo.py` 会被归到 `testing`）。
+
+**修复方案（per-repo，去默认仓库中心化）：**
+- `AreaMapper` 改为按仓库实例化（见遗漏 #1），`__init__(repo)` 接收完整 `owner/repo`，`_load_codeowners` 拉该仓库自己的 CODEOWNERS。
+- `AREA_DEFINITIONS` 改为 per-repo 配置：有领域定义的仓库（如 `vllm-project/vllm`）传入配置，没有的仓库传空字典。`_use_default_mapping` 只在"该仓库有配置但 CODEOWNERS 拉取失败"时兜底，无配置的仓库 `area_map` 直接为空。
+- `_get_area_mapper(repo)` 替代全局单例 `_area_mapper`，按仓库懒加载缓存。
+- 这样无配置的仓库 `map_to_area` 自然返回 `None`，**不需要任何短路判定**。`vllm-project/vllm` 能映射是因为它有配置，不是因为它是"默认仓库"。
+
+**数据来源建议：** per-repo 的 `AREA_DEFINITIONS` 可后续存入 `RepoCache` 表（新增 `area_config` JSON 列）或独立配置文件，避免继续硬编码在类里。当前阶段先把 vLLM 的配置作为该仓库的专属配置，其他仓库留空。
 
 ### 6. `MyPR` 表需要 `repo` 列
 
@@ -406,9 +453,9 @@ if repo:
 
 ### 7. `UserIssue` 表同理
 
-`UserIssue` 表也有 `(number, github_id)` 复合主键，没有 repo。当前设计"贡献面板暂不加 repo，以主仓库为主"，但表结构上的冲突风险仍然存在。
+`UserIssue` 表也有 `(number, github_id)` 复合主键，没有 repo。当前设计"贡献面板暂不加 repo，仅覆盖 `Config` 默认仓库"，但表结构上的冲突风险仍然存在。
 
-**解决：** 暂不处理（当前设计已说明以主仓库为主），但如果未来要支持多仓库用户 issue，需要加 `repo` 列。
+**解决：** 暂不处理（当前设计已说明仅覆盖 `Config` 默认仓库），但如果未来要支持多仓库用户 issue，需要加 `repo` 列。
 
 ### 8. 触发 sync 的竞态风险
 
