@@ -214,7 +214,7 @@ class TaskDedupChecker:
         if "_repo" in item:
             return item["_repo"]
         url = item.get("repository_url") or ""
-        # https://api.github.com/repos/vllm-project/vllm
+        # https://api.github.com/repos/{owner}/{repo}
         if url:
             return url.replace("https://api.github.com/repos/", "")
         return ""
@@ -320,7 +320,7 @@ class TaskDedupChecker:
 {{
   "matches": [
     {{
-      "repo": "vllm-project/vllm",
+      "repo": "owner/repo",
       "item_number": 123,
       "item_title": "...",
       "similarity": "high/medium/low",

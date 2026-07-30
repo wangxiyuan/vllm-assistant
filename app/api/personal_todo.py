@@ -250,7 +250,8 @@ async def create_task(req: PersonalTaskCreate, db: Session = Depends(get_db)):
 
     if req.trigger_dedup_check:
         try:
-            repos = Config.DEFAULT_DEDUP_REPOS
+            from app.services._shared import get_active_repo_map
+            repos = list(get_active_repo_map().values())
             dedup_result = _run_dedup_check(task, repos, "hybrid", db)
             result["dedup_check_result"] = dedup_result
         except Exception:
@@ -365,7 +366,8 @@ def dedup_check(task_id: int, req: DedupCheckRequest, db: Session = Depends(get_
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    repos = req.repos or Config.DEFAULT_DEDUP_REPOS
+    from app.services._shared import get_active_repo_map
+    repos = req.repos or list(get_active_repo_map().values())
     try:
         result = _run_dedup_check(task, repos, req.check_type, db)
         return {
@@ -421,30 +423,39 @@ def resolve_ref(req: ResolveRefRequest, db: Session = Depends(get_db)):
     """解析用户输入的关联引用，自动判断是 issue 还是 PR。
 
     输入格式：
-    - "vllm#123" — 指定仓库 + 编号
-    - "123" — 纯编号，用默认仓库 (vllm-project/vllm)
+    - "repo#123" — 指定仓库短名 + 编号
+    - "123" — 纯编号，用默认仓库
     返回：{repo, number, type, state, url, title} 或 404 错误。
     """
     from app.services.github_client import GitHubClient
+    from app.services._shared import get_active_repo_map, get_default_repo_short, resolve_repo_short_to_full
 
     text = req.input.strip()
     if not text:
         raise HTTPException(status_code=400, detail="输入不能为空")
 
-    # 解析仓库和编号
-    m = re.match(r"^(vllm|vllm-ascend)\s*#\s*(\d+)$", text, re.I)
+    # 动态获取可用仓库短名
+    repo_map = get_active_repo_map()
+    repo_names = list(repo_map.keys())
+
+    # 解析仓库和编号：支持 repo#number 格式，repo 必须是已配置的仓库短名
+    # 动态构建正则，匹配任意已配置仓库短名
+    pattern = r"^((" + "|".join(re.escape(n) for n in repo_names) + r"))\s*#\s*(\d+)$"
+    m = re.match(pattern, text, re.I)
     if m:
         repo = m.group(1).lower()
         number = int(m.group(2))
     elif text.isdigit():
-        repo = "vllm"
+        repo = get_default_repo_short()
         number = int(text)
     else:
-        raise HTTPException(status_code=400, detail="输入格式无效，请使用 repo#number 或纯数字")
+        raise HTTPException(
+            status_code=400,
+            detail=f"输入格式无效，请使用 repo#number 或纯数字（可用仓库：{', '.join(repo_names)}）"
+        )
 
     # 映射到 GitHub 仓库路径
-    repo_map = {"vllm": "vllm-project/vllm", "vllm-ascend": "vllm-project/vllm-ascend"}
-    repo_path = repo_map.get(repo, repo)
+    repo_path = resolve_repo_short_to_full(repo)
 
     # 用 GitHub REST API 直接查询（GitHubClient 只支持默认仓库）
     import requests
@@ -494,6 +505,7 @@ class LinkToWatchlistRequest(BaseModel):
     watchlist_item_type: str  # 'issue' or 'pr'
     watchlist_number: int
     watchlist_title: str = ""
+    repo: Optional[str] = None  # 完整 owner/repo，None 时用 Config 默认仓库
     task_id: Optional[int] = None  # 关联已有任务
     new_task_title: Optional[str] = None  # 或创建新任务
     new_task_description: str = ""
@@ -508,15 +520,16 @@ async def link_to_watchlist(req: LinkToWatchlistRequest, db: Session = Depends(g
     1. 传入 task_id → 关联到已有任务
     2. 传入 new_task_title → 创建新任务并自动关联
     """
-    from app.config import Config
-
     now = _utcnow()
-    repo_path = f"{Config.GITHUB_OWNER}/{Config.GITHUB_REPO}"
+    if not req.repo:
+        raise HTTPException(status_code=400, detail="repo is required")
+    full_repo = req.repo
+    repo_short = full_repo.split("/")[-1]
     ref = {
         "type": req.watchlist_item_type,
         "number": req.watchlist_number,
-        "repo": "vllm",
-        "url": f"https://github.com/{repo_path}/{ 'pull' if req.watchlist_item_type == 'pr' else 'issues' }/{req.watchlist_number}",
+        "repo": repo_short,
+        "url": f"https://github.com/{full_repo}/{ 'pull' if req.watchlist_item_type == 'pr' else 'issues' }/{req.watchlist_number}",
         "title": req.watchlist_title or "",
     }
 

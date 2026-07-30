@@ -220,24 +220,40 @@ class AreaMapper:
         },
     }
 
-    def __init__(self):
+    def __init__(self, repo: Optional[str] = None):
+        """按仓库实例化 AreaMapper。
+
+        Args:
+            repo: 完整 owner/repo（如 ``vllm-project/vllm``）。该仓库有
+                  AREA_DEFINITIONS 配置且有 CODEOWNERS 则加载之；无配置的
+                  仓库 ``area_map`` 为空，``map_to_area`` 自然返回 None。
+        """
+        self.repo = repo or ""
+        # 是否为有 AREA_DEFINITIONS 配置的仓库
+        self.has_area_config = self.repo in self.AREA_DEFINITIONS
         self.area_map: Dict[str, str] = {}  # path -> area_id
         self._load_codeowners()
 
     def _load_codeowners(self):
-        """从 CODEOWNERS 文件加载领域映射"""
+        """从该仓库的 CODEOWNERS 文件加载领域映射。
+
+        无领域定义配置的仓库直接跳过（area_map 保持为空）。
+        """
+        # 无 AREA_DEFINITIONS 配置的仓库不加载 CODEOWNERS，area_map 为空
+        if not self.has_area_config:
+            return
         try:
             from app.services.github_client import GitHubClient
 
             client = GitHubClient()
-            codeowners_content = client.get_codeowners()
+            codeowners_content = client.get_codeowners(repo=self.repo)
 
             if codeowners_content:
                 self._parse_codeowners(codeowners_content)
             else:
                 self._use_default_mapping()
         except Exception as e:
-            logger.warning(f"Failed to load CODEOWNERS, falling back to defaults: {e}")
+            logger.warning(f"Failed to load CODEOWNERS for {self.repo}, falling back to defaults: {e}")
             self._use_default_mapping()
 
     def _parse_codeowners(self, content: str):
@@ -312,6 +328,9 @@ class AreaMapper:
             return best_match
 
         # 第二轮：用 AREA_DEFINITIONS 的路径前缀匹配
+        # 仅对有领域定义配置的仓库生效；无配置的仓库跳过，避免通用路径误命中
+        if not self.has_area_config:
+            return None
         # 选择最长匹配前缀（更具体的领域优先）
         best_match = None
         best_match_len = 0

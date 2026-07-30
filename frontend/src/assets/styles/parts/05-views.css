@@ -313,13 +313,6 @@
 /* =====================================================================
    COMMUNITY VIEW
    ===================================================================== */
-.community-filters {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    margin-bottom: var(--space-4);
-    flex-wrap: wrap;
-}
 .community-list {
     display: flex;
     flex-direction: column;
@@ -403,13 +396,6 @@
 /* =====================================================================
    PR CENTER
    ===================================================================== */
-.pr-filters {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    margin-bottom: var(--space-4);
-    flex-wrap: wrap;
-}
 .pr-list {
     display: flex;
     flex-direction: column;

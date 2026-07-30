@@ -2,7 +2,16 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/api/client'
 import { useAppStore } from './app'
+import { useReposStore } from './repos'
 import type { WatchlistItem } from '@/utils/types'
+
+function repoFullNameFromCloneUrl(cloneUrl: string): string {
+  let url = cloneUrl.endsWith('.git') ? cloneUrl.slice(0, -4) : cloneUrl
+  url = url.replace(/\/+$/, '')
+  const parts = url.split('/')
+  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+  return ''
+}
 
 export const useWatchlistStore = defineStore('watchlist', () => {
   const watchlist = ref<WatchlistItem[]>([])
@@ -63,26 +72,30 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     return list
   })
 
-  function _watchKey(number: number, type: string) { return type + ':' + number }
-
-  function isWatched(number: number, type: string): boolean {
-    return watchlistSet.value.has(_watchKey(number, type))
+  function _watchKey(number: number, type: string, repo?: string) {
+    return (repo || '') + ':' + type + ':' + number
   }
 
-  function findWatchlistItem(number: number, type: string): WatchlistItem | null {
-    return watchlist.value.find(i => i.number === number && i.item_type === type) || null
+  function isWatched(number: number, type: string, repo?: string): boolean {
+    return watchlistSet.value.has(_watchKey(number, type, repo))
+  }
+
+  function findWatchlistItem(number: number, type: string, repo?: string): WatchlistItem | null {
+    return watchlist.value.find(i => i.number === number && i.item_type === type &&
+      (i.repo || '') === (repo || '')) || null
   }
 
   async function loadWatchlist() {
     try {
       const items: WatchlistItem[] = await api('/api/watchlist')
       watchlist.value = items
-      watchlistSet.value = new Set(items.map(i => _watchKey(i.number, i.item_type)))
+      watchlistSet.value = new Set(items.map(i => _watchKey(i.number, i.item_type, i.repo)))
     } catch (_) {}
   }
 
   async function toggleWatch(number: number, type: string, title: string, url: string, extra?: any) {
-    const key = _watchKey(number, type)
+    const repo = extra?.repo
+    const key = _watchKey(number, type, repo)
     if (watchlistSet.value.has(key)) {
       const result = await useAppStore().showConfirm({
         title: '取消关注',
@@ -92,9 +105,10 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       })
       if (!result.confirmed) return
       try {
-        await api(`/api/watchlist/${type}/${number}`, { method: 'DELETE' })
+        const delParams = repo ? `?repo=${encodeURIComponent(repo)}` : ''
+        await api(`/api/watchlist/${type}/${number}${delParams}`, { method: 'DELETE' })
         watchlistSet.value.delete(key)
-        watchlist.value = watchlist.value.filter(w => _watchKey(w.number, w.item_type) !== key)
+        watchlist.value = watchlist.value.filter(w => _watchKey(w.number, w.item_type, w.repo) !== key)
         useAppStore().showToast('已取消关注', `#${number} 已移出特别关注`, 'info')
       } catch (e: any) {
         useAppStore().showToast('取消关注失败', e.message, 'error')
@@ -105,13 +119,14 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       if (meta.area) payload.area = meta.area
       if (meta.issue_type) payload.issue_type = meta.issue_type
       if (meta.state) payload.state = meta.state
+      if (repo) payload.repo = repo
       try {
         await api('/api/watchlist', {
           method: 'POST',
           body: JSON.stringify(payload),
         })
         watchlistSet.value.add(key)
-        watchlist.value.unshift({ number, item_type: type, title, url, added_at: new Date().toISOString(), ...meta })
+        watchlist.value.unshift({ number, item_type: type, title, url, repo, added_at: new Date().toISOString(), ...meta })
         useAppStore().showToast('已加入关注', `#${number} 已加入特别关注`, 'success')
       } catch (e: any) {
         useAppStore().showToast('加入关注失败', e.message, 'error')
@@ -130,8 +145,15 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       return
     }
     if (manualAddLoading.value) return
-    const prKey = _watchKey(num, 'pr')
-    const issueKey = _watchKey(num, 'issue')
+    // 去重检查：同一仓库下同号 pr/issue 不能重复
+    // 但 add-by-number 不知道是 pr 还是 issue，所以两种都查
+    const repoShort = manualAddRepo.value
+    // 从 reposStore 查找该短名对应的完整 owner/repo
+    const reposStore = useReposStore()
+    const repoConfig = reposStore.repos.find(r => r.repo === repoShort)
+    const fullRepo = repoConfig ? repoFullNameFromCloneUrl(repoConfig.clone_url) : ''
+    const prKey = _watchKey(num, 'pr', fullRepo)
+    const issueKey = _watchKey(num, 'issue', fullRepo)
     if (watchlistSet.value.has(prKey) || watchlistSet.value.has(issueKey)) {
       useAppStore().showToast('已在关注列表', `#${num} 已在特别关注中`, 'info')
       manualAddNumber.value = ''
@@ -146,7 +168,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
         method: 'POST',
         body: JSON.stringify({ number: num, note, assignee_id, repo }),
       }, { timeout: 30000 })
-      const key = _watchKey(item.number, item.item_type)
+      const key = _watchKey(item.number, item.item_type, item.repo)
       watchlistSet.value.add(key)
       watchlist.value.unshift(item)
 
@@ -157,6 +179,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
             watchlist_item_type: item.item_type,
             watchlist_number: item.number,
             watchlist_title: item.title || '',
+            repo: item.repo,
             task_id: manualAddSelectedTaskId.value,
           }),
         })
@@ -167,6 +190,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
             watchlist_item_type: item.item_type,
             watchlist_number: item.number,
             watchlist_title: item.title || '',
+            repo: item.repo,
             new_task_title: manualAddNewTaskTitle.value.trim(),
             new_task_source: manualAddNewTaskSource.value || 'self',
           }),
@@ -284,13 +308,15 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     const assignee_id = watchlistEditAssigneeId.value
     watchlistEditSaving.value = true
     try {
-      const updated: any = await api(`/api/watchlist/${w.item_type}/${w.number}/note`, {
+      const noteParam = w.repo ? `?repo=${encodeURIComponent(w.repo)}` : ''
+      const updated: any = await api(`/api/watchlist/${w.item_type}/${w.number}/note${noteParam}`, {
         method: 'PUT',
         body: JSON.stringify({ note, assignee_id }),
       })
       w.note = updated.note
       w.assignee_id = updated.assignee_id
-      const idx = watchlist.value.findIndex(i => i.number === w.number && i.item_type === w.item_type)
+      const idx = watchlist.value.findIndex(i => i.number === w.number && i.item_type === w.item_type &&
+        (i.repo || '') === (w.repo || ''))
       if (idx !== -1) {
         watchlist.value[idx].note = updated.note
         watchlist.value[idx].assignee_id = updated.assignee_id
@@ -302,6 +328,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
             watchlist_item_type: w.item_type,
             watchlist_number: w.number,
             watchlist_title: w.title || '',
+            repo: w.repo,
             task_id: t.id,
           }),
         })
@@ -323,7 +350,8 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     const assignee_id = watchlistEditAssigneeId.value
     watchlistEditSaving.value = true
     try {
-      await api(`/api/watchlist/${w.item_type}/${w.number}/note`, {
+      const noteParam = w.repo ? `?repo=${encodeURIComponent(w.repo)}` : ''
+      await api(`/api/watchlist/${w.item_type}/${w.number}/note${noteParam}`, {
         method: 'PUT',
         body: JSON.stringify({ note, assignee_id }),
       })
@@ -333,6 +361,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
           watchlist_item_type: w.item_type,
           watchlist_number: w.number,
           watchlist_title: w.title || '',
+          repo: w.repo,
           new_task_title: watchlistEditNewTaskTitle.value.trim(),
           new_task_source: watchlistEditNewTaskSource.value,
         }),

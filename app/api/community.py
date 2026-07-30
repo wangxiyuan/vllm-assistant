@@ -41,6 +41,7 @@ async def get_community_items(
     offset: int = Query(0, ge=0),
     sort_by: str = Query("created", pattern="^(created|updated|comments)$"),
     force_refresh: bool = False,
+    repo: Optional[str] = Query(None, description="按仓库过滤"),
     db: Session = Depends(get_db),
 ):
     """从缓存读取 community items（issues/prs）。
@@ -62,6 +63,8 @@ async def get_community_items(
         q = q.filter(Item.type == type)
     if area:
         q = q.filter(Item.area == area)
+    if repo:
+        q = q.filter(Item.repo == repo)
 
     sort_key = {
         "created": Item.created_at,
@@ -84,28 +87,40 @@ async def get_areas(db: Session = Depends(get_db)):
         if areas:
             return [a.to_dict() for a in areas]
         # 缓存未填充（scheduler 还没跑）时回退到 area_mapper 的内存数据
-        return AreaMapper().get_all_areas()
+        from app.scheduler import _get_area_mapper
+        from app.services._shared import get_active_repo_map
+        repo_map = get_active_repo_map()
+        first_repo = next(iter(repo_map.values()), "")
+        if first_repo:
+            return _get_area_mapper(first_repo).get_all_areas()
+        return []
     except Exception:
         logger.exception("Error in get_areas")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats")
-async def get_community_stats(db: Session = Depends(get_db)):
+async def get_community_stats(
+    repo: Optional[str] = Query(None, description="按仓库过滤统计"),
+    db: Session = Depends(get_db),
+):
     """从缓存聚合社区统计（使用 SQL 聚合查询，避免全表扫描）"""
     try:
         from sqlalchemy import func
 
-        # 按 type 分组统计总数
-        type_counts = db.query(
-            Item.type, func.count(Item.id)
-        ).group_by(Item.type).all()
+        q_type = db.query(Item.type, func.count(Item.id))
+        if repo:
+            q_type = q_type.filter(Item.repo == repo)
+        type_counts = q_type.group_by(Item.type).all()
         type_count_map = dict(type_counts)
 
         # 按 area + type 分组统计
-        area_rows = db.query(
+        q_area = db.query(
             Item.area, Item.type, func.count(Item.id)
-        ).filter(Item.area.isnot(None)).group_by(Item.area, Item.type).all()
+        ).filter(Item.area.isnot(None))
+        if repo:
+            q_area = q_area.filter(Item.repo == repo)
+        area_rows = q_area.group_by(Item.area, Item.type).all()
 
         area_stats: dict = {}
         for area_id, type_, _count in area_rows:

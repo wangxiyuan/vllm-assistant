@@ -1,10 +1,19 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/api/client'
 import { useAppStore } from './app'
 import { useWatchlistStore } from './watchlist'
+import { useReposStore } from './repos'
 import { issueType } from '@/utils/helpers'
 import type { PR, Issue, PRDetails } from '@/utils/types'
+
+function repoFullNameFromCloneUrl(cloneUrl: string): string {
+  let url = cloneUrl.endsWith('.git') ? cloneUrl.slice(0, -4) : cloneUrl
+  url = url.replace(/\/+$/, '')
+  const parts = url.split('/')
+  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+  return ''
+}
 
 export const usePRCenterStore = defineStore('prCenter', () => {
   // PR list
@@ -18,6 +27,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   const filterCIFail = ref(false)
   const selectedContributor = ref<{ id: number; name: string; github_id: string } | null>(null)
   const selectedContributorGithubId = ref('')
+  const contributionRepo = ref('')  // 当前选中的仓库，'' 表示全部
 
   // PR drawer
   const selectedPR = ref<any>(null)
@@ -55,6 +65,19 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   const prDiffLoading = ref(false)
 
   // Computed
+  const trackedRepos = computed(() => {
+    const reposStore = useReposStore()
+    return reposStore.repos.filter(r => r.tracked)
+  })
+
+  watch(trackedRepos, (repos) => {
+    if (!contributionRepo.value && repos.length > 0) {
+      const url = repos[0].clone_url
+      contributionRepo.value = repoFullNameFromCloneUrl(url)
+      loadAllContribData()
+    }
+  }, { immediate: true })
+
   const filteredMyPRs = computed(() => {
     const appStore = useAppStore()
     const q = (appStore.searchQuery || '').toLowerCase().trim()
@@ -124,6 +147,12 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     if (tab === 'issues') loadMyIssues()
   }
 
+  function switchContributionRepo(repo: string) {
+    contributionRepo.value = repo
+    loadMyPRs()
+    if (contributionTab.value === 'issues') loadMyIssues()
+  }
+
   function switchMyIssuesState(state: string) {
     myIssuesState.value = state
   }
@@ -133,12 +162,20 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   }
 
   async function loadMyPRs() {
+    // 没有选中仓库时，默认选中第一个 tracked repo
+    if (!contributionRepo.value) {
+      const repos = trackedRepos.value
+      if (repos.length > 0) {
+        const url = repos[0].clone_url
+        contributionRepo.value = repoFullNameFromCloneUrl(url)
+      }
+    }
     try {
       const githubId = selectedContributor.value?.github_id
-      const url = githubId
-        ? `/api/pr-center/my-prs?state=all&github_id=${encodeURIComponent(githubId)}`
-        : '/api/pr-center/my-prs?state=all'
-      myPrs.value = await api(url)
+      const params = new URLSearchParams({ state: 'all' })
+      if (githubId) params.set('github_id', githubId)
+      if (contributionRepo.value) params.set('repo', contributionRepo.value)
+      myPrs.value = await api(`/api/pr-center/my-prs?${params}`)
     } catch (e: any) {
       useAppStore().showToast('加载 PR 失败', e.message, 'error')
     }
@@ -164,7 +201,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   // PR drawer
   async function openPR(pr: any) {
     const watchlistStore = useWatchlistStore()
-    const wl = watchlistStore.findWatchlistItem(pr.pr_number || pr.number, 'pr')
+    const wl = watchlistStore.findWatchlistItem(pr.pr_number || pr.number, 'pr', pr.repo)
     if (wl) {
       pr.watchlist_note = wl.note || ''
       pr.watchlist_assignee_id = wl.assignee_id || null
@@ -183,7 +220,8 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     aiReviewLoading.value = !!pendingReviews.value[pr.pr_number || pr.number]
     aiSummaryLoading.value = !!pendingSummaries.value['pr:' + (pr.pr_number || pr.number)]
     try {
-      prDetails.value = await api(`/api/pr-center/my-prs/${pr.pr_number || pr.number}/details`)
+      const repoParam = pr.repo ? `?repo=${encodeURIComponent(pr.repo)}` : ''
+      prDetails.value = await api(`/api/pr-center/my-prs/${pr.pr_number || pr.number}/details${repoParam}`)
       _loadCachedAI('pr', pr.pr_number || pr.number)
       _loadCachedTranslate('pr', pr.pr_number || pr.number)
     } catch (e: any) {
@@ -213,7 +251,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   // Issue drawer
   async function openIssue(issue: any) {
     const watchlistStore = useWatchlistStore()
-    const wl = watchlistStore.findWatchlistItem(issue.number, 'issue')
+    const wl = watchlistStore.findWatchlistItem(issue.number, 'issue', issue.repo)
     if (wl) {
       issue.watchlist_note = wl.note || ''
       issue.watchlist_assignee_id = wl.assignee_id || null
@@ -230,7 +268,8 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     loadingIssue.value = !issue.body
     try {
       if (!issue.body) {
-        issueDetails.value = await api(`/api/pr-center/issue/${issue.number}/body`)
+        const repoParam = issue.repo ? `?repo=${encodeURIComponent(issue.repo)}` : ''
+        issueDetails.value = await api(`/api/pr-center/issue/${issue.number}/body${repoParam}`)
       }
       _loadCachedAI('issue', issue.number)
       _loadCachedTranslate('issue', issue.number)
@@ -299,7 +338,8 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     if (!selectedPR.value?.pr_number || prDiffLoading.value) return
     prDiffLoading.value = true
     try {
-      const data: any = await api(`/api/pr-center/my-prs/${selectedPR.value.pr_number}/diff`, {}, { timeout: 60000 })
+      const repoParam = selectedPR.value.repo ? `?repo=${encodeURIComponent(selectedPR.value.repo)}` : ''
+      const data: any = await api(`/api/pr-center/my-prs/${selectedPR.value.pr_number}/diff${repoParam}`, {}, { timeout: 60000 })
       prDiffData.value = data.diff || ''
       _parseDiffFiles(prDiffData.value)
     } catch (e: any) {
@@ -408,7 +448,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     try {
       const review = await api('/api/ai-assistant/generate-review', {
         method: 'POST',
-        body: JSON.stringify({ pr_number: prNumber, include_diff: true }),
+        body: JSON.stringify({ pr_number: prNumber, include_diff: true, repo: selectedPR.value.repo }),
       }, { timeout: 150000 })
       if (selectedPR.value?.pr_number === prNumber) {
         aiReview.value = review
@@ -466,6 +506,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     myPrs, myIssues, contributionTab, prState,
     myIssuesState, myIssuesType, filterConflicts, filterCIFail,
     selectedContributor, selectedContributorGithubId,
+    contributionRepo, trackedRepos,
     selectedPR, prDetails, prLoadError, loadingDetails,
     aiReview, aiReviewLoading, aiReviewElapsed, aiReviewTimer,
     aiSummary, aiSummaryLoading, aiSummaryCollapsed, aiReviewCollapsed,
@@ -479,6 +520,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     openPRCount, mergedPRCount, closedPRCount, allPRCount,
     openIssueCount, closedIssueCount, allIssueCount,
     switchPRState, switchContributionTab, switchMyIssuesState, switchMyIssuesType,
+    switchContributionRepo,
     loadMyPRs, loadMyIssues, loadAllContribData,
     openPR, closePR, openIssue, closeIssue,
     loadPRDiff, toggleFileDiff,

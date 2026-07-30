@@ -509,7 +509,7 @@ class MemoryService:
 
                 labels = json.loads(item.labels) if item.labels else []
                 area = item.area or "unknown"
-                tags = [item.type, area] + (labels[:5] if labels else [])
+                tags = [item.type, area, item.repo] + (labels[:5] if labels else [])
 
                 title = item.title or ""
                 body_preview = (item.body or "")
@@ -520,7 +520,7 @@ class MemoryService:
                     f"**标签**: {', '.join(labels) if labels else '无'}\n\n"
                     f"**正文**: {body_preview}\n"
                 )
-                source_ref = f"vllm-project/vllm#{item.number}"
+                source_ref = f"{item.repo}#{item.number}"
                 # 用 items 表的 updated_at 作为 checksum 判断变化
                 item_checksum = str(item.updated_at.timestamp()) if item.updated_at else ""
 
@@ -877,8 +877,11 @@ class MemoryService:
     def _file_module(self, file_path: str) -> str:
         """根据文件路径推断所属模块名"""
         parts = file_path.split("/")
+        # 动态获取已知仓库名（加上常见语言目录名）
+        from app.services._shared import get_active_repo_map
+        known_repos = list(get_active_repo_map().keys()) + ["python", "rust", "csrc"]
         for p in parts:
-            if p in ("vllm", "vllm-ascend", "sglang", "python"):
+            if p in known_repos:
                 idx = parts.index(p)
                 if idx + 1 < len(parts):
                     return parts[idx + 1]

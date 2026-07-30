@@ -52,7 +52,7 @@ class IntelligenceReportGenerator:
                     if len(parts) >= 2:
                         owner_repo = f"{parts[-2]}/{parts[-1]}"
                     else:
-                        owner_repo = f"{Config.GITHUB_OWNER}/{Config.GITHUB_REPO}"
+                        continue
 
                     config[r.repo] = {
                         "display_name": r.repo,
@@ -62,14 +62,7 @@ class IntelligenceReportGenerator:
             except Exception:
                 logger.warning("Failed to load repos from RepoCache", exc_info=True)
 
-        # 如果没有配置任何仓库，使用默认值
-        if not config:
-            config["vllm"] = {
-                "display_name": "vLLM 社区",
-                "repos": ["vllm-project/vllm"],
-                "type": "github",
-            }
-
+        # 如果没有配置任何仓库，跳过 GitHub 来源（仅保留固定来源）
         # 固定来源
         config["academic"] = {
             "display_name": "学术动态",
@@ -329,7 +322,7 @@ class IntelligenceReportGenerator:
                         "如果搜索结果中有感兴趣的文章，可以进一步调用 extract_web_content 提取正文。"
                     )
                     parts.append(
-                        f"同时调用 get_github_releases 获取 {github_repos[0] if github_repos else 'vllm-project/vllm'} 的最近 release。"
+                        f"同时调用 get_github_releases 获取 {github_repos[0] if github_repos else '已配置仓库'} 的最近 release。"
                     )
                 return "\n".join(parts)
             return ""  # 后续搜索轮让 AI 自由发挥
@@ -652,7 +645,7 @@ class IntelligenceReportGenerator:
 基于已读 issue 的正文和评论总结热点话题
 ### 进一步调研建议
 列出未能深入但值得关注的线索，提供 GitHub 搜索链接。格式示例：
-- 在 vllm-project/vllm 搜索更多相关 issue：[搜索链接](https://github.com/vllm-project/vllm/issues?q=关键词)
+- 在 GitHub 搜索更多相关 issue：[搜索链接](https://github.com/search?q=is%3Aissue+关键词&type=issues)
 - 建议关注 label:kernel / label:performance 的 issue
 - 建议用以下关键词在 GitHub 搜索：`triton kernel dispatch`、`platform abstraction`
 
@@ -998,11 +991,15 @@ class IntelligenceReportGenerator:
         self, sources: List[str], excluded_sources: Optional[List[str]] = None,
         source_config: Optional[dict] = None,
     ) -> List[str]:
-        """解析最终使用的来源列表"""
+        """解析最终使用的来源列表。空列表表示用全部可用来源。"""
         if source_config is None:
             source_config = self._get_source_config(self.db)
-        # 只保留已知的 source
-        result = [s for s in sources if s in source_config]
+        # 空 sources 表示用全部来源
+        if not sources:
+            result = list(source_config.keys())
+        else:
+            # 只保留已知的 source
+            result = [s for s in sources if s in source_config]
         if excluded_sources:
             result = [s for s in result if s not in excluded_sources]
         return result

@@ -26,8 +26,11 @@ class ConflictDetector:
             from app.services.github_client import GitHubClient
             self._client = GitHubClient()
 
-    def detect_conflicts(self, pr_number: int) -> Dict[str, Any]:
+    def detect_conflicts(self, pr_number: int, repo: Optional[str] = None) -> Dict[str, Any]:
         """通过 Compare API 检测 PR 是否落后且不可 clean merge
+
+        Args:
+            repo: 完整 owner/repo，None 时用 Config 默认仓库
 
         Returns:
             {
@@ -40,7 +43,7 @@ class ConflictDetector:
             }
         """
         try:
-            pr = self._client.get_pull(pr_number)
+            pr = self._client.get_pull(pr_number, repo=repo)
             if not pr or not isinstance(pr, dict):
                 return self._error("PR not found")
 
@@ -51,7 +54,7 @@ class ConflictDetector:
             if not base_sha or not head:
                 return self._error("Missing base/head sha")
 
-            compare = self._client.compare_branches(base_sha, head) or {}
+            compare = self._client.compare_branches(base_sha, head, repo=repo) or {}
             ahead = int(compare.get("ahead_by") or 0)
             behind = int(compare.get("behind_by") or 0)
             mergeable = compare.get("mergeable")

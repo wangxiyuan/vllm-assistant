@@ -3,7 +3,7 @@ Pydantic数据模型（API请求/响应）
 """
 from typing import List, Optional
 from datetime import datetime, date
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, Field
 
 
 class ItemResponse(BaseModel):
@@ -82,6 +82,7 @@ class AIReviewRequest(BaseModel):
     """AI Review请求"""
     pr_number: int
     include_diff: bool = True
+    repo: Optional[str] = None  # 完整 owner/repo，None 时用 Config 默认仓库
 
 
 class AIAnalyzeRequest(BaseModel):
@@ -196,7 +197,7 @@ class IntelligenceGenerateRequest(BaseModel):
     """生成洞察报告请求"""
     task_id: int
     title: str = ""
-    sources: List[str] = ["vllm", "vllm-ascend", "sglang", "academic", "news"]
+    sources: List[str] = []  # 空表示用全部可用来源（由后端从 RepoCache 动态解析）
     excluded_sources: List[str] = []
     extra_prompt: str = ""
     user_id: Optional[int] = None  # 创建人

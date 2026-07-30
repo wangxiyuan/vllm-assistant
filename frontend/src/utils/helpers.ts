@@ -102,18 +102,12 @@ export function statusClass(status: string): string {
   return 'status-' + (status || 'todo')
 }
 
-export const repoMap: Record<string, string> = {
-  vllm: 'vllm-project/vllm',
-  'vllm-ascend': 'vllm-project/vllm-ascend',
+/** 从 item 的 repo 字段和 number/type 生成 GitHub URL */
+export function ghUrl(repo: string | undefined, number: number, type: 'pr' | 'issue'): string {
+  const full = repo || 'vllm-project/vllm'
+  const seg = type === 'pr' ? 'pull' : 'issues'
+  return `https://github.com/${full}/${seg}/${number}`
 }
-
-export const intelSourceOptions = [
-  { value: 'vllm', label: 'vLLM 社区' },
-  { value: 'vllm-ascend', label: 'vLLM-Ascend' },
-  { value: 'sglang', label: 'sglang' },
-  { value: 'academic', label: '学术动态' },
-  { value: 'news', label: '新闻动态' },
-]
 
 export const priorities = ['P0', 'P1', 'P2', 'P3']
 

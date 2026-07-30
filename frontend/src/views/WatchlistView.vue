@@ -7,7 +7,7 @@ import { useUsersStore } from '@/stores/users'
 import { useTodoStore } from '@/stores/todo'
 import { useReposStore } from '@/stores/repos'
 import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
-import { timeAgo, statusLabel, sourceLabel, priorityClass, statusClass } from '@/utils/helpers'
+import { timeAgo, statusLabel, sourceLabel, priorityClass, statusClass, ghUrl } from '@/utils/helpers'
 import Icon from '@/components/common/Icon.vue'
 
 const watchlistStore = useWatchlistStore()
@@ -23,9 +23,9 @@ onMounted(() => {
 
 function openWatchlistItem(w: any) {
   if (w.item_type === 'pr') {
-    prStore.openPR({ pr_number: w.number, title: w.title, url: w.url, state: w.state || 'open', watchlist_note: w.note || '', watchlist_assignee_id: w.assignee_id || null, linked_tasks: w.linked_tasks || [] })
+    prStore.openPR({ pr_number: w.number, title: w.title, url: w.url, state: w.state || 'open', repo: w.repo, watchlist_note: w.note || '', watchlist_assignee_id: w.assignee_id || null, linked_tasks: w.linked_tasks || [] })
   } else {
-    prStore.openIssue({ number: w.number, title: w.title, url: w.url, state: w.state || 'open', watchlist_note: w.note || '', watchlist_assignee_id: w.assignee_id || null, linked_tasks: w.linked_tasks || [] })
+    prStore.openIssue({ number: w.number, title: w.title, url: w.url, state: w.state || 'open', repo: w.repo, watchlist_note: w.note || '', watchlist_assignee_id: w.assignee_id || null, linked_tasks: w.linked_tasks || [] })
   }
 }
 
@@ -38,8 +38,8 @@ function openUrl(url: string) {
   window.open(url, '_blank')
 }
 
-function toggleWatchlist(number: number, type: string, title: string, url: string) {
-  watchlistStore.toggleWatch(number, type, title, url)
+function toggleWatchlist(number: number, type: string, title: string, url: string, extra?: any) {
+  watchlistStore.toggleWatch(number, type, title, url, extra)
 }
 </script>
 
@@ -70,12 +70,13 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
     </div>
 
     <div class="watchlist-list">
-      <div v-for="w in watchlistStore.filteredWatchlist" :key="w.item_type + '-' + w.number" class="watchlist-item" @click="openWatchlistItem(w)">
+      <div v-for="w in watchlistStore.filteredWatchlist" :key="(w.repo || '') + '-' + w.item_type + '-' + w.number" class="watchlist-item" @click="openWatchlistItem(w)">
         <div class="item-header">
           <span class="item-type-badge" :class="w.item_type === 'pr' ? 'badge-pr' : 'badge-issue'">
             {{ w.item_type === 'pr' ? 'PR' : 'ISSUE' }}
           </span>
           <span class="item-number">#{{ w.number }}</span>
+          <span v-if="w.repo" class="badge badge-area" style="font-size:9px;">{{ w.repo.split('/').pop() }}</span>
           <span v-if="w.state" class="item-state" :class="'state-' + w.state">
             {{ w.state === 'merged' ? '已合并' : w.state === 'open' ? '开放' : '已关闭' }}
           </span>
@@ -100,7 +101,7 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             编辑
           </button>
-          <button class="card-action-btn is-danger" @click.stop="watchlistStore.toggleWatch(w.number, w.item_type, w.title, w.url)" title="移除关注">
+          <button class="card-action-btn is-danger" @click.stop="watchlistStore.toggleWatch(w.number, w.item_type, w.title, w.url, { repo: w.repo })" title="移除关注">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             移除
           </button>
@@ -205,14 +206,14 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
               <h2>{{ prStore.selectedPR.title }}</h2>
             </div>
             <div class="drawer-actions">
-              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr') }"
-                      @click.stop="toggleWatchlist(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.title, 'https://github.com/vllm-project/vllm/pull/' + (prStore.selectedPR.pr_number || prStore.selectedPR.number))"
-                      :title="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr') ? '取消关注' : '添加到特别关注'">
-                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.repo) }"
+                      @click.stop="toggleWatchlist(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.title, ghUrl(prStore.selectedPR.repo, prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr'), { repo: prStore.selectedPR.repo })"
+                      :title="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.repo) ? '取消关注' : '添加到特别关注'">
+                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.repo) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               </button>
-              <a :href="'https://github.com/vllm-project/vllm/pull/' + (prStore.selectedPR.pr_number || prStore.selectedPR.number)" target="_blank" class="btn btn-sm">
+              <a :href="ghUrl(prStore.selectedPR.repo, prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr')" target="_blank" class="btn btn-sm">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 GitHub
               </a>
@@ -332,14 +333,14 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
               <h2>{{ prStore.selectedIssue.title }}</h2>
             </div>
             <div class="drawer-actions">
-              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') }"
-                      @click.stop="toggleWatchlist(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.title, 'https://github.com/vllm-project/vllm/issues/' + prStore.selectedIssue.number)"
-                      :title="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') ? '取消关注' : '添加到特别关注'">
-                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.repo) }"
+                      @click.stop="toggleWatchlist(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.title, ghUrl(prStore.selectedIssue.repo, prStore.selectedIssue.number, 'issue'), { repo: prStore.selectedIssue.repo })"
+                      :title="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.repo) ? '取消关注' : '添加到特别关注'">
+                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.repo) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               </button>
-              <a :href="'https://github.com/vllm-project/vllm/issues/' + prStore.selectedIssue.number" target="_blank" class="btn btn-sm">
+              <a :href="ghUrl(prStore.selectedIssue.repo, prStore.selectedIssue.number, 'issue')" target="_blank" class="btn btn-sm">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 GitHub
               </a>

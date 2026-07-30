@@ -5,9 +5,10 @@ import { useAppStore } from '@/stores/app'
 import { usePRCenterStore } from '@/stores/prCenter'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
-import { issueType, issueTypeLabel, issueStateLabel, prStateLabel, timeAgo, exactTime } from '@/utils/helpers'
+import { issueType, issueTypeLabel, issueStateLabel, prStateLabel, timeAgo, exactTime, ghUrl } from '@/utils/helpers'
 import type { Issue, PR } from '@/utils/types'
 import Icon from '@/components/common/Icon.vue'
+import FilterRow from '@/components/common/FilterRow.vue'
 
 const communityStore = useCommunityStore()
 const appStore = useAppStore()
@@ -15,7 +16,6 @@ const prStore = usePRCenterStore()
 const watchlistStore = useWatchlistStore()
 
 onMounted(() => {
-  communityStore.loadCommunityData()
   communityStore.loadAreas()
 })
 
@@ -29,15 +29,28 @@ function loadMore() {
 }
 
 function openPR(pr: PR) {
-  prStore.openPR({ ...pr, pr_number: pr.number })
+  prStore.openPR({ ...pr, pr_number: pr.number, repo: pr.repo })
 }
 
 function openIssue(issue: Issue) {
   prStore.openIssue(issue)
 }
 
-function toggleWatchlist(number: number, type: string, title: string, url: string) {
-  watchlistStore.toggleWatch(number, type, title, url)
+function toggleWatchlist(number: number, type: string, title: string, url: string, extra?: any) {
+  watchlistStore.toggleWatch(number, type, title, url, extra)
+}
+
+function repoFullName(cloneUrl: string): string {
+  let url = cloneUrl.endsWith('.git') ? cloneUrl.slice(0, -4) : cloneUrl
+  url = url.replace(/\/+$/, '')
+  const parts = url.split('/')
+  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+  return ''
+}
+
+function switchRepo(repo: string) {
+  communityStore.communityRepo = repo
+  communityStore.loadCommunityData()
 }
 </script>
 
@@ -47,39 +60,55 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
       <h2 class="view-title">社区动态</h2>
     </div>
 
-    <div class="tab-bar" style="margin-bottom:var(--space-5)">
-      <button class="tab" :class="{ active: communityStore.communityTab === 'prs' }"
-              @click="communityStore.communityTab = 'prs'">
-        PRs <span class="badge">{{ communityStore.prs.length }}</span>
-      </button>
-      <button class="tab" :class="{ active: communityStore.communityTab === 'issues' }"
-              @click="communityStore.communityTab = 'issues'">
-        Issues <span class="badge">{{ communityStore.issues.length }}</span>
-      </button>
-    </div>
+    <FilterRow label="类型">
+      <div class="tab-bar">
+        <button class="tab" :class="{ active: communityStore.communityTab === 'prs' }"
+                @click="communityStore.communityTab = 'prs'">
+          PRs <span class="badge">{{ communityStore.prs.length }}</span>
+        </button>
+        <button class="tab" :class="{ active: communityStore.communityTab === 'issues' }"
+                @click="communityStore.communityTab = 'issues'">
+          Issues <span class="badge">{{ communityStore.issues.length }}</span>
+        </button>
+      </div>
+    </FilterRow>
 
-    <div class="community-filters">
-      <select v-if="communityStore.communityTab === 'issues'" class="select select-sm" v-model="communityStore.communityIssueType">
-        <option value="all">全部类型</option>
-        <option value="bug">Bug</option>
-        <option value="rfc">RFC</option>
-        <option value="feature">功能</option>
-        <option value="usage">使用</option>
-        <option value="installation">安装</option>
-        <option value="performance">性能</option>
-        <option value="doc">文档</option>
-        <option value="ci">CI</option>
-        <option value="refactor">重构</option>
-      </select>
-      <select v-if="communityStore.communityTab === 'issues'" class="select select-sm" v-model="communityStore.communityIssueArea">
-        <option value="">全部领域</option>
-        <option v-for="area in appStore.areas" :key="area.id" :value="area.id">{{ area.name }}</option>
-      </select>
-      <select v-if="communityStore.communityTab === 'prs'" class="select select-sm" v-model="communityStore.communityPRArea">
-        <option value="">全部领域</option>
-        <option v-for="area in appStore.areas" :key="area.id" :value="area.id">{{ area.name }}</option>
-      </select>
-    </div>
+    <FilterRow v-if="communityStore.trackedRepos.length > 0" label="仓库">
+      <div class="tab-bar" style="flex-wrap:wrap;">
+        <button v-for="r in communityStore.trackedRepos" :key="r.id"
+                class="tab tab-sm" :class="{ active: communityStore.communityRepo === repoFullName(r.clone_url) }"
+                @click="switchRepo(repoFullName(r.clone_url))">
+          {{ r.repo }}
+        </button>
+      </div>
+    </FilterRow>
+
+    <FilterRow label="筛选">
+      <template v-if="communityStore.communityTab === 'issues'">
+        <select class="select select-sm" v-model="communityStore.communityIssueType">
+          <option value="all">全部类型</option>
+          <option value="bug">Bug</option>
+          <option value="rfc">RFC</option>
+          <option value="feature">功能</option>
+          <option value="usage">使用</option>
+          <option value="installation">安装</option>
+          <option value="performance">性能</option>
+          <option value="doc">文档</option>
+          <option value="ci">CI</option>
+          <option value="refactor">重构</option>
+        </select>
+        <select class="select select-sm" v-model="communityStore.communityIssueArea">
+          <option value="">全部领域</option>
+          <option v-for="area in appStore.areas" :key="area.id" :value="area.id">{{ area.name }}</option>
+        </select>
+      </template>
+      <template v-else>
+        <select class="select select-sm" v-model="communityStore.communityPRArea">
+          <option value="">全部领域</option>
+          <option v-for="area in appStore.areas" :key="area.id" :value="area.id">{{ area.name }}</option>
+        </select>
+      </template>
+    </FilterRow>
 
     <div class="community-list">
       <div v-for="item in displayedItems" :key="item.type + '-' + (item.number || item.pr_number)"
@@ -104,12 +133,12 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
         </div>
         <div class="item-title-row">
           <h3 class="item-title">{{ item.title }}</h3>
-          <button class="btn btn-xs watchlist-star-btn" :class="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr') : watchlistStore.findWatchlistItem(item.number, 'issue')) ? 'btn-starred' : 'btn-ghost'"
+          <button class="btn btn-xs watchlist-star-btn" :class="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr', item.repo) : watchlistStore.findWatchlistItem(item.number, 'issue', item.repo)) ? 'btn-starred' : 'btn-ghost'"
                   @click.stop="item.type === 'pr'
-                    ? toggleWatchlist(item.number || item.pr_number, 'pr', item.title, 'https://github.com/vllm-project/vllm/pull/' + (item.number || item.pr_number))
-                    : toggleWatchlist(item.number, 'issue', item.title, 'https://github.com/vllm-project/vllm/issues/' + item.number)"
-                  :title="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr') : watchlistStore.findWatchlistItem(item.number, 'issue')) ? '取消特别关注' : '加入特别关注'">
-            <svg width="14" height="14" viewBox="0 0 24 24" :fill="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr') : watchlistStore.findWatchlistItem(item.number, 'issue')) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+                    ? toggleWatchlist(item.number || item.pr_number, 'pr', item.title, ghUrl(item.repo, item.number || item.pr_number, 'pr'), { repo: item.repo })
+                    : toggleWatchlist(item.number, 'issue', item.title, ghUrl(item.repo, item.number, 'issue'), { repo: item.repo })"
+                  :title="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr', item.repo) : watchlistStore.findWatchlistItem(item.number, 'issue', item.repo)) ? '取消特别关注' : '加入特别关注'">
+            <svg width="14" height="14" viewBox="0 0 24 24" :fill="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr', item.repo) : watchlistStore.findWatchlistItem(item.number, 'issue', item.repo)) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
             </svg>
           </button>
@@ -119,6 +148,7 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
             {{ item.author }}
           </span>
+          <span v-if="!communityStore.communityRepo && item.repo" class="badge badge-area" style="font-size:9px;">{{ item.repo.split('/').pop() }}</span>
           <span v-if="item.area" class="badge badge-area">{{ appStore.areaName(item.area) }}</span>
           <span class="meta-item tt-host">
             {{ timeAgo(item.created_at) }}
@@ -157,14 +187,14 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
               <h2>{{ prStore.selectedPR.title }}</h2>
             </div>
             <div class="drawer-actions">
-              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr') }"
-                      @click.stop="toggleWatchlist(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.title, 'https://github.com/vllm-project/vllm/pull/' + (prStore.selectedPR.pr_number || prStore.selectedPR.number))"
-                      :title="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr') ? '取消关注' : '添加到特别关注'">
-                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.repo) }"
+                      @click.stop="toggleWatchlist(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.title, ghUrl(prStore.selectedPR.repo, prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr'), { repo: prStore.selectedPR.repo })"
+                      :title="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.repo) ? '取消关注' : '添加到特别关注'">
+                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr', prStore.selectedPR.repo) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               </button>
-              <a :href="'https://github.com/vllm-project/vllm/pull/' + (prStore.selectedPR.pr_number || prStore.selectedPR.number)" target="_blank" class="btn btn-sm">
+              <a :href="ghUrl(prStore.selectedPR.repo, prStore.selectedPR.pr_number || prStore.selectedPR.number, 'pr')" target="_blank" class="btn btn-sm">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 GitHub
               </a>
@@ -284,14 +314,14 @@ function toggleWatchlist(number: number, type: string, title: string, url: strin
               <h2>{{ prStore.selectedIssue.title }}</h2>
             </div>
             <div class="drawer-actions">
-              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') }"
-                      @click.stop="toggleWatchlist(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.title, 'https://github.com/vllm-project/vllm/issues/' + prStore.selectedIssue.number)"
-                      :title="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') ? '取消关注' : '添加到特别关注'">
-                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.repo) }"
+                      @click.stop="toggleWatchlist(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.title, ghUrl(prStore.selectedIssue.repo, prStore.selectedIssue.number, 'issue'), { repo: prStore.selectedIssue.repo })"
+                      :title="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.repo) ? '取消关注' : '添加到特别关注'">
+                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.repo) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               </button>
-              <a :href="'https://github.com/vllm-project/vllm/issues/' + prStore.selectedIssue.number" target="_blank" class="btn btn-sm">
+              <a :href="ghUrl(prStore.selectedIssue.repo, prStore.selectedIssue.number, 'issue')" target="_blank" class="btn btn-sm">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 GitHub
               </a>

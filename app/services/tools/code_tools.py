@@ -36,7 +36,7 @@ READ_LOCAL_CODE = {
                 },
                 "repo": {
                     "type": "string",
-                    "description": "仓库名，如 'vllm'，'vllm-ascend' 等，默认 'vllm'",
+                    "description": "仓库名，不传则用默认仓库",
                 },
                 "start_line": {
                     "type": "integer",
@@ -59,7 +59,10 @@ async def handle_read_local_code(args: dict) -> dict:
     if not file_path:
         return {"error": "file_path is required"}
 
-    repo = args.get("repo", "vllm")
+    repo = args.get("repo")
+    if not repo:
+        from app.services._shared import get_default_repo_short
+        repo = get_default_repo_short()
     # max_lines 默认 100，上限 1500；0 或负数视为「读到文件末尾」
     raw_max = args.get("max_lines", 100)
     try:
@@ -145,7 +148,7 @@ SEARCH_CODE = {
                 },
                 "repo": {
                     "type": "string",
-                    "description": "仓库名，如 'vllm'，'vllm-ascend' 等，默认 'vllm'",
+                    "description": "仓库名，不传则用默认仓库",
                 },
                 "file_pattern": {
                     "type": "string",
@@ -171,7 +174,10 @@ async def handle_search_code(args: dict) -> dict:
     if not keyword:
         return {"error": "keyword is required"}
 
-    repo = args.get("repo", "vllm")
+    repo = args.get("repo")
+    if not repo:
+        from app.services._shared import get_default_repo_short
+        repo = get_default_repo_short()
     max_results = min(args.get("max_results", 10), 30)
 
     # file_pattern 当作前缀：去末尾 /，转义 LIKE 通配符，再追加 %

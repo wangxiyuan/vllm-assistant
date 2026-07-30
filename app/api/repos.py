@@ -5,6 +5,7 @@ Repos API - 仓库缓存管理
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -21,12 +22,14 @@ class RepoCreate(BaseModel):
     repo: str  # 仓库短名称，slug 格式
     clone_url: str
     branch: str = "main"
+    tracked: bool = False
 
 
 class RepoUpdate(BaseModel):
     repo: str = ""
     clone_url: str = ""
     branch: str = ""
+    tracked: Optional[bool] = None
 
 
 def _utcnow() -> datetime:
@@ -39,11 +42,22 @@ def _validate_repo_name(name: str) -> bool:
     return bool(re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$', name))
 
 
+def _clone_url_to_full_repo(clone_url: str) -> str:
+    """从 clone_url 提取完整 owner/repo（如 vllm-project/vllm）"""
+    url = clone_url
+    if url.endswith('.git'):
+        url = url[:-4]
+    parts = url.rstrip('/').split('/')
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    return ""
+
+
 # ===== 联动清理辅助函数 =====
 
-def _cleanup_on_delete(db: Session, repo_name: str):
+def _cleanup_on_delete(db: Session, repo_name: str, full_repo: Optional[str] = None):
     """删除仓库时联动清理所有关联资源"""
-    from app.models import LocalCodeCache, FileChangeHistory, CodeReference
+    from app.models import LocalCodeCache, FileChangeHistory, CodeReference, Item, Watchlist
 
     # 1. 删除 LocalCodeCache
     deleted = db.query(LocalCodeCache).filter(LocalCodeCache.repo == repo_name).delete()
@@ -59,7 +73,15 @@ def _cleanup_on_delete(db: Session, repo_name: str):
     ).update({"is_valid": False}, synchronize_session=False)
     logger.info(f"Marked {updated} CodeReference rows invalid for repo '{repo_name}'")
 
-    # 4. 标记 AI Memory 为过期（软删除，tag 包含该 repo 名的条目）
+    # 4. 删除 Item 中该 repo 的记录（按完整 owner/repo 匹配）
+    if full_repo:
+        deleted_items = db.query(Item).filter(Item.repo == full_repo).delete()
+        logger.info(f"Deleted {deleted_items} Item rows for repo '{full_repo}'")
+        # 5. 删除 Watchlist 中该 repo 的记录
+        deleted_wl = db.query(Watchlist).filter(Watchlist.repo == full_repo).delete()
+        logger.info(f"Deleted {deleted_wl} Watchlist rows for repo '{full_repo}'")
+
+    # 6. 标记 AI Memory 为过期（软删除，tag 包含该 repo 名的条目）
     from app.services.memory_service import MemoryService
     mem = MemoryService()
     count = mem.forget_by_source_ref_prefix(f"{repo_name}/")
@@ -166,6 +188,7 @@ async def create_repo(req: RepoCreate, db: Session = Depends(get_db)):
         local_path=local_path,
         branch=branch,
         status="active",
+        tracked=req.tracked,
         created_at=now,
         updated_at=now,
     )
@@ -250,6 +273,7 @@ async def delete_repo(repo_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Repo not found")
 
     repo_name = repo.repo
+    full_repo = _clone_url_to_full_repo(repo.clone_url)
 
     # 1. 软删除 RepoCache
     repo.status = "deleted"
@@ -257,7 +281,7 @@ async def delete_repo(repo_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     # 2. 清理关联资源
-    _cleanup_on_delete(db, repo_name)
+    _cleanup_on_delete(db, repo_name, full_repo=full_repo)
 
     # 3. 删除本地目录
     from app.services.repo_manager import RepoManager
@@ -265,3 +289,24 @@ async def delete_repo(repo_id: int, db: Session = Depends(get_db)):
     manager.delete_local_repo(repo_name)
 
     return {"deleted": True, "repo": repo_name}
+
+
+@router.patch("/{repo_id}/track")
+async def toggle_track(repo_id: int, tracked: bool = True, db: Session = Depends(get_db)):
+    """切换仓库的追踪状态，启用时异步触发该仓库的 issue/PR 同步"""
+    repo = db.query(RepoCache).filter(RepoCache.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    repo.tracked = tracked
+    repo.updated_at = _utcnow()
+    db.commit()
+    db.refresh(repo)
+
+    # 启用追踪时异步触发同步
+    if tracked:
+        from app.scheduler import trigger_sync_for_repo
+        full_repo = _clone_url_to_full_repo(repo.clone_url)
+        trigger_sync_for_repo(full_repo)
+
+    return repo.to_dict()

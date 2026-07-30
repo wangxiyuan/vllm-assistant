@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import Icon from '@/components/common/Icon.vue'
+import { ref, computed, provide, inject, watch, type Ref } from 'vue'
 
 const props = defineProps<{
   data: Record<string, any>
@@ -10,9 +9,19 @@ const props = defineProps<{
 }>()
 
 const level = computed(() => props.level ?? 0)
+
+// 根层级创建共享的 allOpen 状态，子层级通过 inject 获取
+const allOpen = level.value === 0 ? ref(true) : (inject<Ref<boolean>>('paramsSummaryAllOpen') ?? ref(true))
+if (level.value === 0) {
+  provide('paramsSummaryAllOpen', allOpen)
+}
+
 const open = ref(props.defaultOpen ?? level.value === 0)
 
-const allOpen = ref(true)
+// 当 allOpen 变化时，同步到所有层级
+watch(allOpen, (val) => {
+  open.value = val
+})
 
 const safeData = computed(() => {
   if (!props.data || typeof props.data !== 'object') return {}

@@ -29,7 +29,7 @@ SEARCH_DOCS = {
             "properties": {
                 "project": {
                     "type": "string",
-                    "description": "项目名称，如 'vllm'、'vllm-ascend' 等（由仓库配置决定）",
+                    "description": "项目名称（由仓库配置决定，不传则用默认仓库）",
                 },
                 "query": {
                     "type": "string",
@@ -44,7 +44,10 @@ SEARCH_DOCS = {
 
 async def handle_search_docs(args: dict) -> dict:
     """从知识库检索本地缓存的文档知识"""
-    project = args.get("project", "vllm")
+    project = args.get("project")
+    if not project:
+        from app.services._shared import get_default_repo_short
+        project = get_default_repo_short()
     query = args.get("query", "").strip()
     if not query:
         return {"error": "query is required"}

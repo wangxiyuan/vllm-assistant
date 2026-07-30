@@ -7,8 +7,9 @@ import { timeAgo } from '@/utils/helpers'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useRouter } from 'vue-router'
 import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
-import { ciLabel, ciBadgeClass, prStateLabel, issueStateLabel, issueType, issueTypeLabel } from '@/utils/helpers'
+import { ciLabel, ciBadgeClass, prStateLabel, issueStateLabel, issueType, issueTypeLabel, ghUrl } from '@/utils/helpers'
 import Icon from '@/components/common/Icon.vue'
+import FilterRow from '@/components/common/FilterRow.vue'
 
 const prStore = usePRCenterStore()
 const usersStore = useUsersStore()
@@ -17,7 +18,6 @@ const watchlistStore = useWatchlistStore()
 const router = useRouter()
 
 onMounted(() => {
-  prStore.loadAllContribData()
 })
 
 // When contributor changes
@@ -31,51 +31,72 @@ function onContributorChange() {
   }
   prStore.loadAllContribData()
 }
+
+function repoFullName(cloneUrl: string): string {
+  let url = cloneUrl.endsWith('.git') ? cloneUrl.slice(0, -4) : cloneUrl
+  url = url.replace(/\/+$/, '')
+  const parts = url.split('/')
+  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+  return ''
+}
 </script>
 
 <template>
   <div class="view-container">
     <div class="view-header">
       <h2 class="view-title">贡献面板</h2>
-      <div class="view-actions">
-        <select class="select select-sm" v-model="prStore.selectedContributorGithubId" @change="onContributorChange">
-          <option value="">全部贡献者</option>
-          <option v-for="u in usersStore.users" :key="u.id" :value="u.github_id">{{ u.name }}</option>
-        </select>
+    </div>
+
+    <FilterRow label="贡献者">
+      <select class="select select-sm" v-model="prStore.selectedContributorGithubId" @change="onContributorChange" style="min-width:140px;">
+        <option value="">全部贡献者</option>
+        <option v-for="u in usersStore.users" :key="u.id" :value="u.github_id">{{ u.name }}</option>
+      </select>
+    </FilterRow>
+
+    <FilterRow label="类型">
+      <div class="tab-bar">
+        <button class="tab" :class="{ active: prStore.contributionTab === 'prs' }"
+                @click="prStore.switchContributionTab('prs')">PRs ({{ prStore.openPRCount }})</button>
+        <button class="tab" :class="{ active: prStore.contributionTab === 'issues' }"
+                @click="prStore.switchContributionTab('issues')">Issues ({{ prStore.openIssueCount }})</button>
       </div>
-    </div>
+    </FilterRow>
 
-    <!-- Stats overview -- removed PR/Issue/BarChart cards -->
-
-    <!-- Tabs -->
-    <div class="tab-bar" style="margin-bottom:var(--space-5)">
-      <button class="tab" :class="{ active: prStore.contributionTab === 'prs' }"
-              @click="prStore.switchContributionTab('prs')">PRs ({{ prStore.openPRCount }})</button>
-      <button class="tab" :class="{ active: prStore.contributionTab === 'issues' }"
-              @click="prStore.switchContributionTab('issues')">Issues ({{ prStore.openIssueCount }})</button>
-    </div>
+    <FilterRow v-if="prStore.trackedRepos.length > 0" label="仓库">
+      <div class="tab-bar" style="flex-wrap:wrap;">
+        <button v-for="r in prStore.trackedRepos" :key="r.id"
+                class="tab tab-sm" :class="{ active: prStore.contributionRepo === repoFullName(r.clone_url) }"
+                @click="prStore.switchContributionRepo(repoFullName(r.clone_url))">
+          {{ r.repo }}
+        </button>
+      </div>
+    </FilterRow>
 
     <!-- PR list -->
     <template v-if="prStore.contributionTab === 'prs'">
-      <div class="pr-filters">
+      <FilterRow label="状态">
         <div class="tab-bar tab-bar-sm">
           <button class="tab tab-sm" :class="{ active: prStore.prState === 'open' }" @click="prStore.switchPRState('open')">开放 ({{ prStore.openPRCount }})</button>
           <button class="tab tab-sm" :class="{ active: prStore.prState === 'merged' }" @click="prStore.switchPRState('merged')">已合并 ({{ prStore.mergedPRCount }})</button>
           <button class="tab tab-sm" :class="{ active: prStore.prState === 'closed' }" @click="prStore.switchPRState('closed')">已关闭 ({{ prStore.closedPRCount }})</button>
           <button class="tab tab-sm" :class="{ active: prStore.prState === 'all' }" @click="prStore.switchPRState('all')">全部 ({{ prStore.allPRCount }})</button>
         </div>
+      </FilterRow>
+      <FilterRow label="标记">
         <label class="checkbox-label">
           <input type="checkbox" v-model="prStore.filterConflicts" /> 冲突
         </label>
         <label class="checkbox-label">
           <input type="checkbox" v-model="prStore.filterCIFail" /> CI 失败
         </label>
-      </div>
+      </FilterRow>
 
       <div class="pr-list">
-        <div v-for="pr in prStore.filteredMyPRs" :key="pr.pr_number" class="pr-item" @click="prStore.openPR(pr)">
+        <div v-for="pr in prStore.filteredMyPRs" :key="(pr.repo || '') + '-' + pr.pr_number" class="pr-item" @click="prStore.openPR(pr)">
           <div class="pr-item-header">
             <span class="pr-number">#{{ pr.pr_number }}</span>
+            <span v-if="!prStore.contributionRepo && pr.repo" class="badge badge-area" style="font-size:9px;">{{ pr.repo.split('/').pop() }}</span>
             <span class="badge" :class="'state-' + pr.state">{{ prStateLabel(pr.state) }}</span>
             <span v-if="pr.conflict_detected" class="badge badge-conflict">冲突</span>
             <span v-if="pr.ci_status" class="badge" :class="ciBadgeClass(pr.ci_status)">{{ ciLabel(pr.ci_status) }}</span>
@@ -95,12 +116,14 @@ function onContributorChange() {
 
     <!-- Issue list -->
     <template v-if="prStore.contributionTab === 'issues'">
-      <div class="pr-filters">
+      <FilterRow label="状态">
         <div class="tab-bar tab-bar-sm">
           <button class="tab tab-sm" :class="{ active: prStore.myIssuesState === 'open' }" @click="prStore.switchMyIssuesState('open')">开放</button>
           <button class="tab tab-sm" :class="{ active: prStore.myIssuesState === 'closed' }" @click="prStore.switchMyIssuesState('closed')">已关闭</button>
           <button class="tab tab-sm" :class="{ active: prStore.myIssuesState === 'all' }" @click="prStore.switchMyIssuesState('all')">全部</button>
         </div>
+      </FilterRow>
+      <FilterRow label="类型">
         <select class="select select-sm" v-model="prStore.myIssuesType" @change="prStore.switchMyIssuesType(prStore.myIssuesType)">
           <option value="all">全部类型</option>
           <option value="bug">Bug</option>
@@ -113,12 +136,13 @@ function onContributorChange() {
           <option value="ci">CI</option>
           <option value="refactor">重构</option>
         </select>
-      </div>
+      </FilterRow>
 
       <div class="pr-list">
-        <div v-for="issue in prStore.filteredMyIssues" :key="issue.number" class="pr-item" @click="prStore.openIssue(issue)">
+        <div v-for="issue in prStore.filteredMyIssues" :key="(issue.repo || '') + '-' + issue.number" class="pr-item" @click="prStore.openIssue(issue)">
           <div class="pr-item-header">
             <span class="pr-number">#{{ issue.number }}</span>
+            <span v-if="issue.repo" class="badge badge-area" style="font-size:9px;">{{ issue.repo.split('/').pop() }}</span>
             <span class="badge" :class="'state-' + issue.state">{{ issueStateLabel(issue.state) }}</span>
             <span class="badge badge-issue-type">{{ issueTypeLabel(issueType(issue)) }}</span>
           </div>
@@ -147,14 +171,14 @@ function onContributorChange() {
               <h2>{{ prStore.selectedPR.title }}</h2>
             </div>
             <div class="drawer-actions">
-              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr') }"
-                      @click.stop="watchlistStore.toggleWatch(prStore.selectedPR.pr_number, 'pr', prStore.selectedPR.title, 'https://github.com/vllm-project/vllm/pull/' + prStore.selectedPR.pr_number)"
-                      :title="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr') ? '取消关注' : '添加到特别关注'">
-                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr', prStore.selectedPR.repo) }"
+                      @click.stop="watchlistStore.toggleWatch(prStore.selectedPR.pr_number, 'pr', prStore.selectedPR.title, ghUrl(prStore.selectedPR.repo, prStore.selectedPR.pr_number, 'pr'), { repo: prStore.selectedPR.repo })"
+                      :title="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr', prStore.selectedPR.repo) ? '取消关注' : '添加到特别关注'">
+                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedPR.pr_number, 'pr', prStore.selectedPR.repo) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               </button>
-              <a :href="'https://github.com/vllm-project/vllm/pull/' + prStore.selectedPR.pr_number" target="_blank" class="btn btn-sm">
+              <a :href="ghUrl(prStore.selectedPR.repo, prStore.selectedPR.pr_number, 'pr')" target="_blank" class="btn btn-sm">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 GitHub
               </a>
@@ -268,14 +292,14 @@ function onContributorChange() {
               <h2>{{ prStore.selectedIssue.title }}</h2>
             </div>
             <div class="drawer-actions">
-              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') }"
-                      @click.stop="watchlistStore.toggleWatch(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.title, 'https://github.com/vllm-project/vllm/issues/' + prStore.selectedIssue.number)"
-                      :title="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') ? '取消关注' : '添加到特别关注'">
-                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue') ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+              <button class="btn btn-sm btn-icon" :class="{ 'btn-starred': watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.repo) }"
+                      @click.stop="watchlistStore.toggleWatch(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.title, ghUrl(prStore.selectedIssue.repo, prStore.selectedIssue.number, 'issue'), { repo: prStore.selectedIssue.repo })"
+                      :title="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.repo) ? '取消关注' : '添加到特别关注'">
+                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(prStore.selectedIssue.number, 'issue', prStore.selectedIssue.repo) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               </button>
-              <a :href="'https://github.com/vllm-project/vllm/issues/' + prStore.selectedIssue.number" target="_blank" class="btn btn-sm">
+              <a :href="ghUrl(prStore.selectedIssue.repo, prStore.selectedIssue.number, 'issue')" target="_blank" class="btn btn-sm">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 GitHub
               </a>

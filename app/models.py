@@ -47,6 +47,7 @@ class Item(Base):
     __tablename__ = "items"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    repo = Column(String(100), nullable=False)
     type = Column(String(10), nullable=False)  # 'issue' or 'pr'
     number = Column(Integer, nullable=False)
     title = Column(Text, nullable=False)
@@ -67,15 +68,17 @@ class Item(Base):
     last_sync = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     __table_args__ = (
-        UniqueConstraint("type", "number", name="uq_items_type_number"),
+        UniqueConstraint("repo", "type", "number", name="uq_items_repo_type_number"),
         Index("idx_items_type_state", "type", "state"),
         Index("idx_items_area", "area"),
         Index("idx_items_updated_at", "updated_at"),
+        Index("idx_items_repo", "repo"),
     )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
+            "repo": self.repo,
             "type": self.type,
             "number": self.number,
             "title": self.title,
@@ -103,13 +106,14 @@ class MyPR(Base):
     __tablename__ = "my_prs"
 
     __table_args__ = (
-        # 复合主键：一个用户可以有一个 PR 一次
-        PrimaryKeyConstraint("pr_number", "github_id", name="pk_my_prs"),
+        # 复合主键：一个用户在一个仓库可以有一个 PR 一次
+        PrimaryKeyConstraint("repo", "pr_number", "github_id", name="pk_my_prs"),
         Index("idx_my_prs_state", "state"),
         Index("idx_my_prs_created_at", "created_at"),
         Index("idx_my_prs_github_id", "github_id"),
     )
 
+    repo = Column(String(100), primary_key=True)
     pr_number = Column(Integer, primary_key=True)
     github_id = Column(String(100), nullable=True, default="", primary_key=True)
     title = Column(Text)
@@ -128,6 +132,7 @@ class MyPR(Base):
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "repo": self.repo,
             "pr_number": self.pr_number,
             "github_id": self.github_id,
             "author": self.github_id or "",
@@ -173,6 +178,7 @@ class Watchlist(Base):
     __tablename__ = "watchlist"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    repo = Column(String(100))
     number = Column(Integer, nullable=False)  # issue/PR 编号
     item_type = Column(String(10), nullable=False)  # 'issue' or 'pr'
     title = Column(Text)
@@ -185,12 +191,13 @@ class Watchlist(Base):
     added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     __table_args__ = (
-        UniqueConstraint("number", "item_type", name="uq_watchlist_number_type"),
+        UniqueConstraint("repo", "number", "item_type", name="uq_watchlist_repo_number_type"),
     )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
+            "repo": self.repo,
             "number": self.number,
             "item_type": self.item_type,
             "title": self.title,
@@ -495,7 +502,7 @@ class LocalCodeCache(Base):
     __tablename__ = "local_code_cache"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    repo = Column(String(100), nullable=False, default="vllm")
+    repo = Column(String(100), nullable=False)
     file_path = Column(String(500), nullable=False)
     content = Column(Text)
     last_synced_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
@@ -519,6 +526,7 @@ class RepoCache(Base):
     last_synced_at = Column(DateTime)
     commit_sha = Column(String(40))
     status = Column(String(20), default="active")  # active / deleted
+    tracked = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
                         onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
@@ -533,6 +541,7 @@ class RepoCache(Base):
             "last_synced_at": _iso_utc(self.last_synced_at),
             "commit_sha": self.commit_sha,
             "status": self.status or "active",
+            "tracked": bool(self.tracked),
             "created_at": _iso_utc(self.created_at),
             "updated_at": _iso_utc(self.updated_at),
         }
@@ -565,7 +574,7 @@ class FileChangeHistory(Base):
     __tablename__ = "file_change_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    repo = Column(String(100), nullable=False, default="vllm")
+    repo = Column(String(100), nullable=False)
     file_path = Column(String(500), nullable=False)
     pr_number = Column(Integer, nullable=False)
     pr_title = Column(Text)

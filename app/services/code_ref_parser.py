@@ -33,7 +33,7 @@ class CodeRefParser:
         finally:
             db.close()
         if not self.repo_names:
-            self.repo_names = ["vllm"]  # 默认值
+            self.repo_names = []
 
     def _build_pattern(self):
         """构建正则表达式"""
@@ -90,7 +90,7 @@ class CodeRefParser:
         for name in self.repo_names:
             if match.startswith(f"`{name}/") or match.startswith(name + "/"):
                 return name
-        return self.repo_names[0] if self.repo_names else "vllm"
+        return self.repo_names[0] if self.repo_names else ""
 
     def validate_ref(self, repo: str, file_path: str, start_line: int, end_line: int,
                      cache_service) -> Dict:

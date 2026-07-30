@@ -52,13 +52,13 @@ def generate_review(request: AIReviewRequest):
                 return _legacy_review_to_markdown(cached)
             return cached
 
-        pr = _get_github_client().get_pull(request.pr_number)
+        pr = _get_github_client().get_pull(request.pr_number, repo=request.repo)
         if not pr:
             raise HTTPException(status_code=404, detail="PR not found")
 
         diff = ""
         if request.include_diff:
-            diff = _get_github_client().get_pull_diff(request.pr_number) or ""
+            diff = _get_github_client().get_pull_diff(request.pr_number, repo=request.repo) or ""
         logger.info(f"[generate_review] fetched PR+diff PR#{request.pr_number} ({time.time()-t0:.1f}s, diff={len(diff)} chars)")
 
         ai = AIAssistant()

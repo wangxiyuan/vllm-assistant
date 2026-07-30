@@ -72,7 +72,6 @@ class GitHubClient:
     """GitHub REST API客户端"""
 
     def __init__(self):
-        self.base_url = Config.get_base_url()
         self.headers = Config.get_github_headers()
         # 连接池大小适配并行 tool calls 场景（默认 10 不够用）
         adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
@@ -142,14 +141,21 @@ class GitHubClient:
             return None
 
     def _make_request(
-        self, method: str, endpoint: str, params: Optional[Dict] = None, **kwargs
+        self, method: str, endpoint: str, params: Optional[Dict] = None,
+        repo: Optional[str] = None, **kwargs
     ) -> Optional[Any]:
         """发送API请求（仓库 REST API 端点）
 
         默认按 JSON 解析响应。调用方传入 ``Accept`` header 为非 JSON media type
         （如 ``application/vnd.github.v3.diff``）时，返回原始文本。
+
+        Args:
+            repo: 完整 owner/repo（如 ``vllm-project/vllm``），必传。
         """
-        url = f"{self.base_url}{endpoint}"
+        if repo:
+            url = f"https://api.github.com/repos/{repo}{endpoint}"
+        else:
+            raise ValueError("repo parameter is required")
         return self._request_with_retry(method, url, params, **kwargs)
 
     # ==================== Issues API ====================
@@ -163,12 +169,14 @@ class GitHubClient:
         labels: Optional[List[str]] = None,
         since: Optional[str] = None,
         page: int = 1,
+        repo: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """获取issue列表
 
         Args:
             since: ISO 8601 时间戳，仅返回此时间之后更新的 issues（增量拉取用）
             page: 页码（从 1 开始），配合 ``per_page`` 实现分页
+            repo: 完整 owner/repo，None 时用 Config 默认仓库
         """
         params = {
             "state": state,
@@ -182,12 +190,12 @@ class GitHubClient:
         if since:
             params["since"] = since
 
-        result = self._make_request("GET", "/issues", params=params)
+        result = self._make_request("GET", "/issues", params=params, repo=repo)
         return result if isinstance(result, list) else []
 
-    def get_issue(self, number: int) -> Optional[Dict[str, Any]]:
+    def get_issue(self, number: int, repo: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """获取单个issue详情"""
-        return self._make_request("GET", f"/issues/{number}")
+        return self._make_request("GET", f"/issues/{number}", repo=repo)
 
     # ==================== Pull Requests API ====================
 
@@ -198,11 +206,13 @@ class GitHubClient:
         sort: str = "created",
         direction: str = "desc",
         page: int = 1,
+        repo: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """获取PR列表
 
         Args:
             page: 页码（从 1 开始），配合 ``per_page`` 实现分页
+            repo: 完整 owner/repo，None 时用 Config 默认仓库
         """
         params = {
             "state": state,
@@ -211,41 +221,46 @@ class GitHubClient:
             "direction": direction,
             "page": page,
         }
-        result = self._make_request("GET", "/pulls", params=params)
+        result = self._make_request("GET", "/pulls", params=params, repo=repo)
         return result if isinstance(result, list) else []
 
-    def get_pull(self, number: int) -> Optional[Dict[str, Any]]:
+    def get_pull(self, number: int, repo: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """获取单个PR详情"""
-        return self._make_request("GET", f"/pulls/{number}")
+        return self._make_request("GET", f"/pulls/{number}", repo=repo)
 
-    def get_user_pulls(self, username: str, state: str = "all") -> List[Dict[str, Any]]:
-        """获取用户在当前仓库的 PR 列表（Search API，author 过滤）"""
+    def get_user_pulls(self, username: str, state: str = "all",
+                       repo: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取用户在指定仓库的 PR 列表（Search API，author 过滤）"""
         if not username:
             return []
-        repo = f"{Config.GITHUB_OWNER}/{Config.GITHUB_REPO}"
-        q_parts = [f"author:{username}", "type:pr", f"repo:{repo}"]
+        q_parts = [f"author:{username}", "type:pr"]
+        if repo:
+            q_parts.append(f"repo:{repo}")
         if state in ("open", "closed"):
             q_parts.append(f"is:{state}")
         elif state == "merged":
             q_parts.append("is:merged")
         return self._search_issues(" ".join(q_parts))
 
-    def get_user_issues(self, username: str, state: str = "all") -> List[Dict[str, Any]]:
-        """获取用户在当前仓库创建的 Issue 列表（Search API）"""
+    def get_user_issues(self, username: str, state: str = "all",
+                        repo: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取用户在指定仓库创建的 Issue 列表（Search API）"""
         if not username:
             return []
-        repo = f"{Config.GITHUB_OWNER}/{Config.GITHUB_REPO}"
-        q_parts = [f"author:{username}", "type:issue", f"repo:{repo}"]
+        q_parts = [f"author:{username}", "type:issue"]
+        if repo:
+            q_parts.append(f"repo:{repo}")
         if state in ("open", "closed"):
             q_parts.append(f"is:{state}")
         return self._search_issues(" ".join(q_parts))
 
-    def get_user_issues_with_body(self, username: str, state: str = "all") -> List[Dict[str, Any]]:
+    def get_user_issues_with_body(self, username: str, state: str = "all",
+                                  repo: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取用户 issue 列表，包含完整 body（Search API + 单个 issue 拉取）
 
         Search API 不返回 body，需要逐个调 get_issue。数量通常 < 50，可接受。
         """
-        issues = self.get_user_issues(username, state=state) or []
+        issues = self.get_user_issues(username, state=state, repo=repo) or []
         enriched = []
         for it in issues:
             if not isinstance(it, dict):
@@ -253,7 +268,7 @@ class GitHubClient:
             num = it.get("number")
             if not num:
                 continue
-            detail = self.get_issue(num)
+            detail = self.get_issue(num, repo=repo)
             if detail and isinstance(detail, dict):
                 # 合并：search API 的字段 + detail 的 body
                 enriched.append({**it, "body": detail.get("body") or ""})
@@ -290,13 +305,16 @@ class GitHubClient:
             }
         return {"items": [], "total_count": 0}
 
-    def get_pull_files(self, number: int) -> List[Dict[str, Any]]:
+    def get_pull_files(self, number: int, repo: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取PR的文件变更"""
-        return self._make_request("GET", f"/pulls/{number}/files") or []
+        return self._make_request("GET", f"/pulls/{number}/files", repo=repo) or []
 
-    def get_pull_diff(self, number: int) -> Optional[str]:
+    def get_pull_diff(self, number: int, repo: Optional[str] = None) -> Optional[str]:
         """获取PR的diff文本"""
-        url = f"{self.base_url}/pulls/{number}"
+        if repo:
+            url = f"https://api.github.com/repos/{repo}/pulls/{number}"
+        else:
+            url = f"{self.base_url}/pulls/{number}"
         headers = {"Accept": "application/vnd.github.v3.diff"}
         try:
             response = self.session.get(url, headers=headers)
@@ -311,27 +329,27 @@ class GitHubClient:
 
     # ==================== Checks API ====================
 
-    def get_check_runs(self, ref: str) -> List[Dict[str, Any]]:
+    def get_check_runs(self, ref: str, repo: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取 commit 的 check runs（GitHub Actions）
 
         GitHub 返回 ``{"total_count": N, "check_runs": [...]}`` 包装；
         这里拆包只返回 check_runs 列表，方便调用方迭代。
         """
-        result = self._make_request("GET", f"/commits/{ref}/check-runs")
+        result = self._make_request("GET", f"/commits/{ref}/check-runs", repo=repo)
         if isinstance(result, dict):
             return result.get("check_runs") or []
         if isinstance(result, list):
             return result
         return []
 
-    def get_commit_status(self, ref: str) -> Optional[Dict[str, Any]]:
+    def get_commit_status(self, ref: str, repo: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """获取 commit 的 combined status（传统 status API，pre-GitHub-Actions CI）
 
         Returns: ``{"state": "success"|"failure"|"pending", "statuses": [...]}`` 或 None
         """
-        return self._make_request("GET", f"/commits/{ref}/status")
+        return self._make_request("GET", f"/commits/{ref}/status", repo=repo)
 
-    def get_combined_ci(self, ref: str) -> Dict[str, Any]:
+    def get_combined_ci(self, ref: str, repo: Optional[str] = None) -> Dict[str, Any]:
         """聚合 check runs + commit status 给出统一 CI 状态
 
         Returns: ``{"status": "pass"|"fail"|"pending"|"unknown", "check_runs": N, "statuses": N}``
@@ -342,12 +360,12 @@ class GitHubClient:
         if not ref:
             return {"status": "unknown", "check_runs": 0, "statuses": 0}
 
-        check_runs = self.get_check_runs(ref) or []
+        check_runs = self.get_check_runs(ref, repo=repo) or []
         statuses: list = []
         # 只有 check_runs 看起来空或返回 404/无 actions 时，才 fallback 到 commit status
         # 注意：check_runs 不会 404，所以如果返回空就说明没用 Actions
         if not check_runs:
-            commit_status = self.get_commit_status(ref) or {}
+            commit_status = self.get_commit_status(ref, repo=repo) or {}
             statuses = commit_status.get("statuses") or []
 
         # 综合所有信号，按 fail > pending > pass 优先级
@@ -389,9 +407,9 @@ class GitHubClient:
 
     # ==================== CODEOWNERS API ====================
 
-    def get_codeowners(self) -> Optional[str]:
+    def get_codeowners(self, repo: Optional[str] = None) -> Optional[str]:
         """获取CODEOWNERS文件内容"""
-        result = self._make_request("GET", "/contents/.github/CODEOWNERS")
+        result = self._make_request("GET", "/contents/.github/CODEOWNERS", repo=repo)
         if result and "content" in result:
             # Base64解码
             return base64.b64decode(result["content"]).decode("utf-8")
@@ -399,8 +417,8 @@ class GitHubClient:
 
     # ==================== Compare API ====================
 
-    def compare_branches(self, base: str, head: str) -> Optional[Dict[str, Any]]:
+    def compare_branches(self, base: str, head: str, repo: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """比较两个分支"""
-        return self._make_request("GET", f"/compare/{base}...{head}")
+        return self._make_request("GET", f"/compare/{base}...{head}", repo=repo)
 
     # ==================== Commits API ====================

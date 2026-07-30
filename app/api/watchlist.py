@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy.orm import Session
 
-from app.config import Config
 from app.database import get_db
 from app.models import Watchlist
 from app.services.github_client import GitHubClient
@@ -31,6 +30,7 @@ class WatchlistAddRequest(BaseModel):
     state: str = ""  # 'open' / 'closed' / 'merged'
     note: str = ""  # 用户备注
     assignee_id: Optional[int] = None  # 责任人
+    repo: str = ""  # 完整 owner/repo，空则用 Config 默认仓库
 
     @field_validator("item_type")
     @classmethod
@@ -93,6 +93,7 @@ async def list_watchlist(db: Session = Depends(get_db)):
         # 查询关联的任务
         number = w.number
         item_type = w.item_type  # 'issue' or 'pr'
+        repo_short = (w.repo or "").split("/")[-1] if w.repo else ""
         # 在 personal_tasks 的 related_refs JSON 中查找匹配
         tasks = db.query(PersonalTask).filter(
             PersonalTask.related_refs.isnot(None),
@@ -101,15 +102,22 @@ async def list_watchlist(db: Session = Depends(get_db)):
         for t in tasks:
             refs = t.related_refs or []
             for ref in refs:
-                if isinstance(ref, dict) and ref.get("number") == number and ref.get("type") == item_type:
-                    linked_tasks.append({
-                        "id": t.id,
-                        "title": t.title,
-                        "status": t.status,
-                        "priority": t.priority,
-                        "parent_id": t.parent_id,
-                    })
-                    break
+                if not isinstance(ref, dict):
+                    continue
+                if ref.get("number") != number or ref.get("type") != item_type:
+                    continue
+                # repo 维度匹配：related_refs 存短名，Watchlist 存完整 owner/repo
+                ref_repo = ref.get("repo", "")
+                if ref_repo and repo_short and ref_repo != repo_short:
+                    continue
+                linked_tasks.append({
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                    "priority": t.priority,
+                    "parent_id": t.parent_id,
+                })
+                break
         if linked_tasks:
             d["linked_tasks"] = linked_tasks
         result.append(d)
@@ -121,7 +129,11 @@ async def add_to_watchlist(req: WatchlistAddRequest, db: Session = Depends(get_d
     """加入特别关注（幂等：已存在则更新元信息）"""
     if req.item_type not in ("issue", "pr"):
         raise HTTPException(status_code=400, detail="item_type must be 'issue' or 'pr'")
+    if not req.repo:
+        raise HTTPException(status_code=400, detail="repo is required")
+    full_repo = req.repo
     existing = db.query(Watchlist).filter(
+        Watchlist.repo == full_repo,
         Watchlist.number == req.number,
         Watchlist.item_type == req.item_type,
     ).first()
@@ -140,6 +152,7 @@ async def add_to_watchlist(req: WatchlistAddRequest, db: Session = Depends(get_d
         db.refresh(existing)
         return existing.to_dict()
     w = Watchlist(
+        repo=full_repo,
         number=req.number,
         item_type=req.item_type,
         title=req.title,
@@ -188,14 +201,10 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
         repo_owner = parts[-2]
         repo_name = parts[-1]
     else:
-        repo_owner = Config.GITHUB_OWNER
-        repo_name = Config.GITHUB_REPO
+        raise HTTPException(status_code=500, detail=f"Cannot parse clone_url: {clone_url}")
+    full_repo = f"{repo_owner}/{repo_name}"
 
     client = GitHubClient()
-    # 暂存原始 base_url，构建临时 base_url
-    original_base_url = client.base_url
-    temp_base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
-    client.base_url = temp_base_url
 
     # 生成 repo 特定的 URL
     def _repo_pulls_url(number: int) -> str:
@@ -212,17 +221,17 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
     item_type = req.item_type
 
     try:
+        mapper = AreaMapper(full_repo)
         if item_type == "pr":
             # 用户明确指定 PR
-            pr = client.get_pull(req.number)
+            pr = client.get_pull(req.number, repo=full_repo)
             if not pr:
                 raise HTTPException(status_code=404, detail=f"PR #{req.number} not found")
             title = pr.get("title", "")
             state = "merged" if pr.get("merged_at") else pr.get("state", "open")
             url = pr.get("html_url", _repo_pulls_url(req.number))
             try:
-                mapper = AreaMapper()
-                files = client.get_pull_files(req.number) or []
+                files = client.get_pull_files(req.number, repo=full_repo) or []
                 for f in files:
                     if isinstance(f, dict):
                         a = mapper.map_to_area(f.get("filename", ""))
@@ -233,7 +242,7 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
                 pass
         elif item_type == "issue":
             # 用户明确指定 Issue
-            issue = client.get_issue(req.number)
+            issue = client.get_issue(req.number, repo=full_repo)
             if not issue:
                 raise HTTPException(status_code=404, detail=f"Issue #{req.number} not found")
             title = issue.get("title", "")
@@ -241,22 +250,20 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
             url = issue.get("html_url", _repo_issues_url(req.number))
             issue_type = _classify_issue_type(title) or "other"
             try:
-                mapper = AreaMapper()
                 labels = [l.get("name", "") for l in issue.get("labels", []) if isinstance(l, dict)]
                 area = mapper.classify_issue_by_labels(labels)
             except Exception:
                 pass
         else:
             # 自动推断：先查 PR，再查 Issue
-            pr = client.get_pull(req.number)
+            pr = client.get_pull(req.number, repo=full_repo)
             if pr:
                 item_type = "pr"
                 title = pr.get("title", "")
                 state = "merged" if pr.get("merged_at") else pr.get("state", "open")
                 url = pr.get("html_url", _repo_pulls_url(req.number))
                 try:
-                    mapper = AreaMapper()
-                    files = client.get_pull_files(req.number) or []
+                    files = client.get_pull_files(req.number, repo=full_repo) or []
                     for f in files:
                         if isinstance(f, dict):
                             a = mapper.map_to_area(f.get("filename", ""))
@@ -266,7 +273,7 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
                 except Exception:
                     pass
             else:
-                issue = client.get_issue(req.number)
+                issue = client.get_issue(req.number, repo=full_repo)
                 if not issue:
                     raise HTTPException(status_code=404, detail=f"#{req.number} not found as PR or Issue")
                 # GitHub /issues 端点也会返回 PR（PR 是 Issue 的子类型），
@@ -283,7 +290,6 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
                     url = issue.get("html_url", _repo_issues_url(req.number))
                     issue_type = _classify_issue_type(title) or "other"
                 try:
-                    mapper = AreaMapper()
                     labels = [l.get("name", "") for l in issue.get("labels", []) if isinstance(l, dict)]
                     area = mapper.classify_issue_by_labels(labels)
                 except Exception:
@@ -293,12 +299,10 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
     except Exception as e:
         logger.exception("Error fetching item from GitHub")
         raise HTTPException(status_code=502, detail=f"Failed to fetch from GitHub: {e}")
-    finally:
-        # 恢复原始 base_url
-        client.base_url = original_base_url
 
-    # 幂等：已存在则直接返回
+    # 幂等：已存在则直接返回（按 repo + number + item_type 匹配）
     existing = db.query(Watchlist).filter(
+        Watchlist.repo == full_repo,
         Watchlist.number == req.number,
         Watchlist.item_type == item_type,
     ).first()
@@ -306,6 +310,7 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
         return existing.to_dict()
 
     w = Watchlist(
+        repo=full_repo,
         number=req.number,
         item_type=item_type,
         title=title,
@@ -324,11 +329,17 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
 
 
 @router.delete("/{item_type}/{number}")
-async def remove_from_watchlist(item_type: str, number: int, db: Session = Depends(get_db)):
+async def remove_from_watchlist(item_type: str, number: int,
+                                repo: Optional[str] = None,
+                                db: Session = Depends(get_db)):
     """从特别关注移除"""
     if item_type not in ("issue", "pr"):
         raise HTTPException(status_code=400, detail="item_type must be 'issue' or 'pr'")
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo is required")
+    full_repo = repo
     w = db.query(Watchlist).filter(
+        Watchlist.repo == full_repo,
         Watchlist.number == number,
         Watchlist.item_type == item_type,
     ).first()
@@ -340,9 +351,15 @@ async def remove_from_watchlist(item_type: str, number: int, db: Session = Depen
 
 
 @router.get("/check/{item_type}/{number}")
-async def check_watchlist(item_type: str, number: int, db: Session = Depends(get_db)):
+async def check_watchlist(item_type: str, number: int,
+                          repo: Optional[str] = None,
+                          db: Session = Depends(get_db)):
     """检查某 item 是否在特别关注列表"""
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo is required")
+    full_repo = repo
     w = db.query(Watchlist).filter(
+        Watchlist.repo == full_repo,
         Watchlist.number == number,
         Watchlist.item_type == item_type,
     ).first()
@@ -356,11 +373,17 @@ class UpdateWatchlistItemRequest(BaseModel):
 
 
 @router.put("/{item_type}/{number}/note")
-async def update_watchlist_item(item_type: str, number: int, req: UpdateWatchlistItemRequest, db: Session = Depends(get_db)):
+async def update_watchlist_item(item_type: str, number: int, req: UpdateWatchlistItemRequest,
+                                repo: Optional[str] = None,
+                                db: Session = Depends(get_db)):
     """更新特别关注项的备注和责任人"""
     if item_type not in ("issue", "pr"):
         raise HTTPException(status_code=400, detail="item_type must be 'issue' or 'pr'")
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo is required")
+    full_repo = repo
     w = db.query(Watchlist).filter(
+        Watchlist.repo == full_repo,
         Watchlist.number == number,
         Watchlist.item_type == item_type,
     ).first()

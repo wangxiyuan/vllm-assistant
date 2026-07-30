@@ -5,7 +5,7 @@
 """
 import os
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,8 +15,6 @@ class Config:
     """全局配置（类属性 + 环境变量覆盖）"""
 
     # GitHub
-    GITHUB_OWNER: str = os.getenv("GITHUB_OWNER", "vllm-project")
-    GITHUB_REPO: str = os.getenv("GITHUB_REPO", "vllm")
     GITHUB_PAT: str = os.getenv("VLLM_ASSISTANT_PAT", "")
 
     # OpenAI
@@ -31,16 +29,6 @@ class Config:
     API_KEY: str = os.getenv("API_KEY", "")
     DEBUG: bool = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
 
-    @classmethod
-    def get_issues_url(cls, number: int) -> str:
-        """Generate GitHub issue URL for a given number"""
-        return f"https://github.com/{cls.GITHUB_OWNER}/{cls.GITHUB_REPO}/issues/{number}"
-
-    @classmethod
-    def get_pulls_url(cls, number: int) -> str:
-        """Generate GitHub pull request URL for a given number"""
-        return f"https://github.com/{cls.GITHUB_OWNER}/{cls.GITHUB_REPO}/pull/{number}"
-
     # DB
     BASE_DIR: Path = Path(__file__).parent.parent
     DB_PATH: Path = BASE_DIR / "data" / "vllm_assistant.db"
@@ -48,11 +36,6 @@ class Config:
     # Polling
     POLLING_INTERVAL: int = int(os.getenv("POLLING_INTERVAL", "10"))
     POLLING_AREAS: List[str] = None  # type: ignore
-
-    # Personal TODO - 去重检查默认仓库
-    DEFAULT_DEDUP_REPOS: List[str] = os.getenv(
-        "DEFAULT_DEDUP_REPOS", "vllm-project/vllm"
-    ).split(",")
 
     # Personal TODO - 洞察报告异步超时（秒）
     INTELLIGENCE_REPORT_TIMEOUT: int = int(os.getenv("INTELLIGENCE_REPORT_TIMEOUT", "180"))
@@ -62,10 +45,6 @@ class Config:
     # 也可配置为官方 Tavily 或其他兼容服务
     TAVILY_API_URL: str = os.getenv("TAVILY_API_URL", "https://tavily.claude-code-best.win")
     TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
-
-    # ===== 代码仓库配置 =====
-    # 代码同步间隔（分钟）
-    CODE_SYNC_INTERVAL: int = int(os.getenv("CODE_SYNC_INTERVAL", "30"))
 
     # ===== 数据清理配置 =====
     # 社区数据保留天数（closed/merged 超过此天数将被清理）
@@ -88,10 +67,6 @@ class Config:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-
-    @classmethod
-    def get_base_url(cls) -> str:
-        return f"https://api.github.com/repos/{cls.GITHUB_OWNER}/{cls.GITHUB_REPO}"
 
 
 # 初始化 POLLING_AREAS

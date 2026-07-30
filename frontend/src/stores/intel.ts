@@ -201,7 +201,7 @@ export const useIntelStore = defineStore('intel', () => {
         try {
           const payload: any = {
             task_id: backup.task_id,
-            sources: backup.sources || ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'],
+            sources: backup.sources || [],
             excluded_sources: backup.excluded_sources || [],
             extra_prompt: backup.extra_prompt || '',
           }
@@ -238,7 +238,7 @@ export const useIntelStore = defineStore('intel', () => {
       const payload: any = {
         report_id: report.id,
         task_id: report.task_id,
-        sources: report.sources || ['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'],
+        sources: report.sources || [],
         excluded_sources: report.excluded_sources || [],
         extra_prompt: report.extra_prompt || '',
       }

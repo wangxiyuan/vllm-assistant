@@ -17,7 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import Config
 from app.database import SessionLocal
-from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask
+from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask, RepoCache
 from app.services.github_client import GitHubClient, DEFAULT_PER_PAGE
 from app.services.area_mapper import AreaMapper
 
@@ -27,7 +27,7 @@ scheduler = BackgroundScheduler()
 
 # Module-level singletons（避免在 job 中反复创建）
 _github_client: Optional[GitHubClient] = None
-_area_mapper: Optional[AreaMapper] = None
+_area_mappers: dict = {}  # repo -> AreaMapper (per-repo 缓存)
 
 # 防止 trigger_refresh 并发触发多个同类型 job
 _running_jobs: set = set()
@@ -45,11 +45,35 @@ def _get_github_client() -> GitHubClient:
     return _github_client
 
 
-def _get_area_mapper() -> AreaMapper:
-    global _area_mapper
-    if _area_mapper is None:
-        _area_mapper = AreaMapper()
-    return _area_mapper
+def _get_area_mapper(repo: str) -> AreaMapper:
+    """按仓库懒加载并缓存 AreaMapper（per-repo）"""
+    if repo not in _area_mappers:
+        _area_mappers[repo] = AreaMapper(repo)
+    return _area_mappers[repo]
+
+
+def _clone_url_to_full_repo(clone_url: str) -> str:
+    """从 clone_url 提取完整 owner/repo（如 https://github.com/vllm-project/vllm.git -> vllm-project/vllm）"""
+    url = clone_url
+    if url.endswith('.git'):
+        url = url[:-4]
+    parts = url.rstrip('/').split('/')
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    return ""
+
+
+def _get_tracked_repos() -> list:
+    """返回所有 tracked=True 的仓库列表，元素为 (short_name, full_repo)"""
+    db = SessionLocal()
+    try:
+        repos = db.query(RepoCache).filter(
+            RepoCache.status == "active",
+            RepoCache.tracked == True,  # noqa: E712
+        ).all()
+        return [(r.repo, _clone_url_to_full_repo(r.clone_url)) for r in repos]
+    finally:
+        db.close()
 
 
 def _parse_dt(s: str) -> Optional[datetime]:
@@ -63,16 +87,21 @@ def _parse_dt(s: str) -> Optional[datetime]:
         return None
 
 
-def _map_pr_to_area(pr_number: int, github_client: GitHubClient, mapper: AreaMapper) -> Optional[str]:
-    """根据 PR 的变更文件映射领域
+def _map_pr_to_area(pr_number: int, github_client: GitHubClient,
+                    repo: str) -> Optional[str]:
+    """根据 PR 的变更文件映射领域（per-repo）。
 
     取所有变更文件，统计每个文件映射到的 area，返回出现次数最多的 area。
     比只看第一个文件更准确（多领域 PR 会归到变更最多的那个领域）。
+
+    使用该仓库专属的 AreaMapper：无领域定义配置的仓库 area_map 为空，
+    map_to_area 自然返回 None，不需要任何短路判定。
     """
+    mapper = _get_area_mapper(repo)
     try:
-        files = github_client.get_pull_files(pr_number)
+        files = github_client.get_pull_files(pr_number, repo=repo)
     except Exception as e:
-        logger.warning(f"Failed to fetch files for PR #{pr_number}: {e}")
+        logger.warning(f"Failed to fetch files for PR #{pr_number} ({repo}): {e}")
         return None
     if not files:
         return None
@@ -91,7 +120,7 @@ def _map_pr_to_area(pr_number: int, github_client: GitHubClient, mapper: AreaMap
     return None
 
 
-def _process_single_issue(db, issue: dict, mapper: AreaMapper, area_filter) -> None:
+def _process_single_issue(db, issue: dict, mapper: AreaMapper, area_filter, repo: str) -> None:
     """处理单个 issue 同步（独立可失败）"""
     if not isinstance(issue, dict):
         return
@@ -102,6 +131,7 @@ def _process_single_issue(db, issue: dict, mapper: AreaMapper, area_filter) -> N
         return
 
     existing = db.query(Item).filter(
+        Item.repo == repo,
         Item.type == "issue",
         Item.number == issue["number"],
     ).first()
@@ -117,6 +147,7 @@ def _process_single_issue(db, issue: dict, mapper: AreaMapper, area_filter) -> N
         existing.last_sync = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
         db.add(Item(
+            repo=repo,
             type="issue",
             number=issue["number"],
             title=issue.get("title", ""),
@@ -133,7 +164,7 @@ def _process_single_issue(db, issue: dict, mapper: AreaMapper, area_filter) -> N
 
 
 def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
-                            mapper: AreaMapper, area_filter) -> None:
+                            mapper: AreaMapper, area_filter, repo: str) -> None:
     """处理单个 PR item 同步（独立可失败）
 
     性能策略：merged/closed PR 是稳态，仅刷新 last_sync；area 已有不重算
@@ -146,6 +177,7 @@ def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
 
     pr_state = pr.get("state", "open")
     existing = db.query(Item).filter(
+        Item.repo == repo,
         Item.type == "pr",
         Item.number == pr_number,
     ).first()
@@ -166,7 +198,7 @@ def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
         return
 
     # 新 PR 或 area 缺失：需要调 files 映射
-    area_id = _map_pr_to_area(pr_number, github_client, mapper)
+    area_id = _map_pr_to_area(pr_number, github_client, repo)
 
     if area_filter and area_id not in area_filter:
         return
@@ -186,6 +218,7 @@ def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
         existing.last_sync = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
         db.add(Item(
+            repo=repo,
             type="pr",
             number=pr_number,
             title=pr.get("title", ""),
@@ -204,34 +237,42 @@ def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
 
 
 def sync_areas():
-    """同步领域定义（从 CODEOWNERS 解析结果写入 areas 表）"""
+    """同步领域定义（从 CODEOWNERS 解析结果写入 areas 表）
+
+    遍历所有 tracked 仓库，按各自 AreaMapper 同步领域定义。
+    无领域定义配置的仓库跳过。
+    """
     job_id = "sync_areas"
     if job_id in _running_jobs:
         logger.debug(f"{job_id} already running, skipping")
         return
     _running_jobs.add(job_id)
     try:
-        mapper = _get_area_mapper()
-        all_areas = mapper.get_all_areas()
+        tracked = _get_tracked_repos()
         db = SessionLocal()
         try:
-            for area in all_areas:
-                existing = db.query(Area).filter(Area.id == area["id"]).first()
-                if existing:
-                    existing.name = area.get("name", existing.name)
-                    existing.paths = json.dumps(area.get("paths", []))
-                    existing.description = area.get("description")
-                    existing.last_sync = datetime.now(timezone.utc).replace(tzinfo=None)
-                else:
-                    db.add(Area(
-                        id=area["id"],
-                        name=area.get("name", area["id"]),
-                        paths=json.dumps(area.get("paths", [])),
-                        description=area.get("description"),
-                        last_sync=datetime.now(timezone.utc).replace(tzinfo=None),
-                    ))
+            for short_name, full_repo in tracked:
+                mapper = _get_area_mapper(full_repo)
+                if not mapper.has_area_config:
+                    continue
+                all_areas = mapper.get_all_areas()
+                for area in all_areas:
+                    existing = db.query(Area).filter(Area.id == area["id"]).first()
+                    if existing:
+                        existing.name = area.get("name", existing.name)
+                        existing.paths = json.dumps(area.get("paths", []))
+                        existing.description = area.get("description")
+                        existing.last_sync = datetime.now(timezone.utc).replace(tzinfo=None)
+                    else:
+                        db.add(Area(
+                            id=area["id"],
+                            name=area.get("name", area["id"]),
+                            paths=json.dumps(area.get("paths", [])),
+                            description=area.get("description"),
+                            last_sync=datetime.now(timezone.utc).replace(tzinfo=None),
+                        ))
             db.commit()
-            logger.info(f"Synced {len(all_areas)} areas")
+            logger.info(f"Synced areas across {len(tracked)} tracked repos")
         finally:
             db.close()
     except Exception:
@@ -243,6 +284,7 @@ def sync_areas():
 def sync_community_data():
     """同步社区数据（issues/PRs）到数据库
 
+    遍历所有 tracked=True 的仓库，逐个同步 issue/PR。
     同步策略：
     - 翻页拉取最新 N 个 open issue（按 created desc，每页 30，翻 COMMUNITY_FETCH_PAGES 页）
     - 增量拉取最近更新的 issue（since 窗口），更新已有 issue 的状态
@@ -255,102 +297,111 @@ def sync_community_data():
     _running_jobs.add(job_id)
     try:
         logger.info("Starting community data sync...")
-
-        github_client = _get_github_client()
-        mapper = _get_area_mapper()
-        db = SessionLocal()
-        try:
-            # 翻页拉最新 open issue（按 created desc），防止漏掉新 issue
-            recent_issues: list = []
-            for page in range(1, COMMUNITY_FETCH_PAGES + 1):
-                page_items = github_client.get_issues(
-                    state="open", sort="created", direction="desc", page=page
-                ) or []
-                if not page_items:
-                    break
-                recent_issues.extend(page_items)
-                if len(page_items) < DEFAULT_PER_PAGE:
-                    break  # 不足一页，说明没有更多了
-
-            # 增量拉取最近更新的 issue（DB 已有数据时）
-            existing_count = db.query(Item).count()
-            incremental_issues = []
-            if existing_count > 0:
-                since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=int(Config.POLLING_INTERVAL * 3))
-                since_iso = since.isoformat() + "Z"
-                incremental_issues = github_client.get_issues(
-                    state="open", sort="updated", direction="desc", since=since_iso
-                ) or []
-
-            # 合并去重（recent + incremental）
-            seen_numbers = set()
-            all_issues = []
-            for it in recent_issues + incremental_issues:
-                if not isinstance(it, dict):
-                    continue
-                num = it.get("number")
-                if num and num not in seen_numbers:
-                    seen_numbers.add(num)
-                    all_issues.append(it)
-
-            # 翻页拉最新 open PR（按 updated desc）
-            pulls: list = []
-            for page in range(1, COMMUNITY_FETCH_PAGES + 1):
-                page_prs = github_client.get_pulls(
-                    state="open", sort="updated", direction="desc", page=page
-                ) or []
-                if not page_prs:
-                    break
-                pulls.extend(page_prs)
-                if len(page_prs) < DEFAULT_PER_PAGE:
-                    break
-
-            area_filter = Config.POLLING_AREAS or []
-            if not area_filter:
-                area_filter = None
-
-            # GitHub /issues 端点会同时返回 PR（PR 是 issue 的子集），
-            # 必须过滤掉带 pull_request 字段的项，否则 PR 会被当成 issue 存储
-            real_issues = [it for it in all_issues if not it.get("pull_request")]
-
-            for issue in real_issues:
-                try:
-                    _process_single_issue(db, issue, mapper, area_filter)
-                except Exception:
-                    logger.exception(f"Failed to process issue {issue.get('number')}, skipping")
-
-            for pr in pulls:
-                try:
-                    _process_single_pr_item(db, pr, github_client, mapper, area_filter)
-                except Exception:
-                    logger.exception(f"Failed to process PR item {pr.get('number')}, skipping")
-
-            db.commit()
-            logger.info(
-                f"Synced {len(real_issues)} issues and {len(pulls)} PRs "
-                f"(filtered {len(all_issues) - len(real_issues)} PRs from issues)"
-            )
-        finally:
-            db.close()
-
+        tracked = _get_tracked_repos()
+        if not tracked:
+            logger.warning("No tracked repos, skipping community data sync")
+            return
+        for short_name, full_repo in tracked:
+            _sync_single_repo_community(full_repo)
     except Exception:
         logger.exception("Error syncing community data")
     finally:
         _running_jobs.discard(job_id)
 
 
-def _calc_ci_status(github_client: GitHubClient, sha: str) -> str:
+def _sync_single_repo_community(repo: str):
+    """同步单个仓库的 issue/PR"""
+    github_client = _get_github_client()
+    mapper = _get_area_mapper(repo)
+    db = SessionLocal()
+    try:
+        # 翻页拉最新 open issue（按 created desc），防止漏掉新 issue
+        recent_issues: list = []
+        for page in range(1, COMMUNITY_FETCH_PAGES + 1):
+            page_items = github_client.get_issues(
+                state="open", sort="created", direction="desc", page=page, repo=repo
+            ) or []
+            if not page_items:
+                break
+            recent_issues.extend(page_items)
+            if len(page_items) < DEFAULT_PER_PAGE:
+                break  # 不足一页，说明没有更多了
+
+        # 增量拉取最近更新的 issue（DB 已有数据时）
+        existing_count = db.query(Item).filter(Item.repo == repo).count()
+        incremental_issues = []
+        if existing_count > 0:
+            since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=int(Config.POLLING_INTERVAL * 3))
+            since_iso = since.isoformat() + "Z"
+            incremental_issues = github_client.get_issues(
+                state="open", sort="updated", direction="desc", since=since_iso, repo=repo
+            ) or []
+
+        # 合并去重（recent + incremental）
+        seen_numbers = set()
+        all_issues = []
+        for it in recent_issues + incremental_issues:
+            if not isinstance(it, dict):
+                continue
+            num = it.get("number")
+            if num and num not in seen_numbers:
+                seen_numbers.add(num)
+                all_issues.append(it)
+
+        # 翻页拉最新 open PR（按 updated desc）
+        pulls: list = []
+        for page in range(1, COMMUNITY_FETCH_PAGES + 1):
+            page_prs = github_client.get_pulls(
+                state="open", sort="updated", direction="desc", page=page, repo=repo
+            ) or []
+            if not page_prs:
+                break
+            pulls.extend(page_prs)
+            if len(page_prs) < DEFAULT_PER_PAGE:
+                break
+
+        area_filter = Config.POLLING_AREAS or []
+        if not area_filter:
+            area_filter = None
+
+        # GitHub /issues 端点会同时返回 PR（PR 是 issue 的子集），
+        # 必须过滤掉带 pull_request 字段的项，否则 PR 会被当成 issue 存储
+        real_issues = [it for it in all_issues if not it.get("pull_request")]
+
+        for issue in real_issues:
+            try:
+                _process_single_issue(db, issue, mapper, area_filter, repo)
+            except Exception:
+                logger.exception(f"Failed to process issue {issue.get('number')} ({repo}), skipping")
+
+        for pr in pulls:
+            try:
+                _process_single_pr_item(db, pr, github_client, mapper, area_filter, repo)
+            except Exception:
+                logger.exception(f"Failed to process PR item {pr.get('number')} ({repo}), skipping")
+
+        db.commit()
+        logger.info(
+            f"Synced {len(real_issues)} issues and {len(pulls)} PRs for {repo} "
+            f"(filtered {len(all_issues) - len(real_issues)} PRs from issues)"
+        )
+    finally:
+        db.close()
+
+
+def _calc_ci_status(github_client: GitHubClient, sha: str, repo: str) -> str:
     """根据 check runs + commit status 推导 CI 状态"""
     if not sha:
         return "unknown"
-    return github_client.get_combined_ci(sha).get("status", "unknown")
+    return github_client.get_combined_ci(sha, repo=repo).get("status", "unknown")
 
 
 def sync_user_prs():
     """同步所有已录入用户的 PR + Issue 数据
 
     遍历 users 表中所有有 github_id 的用户，
-    为每个用户独立拉取其 PR 和 Issue 并写入 my_prs / user_issues 表。
+    为每个用户在每个 tracked 仓库独立拉取其 PR 和 Issue 并写入 my_prs / user_issues 表。
+    没有 tracked 仓库时兜底同步 Config 默认仓库。
     """
     job_id = "sync_user_prs"
     if job_id in _running_jobs:
@@ -368,8 +419,18 @@ def sync_user_prs():
             logger.info("No users with github_id found, skipping user PR sync")
             return
 
+        # 确定要同步的仓库列表
+        tracked = _get_tracked_repos()
+        if not tracked:
+            logger.warning("No tracked repos, skipping user PR sync")
+            return
+
         for user in users:
-            _sync_single_user(user.github_id)
+            for _short_name, full_repo in tracked:
+                try:
+                    _sync_single_user(user.github_id, full_repo)
+                except Exception:
+                    logger.exception(f"Sync failed for user {user.github_id} in repo {full_repo}")
 
         # 清理已删除用户的旧数据
         _cleanup_orphaned_data()
@@ -379,22 +440,22 @@ def sync_user_prs():
         _running_jobs.discard(job_id)
 
 
-def _sync_single_user(github_id: str):
-    """同步单个用户的 PR 和 Issue 数据"""
-    logger.info(f"Starting sync for user {github_id}...")
+def _sync_single_user(github_id: str, repo: str):
+    """同步单个用户在指定仓库的 PR 和 Issue 数据"""
+    logger.info(f"Starting sync for user {github_id} in {repo}...")
     github_client = _get_github_client()
-    mapper = _get_area_mapper()
+    mapper = _get_area_mapper(repo)
     db = SessionLocal()
     try:
         # 增量策略：首次全量拉，后续只拉 open + 最近更新的 PR
-        existing_count = db.query(MyPR).filter(MyPR.github_id == github_id).count()
+        existing_count = db.query(MyPR).filter(MyPR.github_id == github_id, MyPR.repo == repo).count()
         is_first_sync = existing_count == 0
 
         if is_first_sync:
-            user_prs = github_client.get_user_pulls(github_id, state="all") or []
+            user_prs = github_client.get_user_pulls(github_id, state="all", repo=repo) or []
         else:
-            user_prs = github_client.get_user_pulls(github_id, state="open") or []
-            closed_prs = github_client.get_user_pulls(github_id, state="closed") or []
+            user_prs = github_client.get_user_pulls(github_id, state="open", repo=repo) or []
+            closed_prs = github_client.get_user_pulls(github_id, state="closed", repo=repo) or []
             user_prs.extend(closed_prs[:20])
 
         def _fetch_one(pr):
@@ -404,7 +465,7 @@ def _sync_single_user(github_id: str):
             if pr_number is None:
                 return None
             try:
-                return (pr_number, _fetch_user_pr_detail(pr, pr_number, github_client, mapper))
+                return (pr_number, _fetch_user_pr_detail(pr, pr_number, github_client, mapper, repo))
             except Exception:
                 logger.exception(f"Failed to fetch user PR #{pr_number} for {github_id}, skipping")
                 return None
@@ -419,7 +480,7 @@ def _sync_single_user(github_id: str):
             if detail is None:
                 continue
             try:
-                _upsert_user_pr(db, detail, github_client, mapper, github_id)
+                _upsert_user_pr(db, detail, github_client, repo, github_id)
             except Exception:
                 logger.exception(f"Failed to upsert user PR #{pr_number} for {github_id}, skipping")
 
@@ -428,9 +489,9 @@ def _sync_single_user(github_id: str):
         is_first_issue_sync = existing_issue_count == 0
         issue_state = "all" if is_first_issue_sync else "open"
 
-        user_issues = github_client.get_user_issues_with_body(github_id, state=issue_state) or []
+        user_issues = github_client.get_user_issues_with_body(github_id, state=issue_state, repo=repo) or []
         if not is_first_issue_sync:
-            closed_issues = github_client.get_user_issues(github_id, state="closed") or []
+            closed_issues = github_client.get_user_issues(github_id, state="closed", repo=repo) or []
             user_issues.extend(closed_issues[:20])
 
         issue_count = 0
@@ -523,7 +584,8 @@ def _process_single_user_issue(db, issue: dict, mapper: AreaMapper, github_id: s
 
 
 def _fetch_user_pr_detail(pr: dict, pr_number: int,
-                          github_client: GitHubClient, mapper: "AreaMapper") -> Optional[dict]:
+                          github_client: GitHubClient, mapper: "AreaMapper",
+                          repo: str) -> Optional[dict]:
     """纯拉取单个 user PR 的详情数据（不含 DB 访问，可在线程池并发调用）。
 
     性能策略：
@@ -544,7 +606,7 @@ def _fetch_user_pr_detail(pr: dict, pr_number: int,
     # 只有 open PR 需要调 get_pull 拿 sha + mergeable 做冲突检测。
     full_pr = pr
     if is_active:
-        fetched = github_client.get_pull(pr_number)
+        fetched = github_client.get_pull(pr_number, repo=repo)
         if isinstance(fetched, dict):
             full_pr = fetched
             head = full_pr.get("head") or {}
@@ -562,7 +624,7 @@ def _fetch_user_pr_detail(pr: dict, pr_number: int,
 
     # 仅对 open PR 调 status API（merged/closed 是稳态，省 rate limit）
     if is_active:
-        ci_status = _calc_ci_status(github_client, head_sha)
+        ci_status = _calc_ci_status(github_client, head_sha, repo)
     else:
         ci_status = "pass"  # merged/closed PR 默认 CI 通过
 
@@ -574,7 +636,7 @@ def _fetch_user_pr_detail(pr: dict, pr_number: int,
     if is_active and head_sha:
         # 用 base ref（如 main）而非 base sha：base sha 是 PR 创建时的快照，
         # 比对不到后续 main 的推进，behind_by 会一直为 0。
-        compare = github_client.compare_branches(base_ref, head_sha) or {}
+        compare = github_client.compare_branches(base_ref, head_sha, repo=repo) or {}
         if isinstance(compare, dict):
             conflict_commits = int(compare.get("behind_by") or 0)
         else:
@@ -605,7 +667,7 @@ def _fetch_user_pr_detail(pr: dict, pr_number: int,
 
 
 def _upsert_user_pr(db, detail: dict, github_client: GitHubClient,
-                    mapper: "AreaMapper", github_id: str = "") -> None:
+                    repo: str, github_id: str = "") -> None:
     """把 _fetch_user_pr_detail 的结果写入 my_prs（串行，DB 非线程安全）。
 
     领域映射在此阶段做：先查 Item 缓存，缺失才调 _map_pr_to_area（会打 files API，
@@ -621,15 +683,17 @@ def _upsert_user_pr(db, detail: dict, github_client: GitHubClient,
     conflict_detected = detail["conflict_detected"]
 
     # 领域映射（首次或缺失时）
-    existing = db.query(MyPR).filter(MyPR.pr_number == pr_number, MyPR.github_id == github_id).first()
+    existing = db.query(MyPR).filter(
+        MyPR.repo == repo, MyPR.pr_number == pr_number, MyPR.github_id == github_id
+    ).first()
     area_id = detail.get("area_id")
     if existing:
-        item = db.query(Item).filter(Item.type == "pr", Item.number == pr_number).first()
+        item = db.query(Item).filter(Item.repo == repo, Item.type == "pr", Item.number == pr_number).first()
         area_id = item.area if item else None
     if not area_id:
-        area_id = _map_pr_to_area(pr_number, github_client, mapper)
+        area_id = _map_pr_to_area(pr_number, github_client, repo)
         if area_id:
-            item = db.query(Item).filter(Item.type == "pr", Item.number == pr_number).first()
+            item = db.query(Item).filter(Item.repo == repo, Item.type == "pr", Item.number == pr_number).first()
             if item:
                 item.area = area_id
                 item.last_sync = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -649,6 +713,7 @@ def _upsert_user_pr(db, detail: dict, github_client: GitHubClient,
         existing.last_sync = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
         db.add(MyPR(
+            repo=repo,
             pr_number=pr_number,
             github_id=github_id,
             title=pr.get("title"),
@@ -683,11 +748,21 @@ def _refresh_personal_task_refs():
         for task in tasks:
             refs = task.related_refs or []
             changed = False
+            # 预加载 RepoCache 短名 -> 完整 owner/repo 映射
+            repo_map = {}
+            try:
+                for rc in db.query(RepoCache).filter(RepoCache.status == "active").all():
+                    repo_map[rc.repo] = _clone_url_to_full_repo(rc.clone_url)
+            except Exception:
+                pass
             for ref in refs:
                 if ref.get("state") or not ref.get("number"):
                     continue
                 number = ref["number"]
-                repo_path = f"vllm-project/{ref.get('repo', 'vllm')}"
+                repo_short = ref.get('repo', '')
+                repo_path = repo_map.get(repo_short, '')
+                if not repo_path:
+                    continue
                 if ref.get("type") == "pr":
                     url = f"https://api.github.com/repos/{repo_path}/pulls/{number}"
                 else:
@@ -769,7 +844,7 @@ def start_scheduler():
     if has_active_repos:
         scheduler.add_job(
             sync_all_repos_job,
-            trigger=IntervalTrigger(minutes=Config.CODE_SYNC_INTERVAL),
+            trigger=IntervalTrigger(minutes=Config.POLLING_INTERVAL),
             id="sync_all_repos",
             name="Sync All Repo Code",
             replace_existing=True,
@@ -827,6 +902,21 @@ def start_scheduler():
             logger.exception("Initial sync failed (will retry on schedule)")
     threading.Thread(target=_initial_sync, daemon=True, name="initial-sync").start()
     logger.info("Initial sync scheduled in background thread")
+
+
+def trigger_sync_for_repo(repo: str):
+    """异步触发单个仓库的社区同步（供 toggle 追踪时调用，不阻塞）"""
+    if not scheduler.running:
+        return {"triggered": False, "reason": "scheduler not running"}
+    # 用 (repo, "community") 作为 job_id，避免与全局 sync_community 冲突
+    job_id = f"sync_repo_{repo}"
+    if job_id in _running_jobs:
+        return {"triggered": False, "reason": "already running", "repo": repo}
+    import threading
+    def _run():
+        _sync_single_repo_community(repo)
+    threading.Thread(target=_run, daemon=True, name=job_id).start()
+    return {"triggered": True, "repo": repo}
 
 
 def trigger_refresh() -> dict:
@@ -973,13 +1063,18 @@ def sync_file_change_history_job():
             synced_count = 0
             for pr in all_prs:
                 try:
-                    files = client.get_pull_files(pr.pr_number)
+                    pr_repo = pr.repo
+                    if not pr_repo:
+                        continue
+                    files = client.get_pull_files(pr.pr_number, repo=pr_repo)
                     if not files:
                         continue
 
                     # 清除该 PR 的旧记录，重新写入
                     db.query(FileChangeHistory).filter(
-                        FileChangeHistory.pr_number == pr.pr_number).delete()
+                        FileChangeHistory.pr_number == pr.pr_number,
+                        FileChangeHistory.repo == pr_repo,
+                    ).delete()
                     db.flush()
 
                     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -988,7 +1083,7 @@ def sync_file_change_history_job():
                         if not fname:
                             continue
                         db.add(FileChangeHistory(
-                            repo="vllm",
+                            repo=pr_repo,
                             file_path=fname,
                             pr_number=pr.pr_number,
                             pr_title=pr.title,

@@ -49,6 +49,7 @@ export interface Issue {
   type: 'issue'
   author: string
   area: string
+  repo?: string
   created_at: string
   updated_at: string
   is_new?: boolean
@@ -67,6 +68,7 @@ export interface PR {
   type: 'pr'
   author: string
   area: string
+  repo?: string
   created_at: string
   updated_at: string
   branch?: string
@@ -85,6 +87,7 @@ export interface WatchlistItem {
   title: string
   url: string
   added_at: string
+  repo?: string
   note?: string
   assignee_id?: number | null
   linked_tasks?: any[]
@@ -199,6 +202,7 @@ export interface RepoConfig {
   last_synced_at: string | null
   commit_sha: string | null
   status: string
+  tracked: boolean
   created_at: string
   updated_at: string
 }

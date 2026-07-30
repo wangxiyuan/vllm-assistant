@@ -40,6 +40,11 @@ function catColor(name: string): string {
 }
 
 function opsInCategory(catValue: string): any[] {
+  return anatomyStore.allOperators.filter(o => o.category === catValue)
+}
+
+// 过滤后的某分类算子（用于列表展示）
+function filteredOpsInCategory(catValue: string): any[] {
   return anatomyStore.operators.filter(o => o.category === catValue)
 }
 
@@ -168,47 +173,49 @@ function onCatDragEnd() {
         <button class="btn btn-primary" @click="anatomyStore.openNewOperator()">+ 新建算子</button>
       </div>
 
-      <!-- Operators grouped by category -->
-      <div v-for="cat in anatomyStore.operatorCategoryOptions" :key="cat.value" class="op-category-group"
-           v-show="opsInCategory(cat.value).length > 0"
-           :style="{ '--group-color': catColor(cat.value) }">
-        <div class="op-category-header"
-             @click="anatomyStore.toggleCategoryCollapse(cat.value)"
-             @keydown.enter="anatomyStore.toggleCategoryCollapse(cat.value)"
-             role="button" tabindex="0">
-          <span class="op-category-chevron" :class="{ collapsed: isCatCollapsed(cat.value) }"><Icon name="chevronRight" :size="10" /></span>
-          <span class="op-category-tag">
-            <span class="op-category-dot"></span>
-            <span class="op-category-name">{{ cat.label }}</span>
-          </span>
-          <span class="op-category-count">{{ opsInCategory(cat.value).length }}</span>
-        </div>
-        <div v-show="!isCatCollapsed(cat.value)" class="op-category-body">
-          <div v-for="op in opsInCategory(cat.value)" :key="op.id" class="op-card" @click="anatomyStore.viewOperatorDetail(op)">
-            <div class="op-card-main">
-              <div class="op-card-title">
-                <span class="op-name">{{ op.display_name }}</span>
-                <span class="op-tech-name">{{ op.name }}</span>
-                <span v-if="op.user_id" class="badge-assignee ml-auto">{{ usersStore.userName(op.user_id) }}</span>
+      <!-- Operators grouped by category (filtered) -->
+      <template v-for="cat in anatomyStore.operatorCategoryOptions" :key="cat.value">
+        <div class="op-category-group"
+             v-if="filteredOpsInCategory(cat.value).length > 0"
+             :style="{ '--group-color': catColor(cat.value) }">
+          <div class="op-category-header"
+               @click="anatomyStore.toggleCategoryCollapse(cat.value)"
+               @keydown.enter="anatomyStore.toggleCategoryCollapse(cat.value)"
+               role="button" tabindex="0">
+            <span class="op-category-chevron" :class="{ collapsed: isCatCollapsed(cat.value) }"><Icon name="chevronRight" :size="10" /></span>
+            <span class="op-category-tag">
+              <span class="op-category-dot"></span>
+              <span class="op-category-name">{{ cat.label }}</span>
+            </span>
+            <span class="op-category-count">{{ filteredOpsInCategory(cat.value).length }}</span>
+          </div>
+          <div v-show="!isCatCollapsed(cat.value)" class="op-category-body">
+            <div v-for="op in filteredOpsInCategory(cat.value)" :key="op.id" class="op-card" @click="anatomyStore.viewOperatorDetail(op)">
+              <div class="op-card-main">
+                <div class="op-card-title">
+                  <span class="op-name">{{ op.display_name }}</span>
+                  <span class="op-tech-name">{{ op.name }}</span>
+                  <span v-if="op.user_id" class="badge-assignee ml-auto">{{ usersStore.userName(op.user_id) }}</span>
+                </div>
+                <p v-if="op.description" class="op-card-desc">{{ op.description }}</p>
+                <div class="op-card-meta">
+                  <span v-if="op.input_shape_desc" class="shape-badge input">in: {{ op.input_shape_desc }}</span>
+                  <span v-if="op.output_shape_desc" class="shape-badge output">out: {{ op.output_shape_desc }}</span>
+                  <span v-for="tag in (op.tags || []).slice(0, 3)" :key="tag" class="tag-badge">{{ tag }}</span>
+                </div>
               </div>
-              <p v-if="op.description" class="op-card-desc">{{ op.description }}</p>
-              <div class="op-card-meta">
-                <span v-if="op.input_shape_desc" class="shape-badge input">in: {{ op.input_shape_desc }}</span>
-                <span v-if="op.output_shape_desc" class="shape-badge output">out: {{ op.output_shape_desc }}</span>
-                <span v-for="tag in (op.tags || []).slice(0, 3)" :key="tag" class="tag-badge">{{ tag }}</span>
+              <div class="op-card-actions">
+                <button class="card-action-btn" @click.stop="anatomyStore.openEditOperator(op)" title="编辑">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button class="card-action-btn is-danger" @click.stop="anatomyStore.deleteOperator(op)" title="删除">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
               </div>
-            </div>
-            <div class="op-card-actions">
-              <button class="card-action-btn" @click.stop="anatomyStore.openEditOperator(op)" title="编辑">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              </button>
-              <button class="card-action-btn is-danger" @click.stop="anatomyStore.deleteOperator(op)" title="删除">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              </button>
             </div>
           </div>
         </div>
-      </div>
+      </template>
     </template>
 
     <!-- ============ Models tab (two-column) ============ -->

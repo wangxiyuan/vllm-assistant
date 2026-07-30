@@ -7,7 +7,7 @@ import type { RepoConfig } from '@/utils/types'
 export const useReposStore = defineStore('repos', () => {
   const repos = ref<RepoConfig[]>([])
   const showRepoManager = ref(false)
-  const repoForm = ref({ repo: '', clone_url: '', branch: 'main' })
+  const repoForm = ref({ repo: '', clone_url: '', branch: 'main', tracked: false })
   const repoFormMode = ref<'create' | 'edit'>('create')
   const editingRepo = ref<RepoConfig | null>(null)
   const repoSaving = ref(false)
@@ -33,7 +33,7 @@ export const useReposStore = defineStore('repos', () => {
   }
 
   function resetForm() {
-    repoForm.value = { repo: '', clone_url: '', branch: 'main' }
+    repoForm.value = { repo: '', clone_url: '', branch: 'main', tracked: false }
     repoFormMode.value = 'create'
     editingRepo.value = null
   }
@@ -45,6 +45,7 @@ export const useReposStore = defineStore('repos', () => {
       repo: repo.repo,
       clone_url: repo.clone_url,
       branch: repo.branch || 'main',
+      tracked: repo.tracked ?? false,
     }
   }
 
@@ -73,7 +74,7 @@ export const useReposStore = defineStore('repos', () => {
     if (repoSaving.value) return
     repoSaving.value = true
 
-    const payload = { repo: repoName, clone_url: cloneUrl, branch }
+    const payload = { repo: repoName, clone_url: cloneUrl, branch, tracked: repoForm.value.tracked }
 
     try {
       if (repoFormMode.value === 'create') {
@@ -108,6 +109,7 @@ export const useReposStore = defineStore('repos', () => {
       `• 文件变更历史记录\n` +
       `• 文章中的代码引用（标记为无效）\n` +
       `• 知识库中相关内容（标记为过期）\n` +
+      `• 社区动态（Item）和特别关注（Watchlist）记录\n` +
       `• 本地克隆目录\n\n` +
       `此操作不可撤销，确认删除？`
     )) return
@@ -119,6 +121,23 @@ export const useReposStore = defineStore('repos', () => {
       useAppStore().showToast('已删除', `仓库「${repo.repo}」已删除`, 'info')
     } catch (e: any) {
       useAppStore().showToast('删除失败', e.message, 'error')
+    }
+  }
+
+  async function toggleTrack(repo: RepoConfig, tracked: boolean) {
+    try {
+      const updated: any = await api(`/api/repos/${repo.id}/track?tracked=${tracked}`, {
+        method: 'PATCH',
+      })
+      const idx = repos.value.findIndex(r => r.id === repo.id)
+      if (idx >= 0) repos.value[idx] = updated
+      useAppStore().showToast(
+        tracked ? '已开启追踪' : '已关闭追踪',
+        tracked ? `「${repo.repo}」开始同步社区动态` : `「${repo.repo}」已停止同步`,
+        'success'
+      )
+    } catch (e: any) {
+      useAppStore().showToast('操作失败', e.message, 'error')
     }
   }
 
@@ -136,5 +155,6 @@ export const useReposStore = defineStore('repos', () => {
     openEditRepo,
     saveRepo,
     deleteRepo,
+    toggleTrack,
   }
 })

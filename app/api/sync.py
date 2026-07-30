@@ -19,7 +19,7 @@ router = APIRouter()
 
 
 class EmbedRef(BaseModel):
-    repo: str = "vllm"
+    repo: Optional[str] = None
     file_path: str
     line_start: int
     line_end: Optional[int] = None
@@ -31,12 +31,14 @@ class EmbedRequest(BaseModel):
 
 @router.get("/code/files")
 async def list_cached_files(
-    repo: str = Query("vllm"),
+    repo: Optional[str] = Query(None, description="仓库名，不传则用默认仓库"),
     q: str = Query("", description="搜索关键词"),
     limit: int = Query(50, le=200),
     db: Session = Depends(get_db),
 ):
     """列出缓存的代码文件，支持前缀搜索"""
+    from app.services._shared import get_default_repo_short
+    repo = repo or get_default_repo_short()
     query = db.query(LocalCodeCache.file_path).filter(
         LocalCodeCache.repo == repo,
     )
@@ -49,12 +51,14 @@ async def list_cached_files(
 @router.get("/code/{file_path:path}")
 async def get_cached_code(
     file_path: str,
-    repo: str = Query("vllm"),
+    repo: Optional[str] = Query(None, description="仓库名，不传则用默认仓库"),
     line_start: Optional[int] = Query(None),
     line_end: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
     """获取缓存的代码文件内容（用于前端跳转预览）"""
+    from app.services._shared import get_default_repo_short
+    repo = repo or get_default_repo_short()
     cache_service = LocalCodeSyncService(db)
 
     content = cache_service.get_file_content(repo, file_path)
@@ -91,8 +95,10 @@ async def get_cached_code(
 @router.post("/code/embed")
 async def batch_get_embeds(req: EmbedRequest, db: Session = Depends(get_db)):
     """批量获取多个代码片段，用于文章渲染时嵌入"""
+    from app.services._shared import get_default_repo_short
+    default_repo = get_default_repo_short()
     cache_service = LocalCodeSyncService(db)
-    refs_list = [r.model_dump() for r in req.refs]
+    refs_list = [{**r.model_dump(), "repo": r.repo or default_repo} for r in req.refs]
     snippets = cache_service.batch_get_snippets(refs_list)
 
     return {"snippets": snippets}
@@ -100,7 +106,7 @@ async def batch_get_embeds(req: EmbedRequest, db: Session = Depends(get_db)):
 
 @router.get("/file-history")
 def get_file_history(
-    repo: str = Query("vllm"),
+    repo: Optional[str] = Query(None, description="仓库名，不传则用默认仓库"),
     file_path: str = Query(..., description="仓库内相对路径，如 vllm/engine/core.py"),
     db: Session = Depends(get_db),
 ):
@@ -110,6 +116,8 @@ def get_file_history(
     查询 O(1)，无 GitHub API 调用。
     若缓存未填充，回退到实时查询。
     """
+    from app.services._shared import get_default_repo_short
+    repo = repo or get_default_repo_short()
     from app.models import FileChangeHistory, MyPR
 
     # 优先从缓存表查询
@@ -123,6 +131,7 @@ def get_file_history(
         pr_numbers = [r.pr_number for r in records]
         my_pr_nums = {
             row[0] for row in db.query(MyPR.pr_number).filter(
+                MyPR.repo == repo,
                 MyPR.pr_number.in_(pr_numbers)).all()
         }
         prs = []
@@ -182,17 +191,18 @@ def _fallback_file_history(repo: str, file_path: str, db):
     checked_prs = set()
     candidates = []
     for pr in db.query(MyPR).filter(MyPR.state == "open").all():
-        candidates.append({"num": pr.pr_number, "title": pr.title, "state": pr.state, "source": "my_pr"})
+        candidates.append({"num": pr.pr_number, "title": pr.title, "state": pr.state, "source": "my_pr", "repo": pr.repo})
     for pr in db.query(Item).filter(Item.type == "pr", Item.state == "open").all():
-        candidates.append({"num": pr.number, "title": pr.title, "state": pr.state, "source": "community"})
+        candidates.append({"num": pr.number, "title": pr.title, "state": pr.state, "source": "community", "repo": pr.repo})
 
     for c in candidates[:10]:
         pr_num = c["num"]
+        pr_repo = c.get("repo")
         if pr_num in checked_prs:
             continue
         checked_prs.add(pr_num)
         try:
-            files = client.get_pull_files(pr_num) or []
+            files = client.get_pull_files(pr_num, repo=pr_repo) or []
             for f in files:
                 fname = f.get("filename", "")
                 if fname == file_path or fname.endswith("/" + file_path):

@@ -416,6 +416,32 @@ input[type="radio"] {
     accent-color: var(--amber);
 }
 
+/* ── Filter Row ── */
+.filter-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+.filter-row-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-tertiary);
+    min-width: 44px;
+    padding-top: 7px;
+    flex-shrink: 0;
+}
+.filter-row-content {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    flex: 1;
+}
+
 /* =====================================================================
    PANELS / CARDS
    ===================================================================== */

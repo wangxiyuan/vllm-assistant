@@ -204,8 +204,7 @@ watch(
               <div class="field" style="flex:0 0 140px;">
                 <label class="form-label">仓库</label>
                 <select class="select" v-model="articlesStore.insertRef.repo" @change="articlesStore.loadCachedFiles()">
-                  <option value="vllm">vllm</option>
-                  <option value="vllm-ascend">vllm-ascend</option>
+                  <option v-for="repo in articlesStore.repoOptions" :key="repo" :value="repo">{{ repo }}</option>
                 </select>
               </div>
               <div class="field" style="flex:1;">

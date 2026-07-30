@@ -37,7 +37,10 @@ class LocalCodeSyncService:
         """批量获取代码片段"""
         results = []
         for ref in refs:
-            repo = ref.get("repo", "vllm")
+            repo = ref.get("repo")
+            if not repo:
+                from app.services._shared import get_default_repo_short
+                repo = get_default_repo_short()
             file_path = ref["file_path"]
             start_line = ref["line_start"]
             end_line = ref.get("line_end", start_line)

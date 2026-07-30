@@ -86,9 +86,9 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     localStorage.setItem('anatomy-model-list-collapsed', modelListCollapsed.value ? '1' : '0')
   }
 
-  // Auto-reload when filter or search changes
+  // Auto-reload when filter or search changes (前端过滤)
   watch([operatorFilterCategory, operatorSearch], () => {
-    loadOperators()
+    applyOperatorFilters()
   })
 
   // Auto-reload models when filter or search changes
@@ -96,28 +96,35 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     loadModels()
   })
 
+  // 前端过滤算子
+  function applyOperatorFilters() {
+    let result = allOperators.value
+    if (operatorFilterCategory.value) {
+      result = result.filter(o => o.category === operatorFilterCategory.value)
+    }
+    if (operatorSearch.value) {
+      const q = operatorSearch.value.toLowerCase()
+      result = result.filter(o =>
+        (o.name && o.name.toLowerCase().includes(q)) ||
+        (o.display_name && o.display_name.toLowerCase().includes(q)) ||
+        (o.description && o.description.toLowerCase().includes(q))
+      )
+    }
+    operators.value = result
+  }
+
   // Operator actions
   async function loadOperators() {
     operatorsLoading.value = true
     try {
-      const params = new URLSearchParams()
-      if (operatorFilterCategory.value) params.set('category', operatorFilterCategory.value)
-      if (operatorSearch.value) params.set('search', operatorSearch.value)
-      const qs = params.toString()
-      const data: any = await api(`/api/anatomy/operators${qs ? '?' + qs : ''}`)
-      operators.value = data.operators || []
+      const data: any = await api('/api/anatomy/operators')
+      allOperators.value = data.operators || []
+      applyOperatorFilters()
     } catch (e: any) {
       useAppStore().showToast('加载算子失败', e.message, 'error')
     } finally {
       operatorsLoading.value = false
     }
-  }
-
-  async function loadAllOperators() {
-    try {
-      const data: any = await api('/api/anatomy/operators')
-      allOperators.value = data.operators || []
-    } catch (_) {}
   }
 
   function operatorById(id: number): Operator | undefined {
@@ -627,7 +634,6 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     anatomyTab.value = tab
     if (tab === 'operators') {
       loadOperators()
-      loadAllOperators()
       loadCategories()
     } else {
       loadModels()
@@ -648,7 +654,7 @@ export const useAnatomyStore = defineStore('anatomy', () => {
     modelTagInput, modelFormSnapshot, modelCategoryOptions,
     collapsedCategories, toggleCategoryCollapse,
     modelListCollapsed, toggleModelListCollapse,
-    loadOperators, loadAllOperators, operatorById, viewOperatorDetail, closeOperatorDetail,
+    loadOperators, operatorById, viewOperatorDetail, closeOperatorDetail,
     editFromDetail, openNewOperator, openEditOperator, closeOperatorEditor,
     addOperatorTag, removeOperatorTag, validateParamsSchema, saveOperator, deleteOperator,
     loadCategories, openCategoryManager, loadCategoryList, openEditCategory, cancelEditCategory, openNewCategory,

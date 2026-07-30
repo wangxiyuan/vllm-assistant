@@ -1,9 +1,18 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/api/client'
 import { useAppStore } from './app'
+import { useReposStore } from './repos'
 import { issueType } from '@/utils/helpers'
 import type { Issue, PR } from '@/utils/types'
+
+function repoFullNameFromCloneUrl(cloneUrl: string): string {
+  let url = cloneUrl.endsWith('.git') ? cloneUrl.slice(0, -4) : cloneUrl
+  url = url.replace(/\/+$/, '')
+  const parts = url.split('/')
+  if (parts.length >= 2) return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+  return ''
+}
 
 export const useCommunityStore = defineStore('community', () => {
   const issues = ref<Issue[]>([])
@@ -17,8 +26,22 @@ export const useCommunityStore = defineStore('community', () => {
   const communityIssueType = ref('all')
   const communityIssueArea = ref('')
   const communityPRArea = ref('')
+  const communityRepo = ref('')  // 当前选中的仓库，'' 表示全部
   const labelLoading = ref<number | null>(null)
   const labelResult = ref<Record<number, string[]>>({})
+
+  const trackedRepos = computed(() => {
+    const reposStore = useReposStore()
+    return reposStore.repos.filter(r => r.tracked)
+  })
+
+  watch(trackedRepos, (repos) => {
+    if (!communityRepo.value && repos.length > 0) {
+      const url = repos[0].clone_url
+      communityRepo.value = repoFullNameFromCloneUrl(url)
+      loadCommunityData()
+    }
+  }, { immediate: true })
 
   const filteredIssues = computed(() => {
     const appStore = useAppStore()
@@ -94,10 +117,19 @@ export const useCommunityStore = defineStore('community', () => {
   async function loadCommunityData() {
     communityPage.value = 1
     communityLoadingMore.value = false
+    // 没有选中仓库时，默认选中第一个 tracked repo
+    if (!communityRepo.value) {
+      const repos = trackedRepos.value
+      if (repos.length > 0) {
+        const url = repos[0].clone_url
+        communityRepo.value = repoFullNameFromCloneUrl(url)
+      }
+    }
     try {
       const params = new URLSearchParams()
       params.set('sort_by', sortBy.value)
       params.set('limit', '200')
+      if (communityRepo.value) params.set('repo', communityRepo.value)
       const data: any = await api('/api/community/items?' + params)
       const items = data.items || data
       issues.value = items.filter((x: any) => x.type === 'issue')
@@ -151,6 +183,7 @@ export const useCommunityStore = defineStore('community', () => {
   return {
     issues, prs, stats, sortBy, communityTab, communityPage, pageSize,
     communityLoadingMore, communityIssueType, communityIssueArea, communityPRArea,
+    communityRepo, trackedRepos,
     labelLoading, labelResult,
     filteredIssues, filteredPRs, pagedFilteredIssues, pagedFilteredPRs,
     hasMoreCommunity, filteredListEmpty, newIssuesCount, newPRsCount,

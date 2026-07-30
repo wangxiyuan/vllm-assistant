@@ -28,12 +28,15 @@ async def get_my_prs(
     filter_conflicts: bool = False,
     filter_ci_fail: bool = False,
     github_id: Optional[str] = Query(None, description="GitHub ID 过滤"),
+    repo: Optional[str] = Query(None, description="按仓库过滤"),
     db: Session = Depends(get_db),
 ):
-    """从 my_prs 缓存读取用户的 PR 列表（可选按 github_id 过滤）"""
+    """从 my_prs 缓存读取用户的 PR 列表（可选按 github_id / repo 过滤）"""
     q = db.query(MyPR)
     if github_id:
         q = q.filter(MyPR.github_id == github_id)
+    if repo:
+        q = q.filter(MyPR.repo == repo)
     if state == "open":
         q = q.filter(MyPR.state == "open")
     elif state == "merged":
@@ -51,19 +54,25 @@ async def get_my_prs(
 
 
 @router.get("/my-prs/{pr_number}/details")
-def get_pr_details(pr_number: int, db: Session = Depends(get_db)):
+def get_pr_details(pr_number: int, repo: Optional[str] = None, db: Session = Depends(get_db)):
     """获取单个 PR 的详细信息
     - 基础信息：优先 item 缓存（更全），fallback 到 my_prs 缓存
     - files：实时拉取
 
     用 def（非 async）避免同步 GitHub API 调用阻塞事件循环。
+
+    Args:
+        repo: 完整 owner/repo，必传
     """
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo parameter is required")
+    full_repo = repo
     client = _get_github_client()
-    item = db.query(Item).filter(Item.type == "pr", Item.number == pr_number).first()
-    cached = db.query(MyPR).filter(MyPR.pr_number == pr_number).first()
+    item = db.query(Item).filter(Item.repo == full_repo, Item.type == "pr", Item.number == pr_number).first()
+    cached = db.query(MyPR).filter(MyPR.repo == full_repo, MyPR.pr_number == pr_number).first()
 
     try:
-        files = client.get_pull_files(pr_number) or []
+        files = client.get_pull_files(pr_number, repo=full_repo) or []
     except Exception:
         logger.exception(f"get_pull_files failed for PR#{pr_number}")
         files = []
@@ -86,7 +95,7 @@ def get_pr_details(pr_number: int, db: Session = Depends(get_db)):
     # 如果缓存中没有 body（存量数据/未同步），实时拉取补充
     if not pr_payload or not pr_payload.get("body"):
         try:
-            pr = client.get_pull(pr_number)
+            pr = client.get_pull(pr_number, repo=full_repo)
             if pr:
                 if not pr_payload:
                     pr_payload = {
@@ -115,14 +124,20 @@ def get_pr_details(pr_number: int, db: Session = Depends(get_db)):
 
 
 @router.get("/my-prs/{pr_number}/conflicts")
-def check_pr_conflicts(pr_number: int, db: Session = Depends(get_db)):
+def check_pr_conflicts(pr_number: int, repo: Optional[str] = None, db: Session = Depends(get_db)):
     """检测 PR 是否有冲突
     - 缓存策略：last_sync 在 CACHE_TTL 内直接用缓存
     - 否则实时调 Compare API
+
+    Args:
+        repo: 完整 owner/repo，必传
     """
     from app.services.conflict_detector import ConflictDetector
 
-    cached = db.query(MyPR).filter(MyPR.pr_number == pr_number).first()
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo parameter is required")
+    full_repo = repo
+    cached = db.query(MyPR).filter(MyPR.repo == full_repo, MyPR.pr_number == pr_number).first()
 
     if cached and cached.last_sync:
         age = datetime.now(timezone.utc).replace(tzinfo=None) - cached.last_sync
@@ -140,7 +155,7 @@ def check_pr_conflicts(pr_number: int, db: Session = Depends(get_db)):
     # 缓存缺失或过期：实时检测
     try:
         detector = ConflictDetector(_get_github_client())
-        result = detector.detect_conflicts(pr_number)
+        result = detector.detect_conflicts(pr_number, repo=full_repo)
         result["source"] = "live"
         return result
     except Exception:
@@ -149,10 +164,13 @@ def check_pr_conflicts(pr_number: int, db: Session = Depends(get_db)):
 
 
 @router.get("/issue/{issue_number}/body")
-def get_issue_body(issue_number: int):
+def get_issue_body(issue_number: int, repo: Optional[str] = None):
     """获取 Issue 正文（实时从 GitHub 拉取，用于弹窗显示）"""
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo parameter is required")
+    full_repo = repo
     try:
-        issue = _get_github_client().get_issue(issue_number)
+        issue = _get_github_client().get_issue(issue_number, repo=full_repo)
         if not issue:
             raise HTTPException(status_code=404, detail="Issue not found")
         return {
@@ -175,10 +193,13 @@ def get_issue_body(issue_number: int):
 
 
 @router.get("/my-prs/{pr_number}/body")
-def get_pr_body(pr_number: int):
+def get_pr_body(pr_number: int, repo: Optional[str] = None):
     """获取 PR 正文和元信息（实时从 GitHub 拉取）"""
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo parameter is required")
+    full_repo = repo
     try:
-        pr = _get_github_client().get_pull(pr_number)
+        pr = _get_github_client().get_pull(pr_number, repo=full_repo)
         if not pr:
             raise HTTPException(status_code=404, detail="PR not found")
         return {
@@ -206,10 +227,13 @@ def get_pr_body(pr_number: int):
 
 
 @router.get("/my-prs/{pr_number}/diff")
-def get_pr_diff(pr_number: int, db: Session = Depends(get_db)):
+def get_pr_diff(pr_number: int, repo: Optional[str] = None, db: Session = Depends(get_db)):
     """获取 PR 的 diff 内容（实时）"""
+    if not repo:
+        raise HTTPException(status_code=400, detail="repo parameter is required")
+    full_repo = repo
     try:
-        diff = _get_github_client().get_pull_diff(pr_number)
+        diff = _get_github_client().get_pull_diff(pr_number, repo=full_repo)
         if diff is None:
             # 可能 diff 太大或 PR 不存在
             raise HTTPException(

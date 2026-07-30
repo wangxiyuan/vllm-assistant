@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/api/client'
 import { useAppStore } from './app'
+import { useReposStore } from './repos'
 import type { Article } from '@/utils/types'
 
 export const useArticlesStore = defineStore('articles', () => {
@@ -49,7 +50,7 @@ export const useArticlesStore = defineStore('articles', () => {
 
   // Insert code ref
   const showInsertRef = ref(false)
-  const insertRef = ref({ repo: 'vllm', file_path: '', line_start: 1, line_end: 10 })
+  const insertRef = ref({ repo: '', file_path: '', line_start: 1, line_end: 10 })
   const insertRefPreview = ref('')
   const cacheFiles = ref<any[]>([])
 
@@ -70,7 +71,10 @@ export const useArticlesStore = defineStore('articles', () => {
       || JSON.stringify(snap.tags) !== JSON.stringify(form.value.tags)
   })
 
-  const repoOptions = ['vllm', 'vllm-ascend']
+  const repoOptions = computed(() => {
+    const reposStore = useReposStore()
+    return reposStore.repos.filter(r => r.tracked).map(r => r.repo)
+  })
 
   function _takeFormSnapshot() {
     formSnapshot.value = {
@@ -333,7 +337,7 @@ export const useArticlesStore = defineStore('articles', () => {
 
   function openInsertRef() {
     showInsertRef.value = true
-    insertRef.value = { repo: 'vllm', file_path: '', line_start: 1, line_end: 10 }
+    insertRef.value = { repo: '', file_path: '', line_start: 1, line_end: 10 }
     insertRefPreview.value = ''
     cacheFiles.value = []
     loadCachedFiles()

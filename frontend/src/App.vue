@@ -176,6 +176,12 @@ watch(() => authStore.authenticated, async (val) => {
               </button>
             </div>
           </div>
+          <div class="form-row" style="margin-bottom:var(--space-5);">
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="reposStore.repoForm.tracked" />
+              追踪社区动态（同步该仓库的 issue/PR 到社区动态页）
+            </label>
+          </div>
           <div class="list">
             <div v-for="repo in reposStore.repos" :key="repo.id" class="list-item">
               <div class="item-main">
@@ -187,6 +193,11 @@ watch(() => authStore.authenticated, async (val) => {
                 </div>
               </div>
               <div class="item-side">
+                <button class="card-action-btn" :class="{ 'is-active': repo.tracked }"
+                        @click="reposStore.toggleTrack(repo, !repo.tracked)" :title="repo.tracked ? '关闭追踪' : '开启追踪'">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  {{ repo.tracked ? '追踪中' : '追踪' }}
+                </button>
                 <button class="card-action-btn" @click="reposStore.openEditRepo(repo)" title="编辑">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   编辑
