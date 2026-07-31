@@ -365,7 +365,7 @@ async function generateInsight(task: any) {
 
     <!-- Task Drawer -->
     <Teleport to="body">
-      <div v-if="todoStore.selectedTask" class="drawer-backdrop" @click="todoStore.closeTask()">
+      <div v-if="todoStore.selectedTask" class="drawer-backdrop" @click="todoStore.editingTask ? null : todoStore.closeTask()">
         <div class="drawer" @click.stop>
           <div class="drawer-header">
             <!-- View mode: display title -->
@@ -466,7 +466,7 @@ async function generateInsight(task: any) {
               <!-- Description -->
               <div class="field" style="margin-bottom:var(--space-3);">
                 <label class="field-label-sm">描述</label>
-                <textarea class="textarea" rows="4" v-model="todoStore.editTaskForm.description" placeholder="描述（可选，支持 Markdown）"></textarea>
+                <textarea class="textarea" rows="24" v-model="todoStore.editTaskForm.description" placeholder="描述（可选，支持 Markdown）"></textarea>
               </div>
 
               <!-- Meta fields -->

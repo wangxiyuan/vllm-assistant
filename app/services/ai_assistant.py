@@ -34,11 +34,11 @@ class AIAssistant:
         Returns:
             markdown 格式的 review 字符串
         """
-        prompt = f"""你是一位资深 vLLM 贡献者，正在 review 一个 PR。
+        prompt = f"""你是一位资深贡献者，正在 review 一个 PR。
 
 PR #{pr_number}: {pr_title}
 
-PR Diff:
+PR Diff（超出 8000 字符的部分已截断，仅展示前 8000 字符）：
 ```diff
 {pr_diff[:8000]}
 ```
@@ -94,7 +94,7 @@ PR Diff:
                 "cross_area_impact": [...],
             }
         """
-        prompt = f"""Analyze the impact of these file changes in the vLLM project:
+        prompt = f"""Analyze the impact of these file changes:
 
 Changed files:
 {json.dumps(changed_files, indent=2)}
@@ -105,11 +105,11 @@ Return JSON with:
 3. test_requirements: List of test files that may need updates
 4. cross_area_impact: List of areas that may be affected
 
-Consider vLLM's architecture:
-- Engine core (scheduler, KV cache, distributed)
+Consider common project architecture:
+- Core engine (scheduler, cache, distributed)
 - Model implementation (attention, MoE, quantization)
-- Entrypoints (API server, CLI)
-- Hardware integration (GPU, CPU, TPU)
+- API/entrypoints
+- Hardware integration (GPU, CPU, NPU, TPU)
 
 Return valid JSON only."""
 
@@ -134,12 +134,12 @@ Return valid JSON only."""
         Returns:
             推荐的标签列表
         """
-        prompt = f"""Based on this vLLM issue, suggest appropriate labels and area.
+        prompt = f"""Based on this issue, suggest appropriate labels and area.
 
 Issue Title: {issue_title}
 Issue Body: {issue_body[:2000]}
 
-vLLM label categories:
+Label categories:
 - Type: bug, feature, enhancement, documentation
 - Area: engine, model, entrypoints, kernels, hardware, config, multimodal, compilation, lora, docs, ci
 - Status: good first issue, help wanted, priority: high
@@ -180,7 +180,7 @@ Return valid JSON only."""
         kind = "Issue" if item_type == "issue" else "Pull Request"
 
         if item_type == "issue":
-            prompt = f"""分析以下 vLLM Issue，用中文写一段 markdown 格式的摘要。
+            prompt = f"""分析以下 Issue，用中文写一段 markdown 格式的摘要。
 
 要求包含以下几部分（用 markdown 标题分隔）：
 - **核心问题**：这个 issue 报告了什么问题或提出了什么需求（1-2句）
@@ -195,7 +195,7 @@ Return valid JSON only."""
 
 输出纯 markdown，不要用代码块包裹整个内容。"""
         else:
-            prompt = f"""分析以下 vLLM Pull Request，用中文写一段 markdown 格式的摘要。
+            prompt = f"""分析以下 Pull Request，用中文写一段 markdown 格式的摘要。
 
 要求包含以下几部分（用 markdown 标题分隔）：
 - **核心问题**：这个 PR 解决了什么问题或实现了什么功能（1-2句）
@@ -229,7 +229,7 @@ Return valid JSON only."""
         if not text:
             return ""
 
-        prompt = f"""你是一个 vLLM 项目的技术文档翻译专家。请将以下英文技术内容翻译成流畅的中文。
+        prompt = f"""你是一个技术文档翻译专家。请将以下英文技术内容翻译成流畅的中文。
 
 ## 核心原则
 

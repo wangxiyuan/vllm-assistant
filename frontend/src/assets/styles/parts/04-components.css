@@ -1343,7 +1343,7 @@ a.item-title:hover { color: var(--amber-bright); }
 
 /* ── Drawer ── */
 .drawer {
-    width: min(720px, 100vw);
+    width: min(900px, 85vw);
     background: var(--bg-elev-1);
     border-left: 1px solid var(--border);
     display: flex;
@@ -1357,7 +1357,7 @@ a.item-title:hover { color: var(--amber-bright); }
     from { transform: translateX(40px); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
 }
-.drawer-wide { width: min(900px, 70vw); }
+.drawer-wide { width: min(1100px, 85vw); }
 
 .drawer-header {
     padding: var(--space-5) var(--space-7);
@@ -1416,8 +1416,22 @@ a.item-title:hover { color: var(--amber-bright); }
 .drawer-body {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: var(--space-6) var(--space-7);
     scrollbar-width: thin;
+    word-break: break-word;
+}
+.drawer-body img { max-width: 100%; height: auto; }
+.drawer-body pre,
+.drawer-body code {
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-width: 100%;
+}
+.drawer-body table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
 }
 .drawer-body::-webkit-scrollbar { width: 8px; }
 .drawer-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }

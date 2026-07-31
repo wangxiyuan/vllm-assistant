@@ -118,7 +118,6 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
     try {
       const data: any = await api('/api/ai-agent/sessions', { method: 'POST' })
       currentSessionId.value = data.id || data.session_id
-      messages.value = []
       error.value = ''
       await loadSessions()
       return currentSessionId.value
@@ -216,6 +215,9 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
     if (!sessionId) {
       sessionId = await createSession()
       if (!sessionId) return
+      // 更新新会话的消息数（此时已有 1 条 user 消息）
+      const s = sessions.value.find(s => s.id === sessionId)
+      if (s) s.message_count = messages.value.length
     }
 
     streaming.value = true
