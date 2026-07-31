@@ -120,15 +120,12 @@ def _map_pr_to_area(pr_number: int, github_client: GitHubClient,
     return None
 
 
-def _process_single_issue(db, issue: dict, mapper: AreaMapper, area_filter, repo: str) -> None:
+def _process_single_issue(db, issue: dict, mapper: AreaMapper, repo: str) -> None:
     """处理单个 issue 同步（独立可失败）"""
     if not isinstance(issue, dict):
         return
     labels = [l["name"] for l in issue.get("labels", []) if isinstance(l, dict)]
     area_id = mapper.classify_issue_by_labels(labels)
-
-    if area_filter and area_id not in area_filter:
-        return
 
     existing = db.query(Item).filter(
         Item.repo == repo,
@@ -164,7 +161,7 @@ def _process_single_issue(db, issue: dict, mapper: AreaMapper, area_filter, repo
 
 
 def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
-                            mapper: AreaMapper, area_filter, repo: str) -> None:
+                            mapper: AreaMapper, repo: str) -> None:
     """处理单个 PR item 同步（独立可失败）
 
     性能策略：merged/closed PR 是稳态，仅刷新 last_sync；area 已有不重算
@@ -184,8 +181,6 @@ def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
 
     # 已存在且 area 已映射：只更新轻量字段，跳过文件 API
     if existing and existing.area:
-        if area_filter and existing.area not in area_filter:
-            return
         existing.title = pr.get("title", existing.title)
         existing.state = pr_state
         existing.updated_at = _parse_dt(pr.get("updated_at"))
@@ -199,9 +194,6 @@ def _process_single_pr_item(db, pr: dict, github_client: GitHubClient,
 
     # 新 PR 或 area 缺失：需要调 files 映射
     area_id = _map_pr_to_area(pr_number, github_client, repo)
-
-    if area_filter and area_id not in area_filter:
-        return
 
     head = pr.get("head") or {}
     base = pr.get("base") or {}
@@ -242,6 +234,8 @@ def sync_areas():
     遍历所有 tracked 仓库，按各自 AreaMapper 同步领域定义。
     无领域定义配置的仓库跳过。
     """
+    if not Config.GITHUB_SYNC_ENABLED:
+        return
     job_id = "sync_areas"
     if job_id in _running_jobs:
         logger.debug(f"{job_id} already running, skipping")
@@ -290,6 +284,8 @@ def sync_community_data():
     - 增量拉取最近更新的 issue（since 窗口），更新已有 issue 的状态
     - 翻页拉取最新 N 个 open PR（按 updated desc）
     """
+    if not Config.GITHUB_SYNC_ENABLED:
+        return
     job_id = "sync_community"
     if job_id in _running_jobs:
         logger.debug(f"{job_id} already running, skipping")
@@ -360,23 +356,19 @@ def _sync_single_repo_community(repo: str):
             if len(page_prs) < DEFAULT_PER_PAGE:
                 break
 
-        area_filter = Config.POLLING_AREAS or []
-        if not area_filter:
-            area_filter = None
-
         # GitHub /issues 端点会同时返回 PR（PR 是 issue 的子集），
         # 必须过滤掉带 pull_request 字段的项，否则 PR 会被当成 issue 存储
         real_issues = [it for it in all_issues if not it.get("pull_request")]
 
         for issue in real_issues:
             try:
-                _process_single_issue(db, issue, mapper, area_filter, repo)
+                _process_single_issue(db, issue, mapper, repo)
             except Exception:
                 logger.exception(f"Failed to process issue {issue.get('number')} ({repo}), skipping")
 
         for pr in pulls:
             try:
-                _process_single_pr_item(db, pr, github_client, mapper, area_filter, repo)
+                _process_single_pr_item(db, pr, github_client, mapper, repo)
             except Exception:
                 logger.exception(f"Failed to process PR item {pr.get('number')} ({repo}), skipping")
 
@@ -403,6 +395,8 @@ def sync_user_prs():
     为每个用户在每个 tracked 仓库独立拉取其 PR 和 Issue 并写入 my_prs / user_issues 表。
     没有 tracked 仓库时兜底同步 Config 默认仓库。
     """
+    if not Config.GITHUB_SYNC_ENABLED:
+        return
     job_id = "sync_user_prs"
     if job_id in _running_jobs:
         logger.debug(f"{job_id} already running, skipping")
@@ -974,6 +968,8 @@ def stop_scheduler():
 
 def sync_all_repos_job():
     """定时任务：同步所有仓库代码到 LocalCodeCache，然后增量更新知识库"""
+    if not Config.GITHUB_SYNC_ENABLED:
+        return
     job_id = "sync_all_repos"
     if job_id in _running_jobs:
         logger.debug(f"{job_id} already running, skipping")
@@ -1030,6 +1026,8 @@ def sync_file_change_history_job():
     增量策略：只同步最近 6 小时内未同步过的 PR（last_sync < now - 6h），
     避免每次全量重刷所有 PR 的变更文件列表。
     """
+    if not Config.GITHUB_SYNC_ENABLED:
+        return
     job_id = "sync_file_history"
     if job_id in _running_jobs:
         logger.debug(f"{job_id} already running, skipping")

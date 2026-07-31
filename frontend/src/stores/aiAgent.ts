@@ -62,7 +62,7 @@ export const KNOWLEDGE_TYPE_LABELS: Record<string, string> = {
 }
 
 export const KNOWLEDGE_TYPE_ORDER = [
-  'docs', 'code_structure', 'issue', 'pr', 'article', 'report', 'manual', 'conversation',
+  'docs', 'code_structure', 'issue', 'pr', 'article', 'report', 'conversation', 'manual',
 ]
 
 export const useAIAgentStore = defineStore('aiAgent', () => {

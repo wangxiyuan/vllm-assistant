@@ -139,19 +139,7 @@ function isGroupActive(group: NavGroup): boolean {
       </button>
     </nav>
 
-    <div class="sidebar-footer">
-      <div class="sidebar-version">vLLM Assistant v1.0</div>
-      <div class="sidebar-shortcuts tt-host">
-        <span>快捷键: 1-8 切换 · R 同步</span>
-        <span class="tt">
-          <span class="tt-line"><span class="tt-k">1-8</span> <span class="tt-v">切换视图</span></span>
-          <span class="tt-line"><span class="tt-k">R</span> <span class="tt-v">手动同步</span></span>
-          <span class="tt-line"><span class="tt-k">Esc</span> <span class="tt-v">关闭弹窗/抽屉</span></span>
-          <span class="tt-line"><span class="tt-k">Ctrl+S</span> <span class="tt-v">保存文章</span></span>
-          <span class="tt-line"><span class="tt-k">Ctrl+P</span> <span class="tt-v">预览文章</span></span>
-        </span>
-      </div>
-    </div>
+    
   </aside>
 </template>
 

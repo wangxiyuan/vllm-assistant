@@ -213,7 +213,89 @@ docker cp vllm-assistant:/tmp/knowledge ./knowledge
 
 ---
 
-## 实施建议
+## 方案 C：MCP stdio 本地脚本（推荐，本地开发用）
 
-1. **优先做方案 A（MCP Server）**：改动极小，部署后外部 agent 立即可用。这是主要使用路径。
-2. **按需补充方案 B（导出脚本）**：当需要在本地离线浏览、或给不支持 MCP HTTP 的工具使用时，执行一次导出即可。
+在本地开发时，agent 通过一个独立的 Python 脚本直接读取本地 SQLite 数据库，无需启动 HTTP 服务。
+
+### 架构
+
+```
+agent (opencode/claude code)
+        │
+        │  MCP stdio 协议 (stdin/stdout)
+        ▼
+scripts/mcp/mcp_server.py
+        │
+        │  直接读同目录 SQLite
+        ▼
+scripts/mcp/vllm_assistant.db
+```
+
+### 改动清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `scripts/mcp/mcp_server.py` | 新增 | MCP stdio server，直接读本地 sqlite |
+| `.claude/settings.local.json` | 修改 | 注册 MCP server |
+| `CLAUDE.md` | 修改 | 添加使用说明 |
+
+### 工具定义
+
+与方案 A 一致：`knowledge_search`、`knowledge_list`、`knowledge_stats`。
+
+### 外部 agent 配置
+
+**opencode**（`~/.config/opencode/opencode.jsonc`）：
+
+```json
+"mcp": {
+  "vllm-knowledge": {
+    "type": "local",
+    "command": ["python", "/path/to/vllm-assistant/scripts/mcp/mcp_server.py"],
+    "enabled": true
+  }
+}
+```
+
+**claude code**（项目目录下 `.claude/settings.local.json`）：
+
+```json
+{
+  "mcpServers": {
+    "vllm-knowledge": {
+      "command": "python",
+      "args": ["scripts/mcp/mcp_server.py"]
+    }
+  }
+}
+```
+
+### 拷贝生产环境知识库到本地
+
+SQLite 是单文件数据库，生产库可直接拷贝到本地使用：
+
+```bash
+# 先合并 WAL 再拷贝（避免 WAL 文件不一致）
+docker exec vllm-assistant python -c "
+import sqlite3
+conn = sqlite3.connect('/app/data/vllm_assistant.db')
+conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+conn.close()
+"
+docker cp vllm-assistant:/app/data/vllm_assistant.db ./scripts/mcp/vllm_assistant.db
+```
+
+### 优点
+
+| 对比项 | 方案 C（MCP stdio） | 方案 A（MCP HTTP） |
+|--------|---------------------|---------------------|
+| 启动服务 | 不需要 | 需要 Docker/uvicorn 运行中 |
+| 依赖 | Python 标准库 | 需 FastAPI + uvicorn |
+| 认证 | 不需要 | 需要 API_KEY |
+| 性能 | 直接读文件，毫秒级 | HTTP 网络开销 |
+| 开发调试 | 可直接运行测试 | 需 curl 测试 |
+
+### 注意
+
+- 读的是本地 sqlite 文件，需要自己从生产同步 db 文件到 `scripts/mcp/` 目录
+- 只读不写，不会污染生产库

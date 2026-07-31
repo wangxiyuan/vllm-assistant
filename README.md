@@ -254,7 +254,6 @@ vllm-assistant/
 - **缓存优先**：所有 API 端点优先从 SQLite 缓存读取，scheduler 后台增量同步 GitHub 数据
 - **增量拉取**：每次轮询只拉取 `since=now-1.5*interval` 的新数据
 - **手动刷新**：点击界面 R 键或刷新按钮触发同步
-- **领域过滤**：通过 `POLLING_AREAS` 环境变量只同步指定领域
 
 ## API 文档
 
@@ -298,16 +297,6 @@ pytest tests/
 3. 在 `frontend/src/views/` 添加新视图组件
 4. 在 `frontend/src/router/index.ts` 注册新路由
 5. 更新 `app/main.py` 注册新路由
-
-### 快捷键
-
-| 快捷键 | 功能 |
-|--------|------|
-| 1-7 | 切换视图 |
-| R | 手动同步 |
-| Esc | 关闭弹窗/抽屉 |
-| Ctrl+S | 保存文章 |
-| Ctrl+P | 预览文章 |
 
 ## License
 

@@ -21,10 +21,11 @@
     border-right: 1px solid var(--border-faint);
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;
     transition: width var(--t-slow) var(--ease-out);
     position: relative;
 }
+
 .sidebar::after { display: none; }
 /* Ambient phosphor seam along the sidebar's right edge */
 .sidebar::before {
@@ -98,6 +99,7 @@
 .nav-section {
     padding: var(--space-5) var(--space-4) var(--space-3);
     flex: 1;
+    overflow-y: auto;
 }
 .nav-label {
     font-family: var(--font-mono);
@@ -206,6 +208,11 @@
     font-size: var(--text-sm);
     color: var(--text-tertiary);
     font-family: var(--font-mono);
+    flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-elev-1);
+    z-index: 1;
 }
 .sidebar-version {
     font-family: var(--font-mono);

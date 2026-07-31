@@ -1,11 +1,9 @@
 """
 配置管理模块
 - 环境变量（.env）为基础
-- ``POLLING_AREAS`` 支持 env 逗号分隔格式
 """
 import os
 from pathlib import Path
-from typing import List, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -35,7 +33,7 @@ class Config:
 
     # Polling
     POLLING_INTERVAL: int = int(os.getenv("POLLING_INTERVAL", "10"))
-    POLLING_AREAS: List[str] = None  # type: ignore
+    GITHUB_SYNC_ENABLED: bool = os.getenv("GITHUB_SYNC_ENABLED", "true").lower() in ("1", "true", "yes")
 
     # Personal TODO - 洞察报告异步超时（秒）
     INTELLIGENCE_REPORT_TIMEOUT: int = int(os.getenv("INTELLIGENCE_REPORT_TIMEOUT", "180"))
@@ -67,11 +65,3 @@ class Config:
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-
-
-# 初始化 POLLING_AREAS
-_polling_raw = os.getenv("POLLING_AREAS", "").strip()
-if _polling_raw:
-    Config.POLLING_AREAS = [a.strip() for a in _polling_raw.split(",") if a.strip()]
-else:
-    Config.POLLING_AREAS = []
