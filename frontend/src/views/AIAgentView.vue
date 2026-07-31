@@ -584,14 +584,14 @@ const sortedKbTypes = computed(() => {
                   <div v-for="(step, i) in visibleSteps" :key="step._key || i" class="agent-step" :class="'step-' + step.type">
                     <div v-if="step.type === 'thinking'" class="step-thinking">
                       <span class="step-icon"><Icon name="brain" :size="12" /></span>
-                      <span class="step-text" v-html="renderMarkdown(step.thinking)"></span>
+                      <span class="step-text" v-html="renderMarkdown(step.thinking || '')"></span>
                     </div>
                     <div v-else-if="step.type === 'tool_call'" class="step-tool-call">
                       <span class="step-icon"><Icon name="wrench" :size="12" /></span>
                       <span class="step-text">
-                        调用工具 <code>{{ step.tool.name }}</code>
-                        <span v-if="step.tool.args && hasArgs(step.tool.args)" class="step-tool-args">({{ formatArgs(step.tool.args) }})</span>
-                        <span v-if="step.tool.result !== undefined" class="step-tool-done"><Icon name="check" :size="11" /></span>
+                        调用工具 <code>{{ step.tool?.name }}</code>
+                        <span v-if="step.tool?.args && hasArgs(step.tool.args)" class="step-tool-args">({{ formatArgs(step.tool.args) }})</span>
+                        <span v-if="step.tool && step.tool.result !== undefined" class="step-tool-done"><Icon name="check" :size="11" /></span>
                         <span v-else-if="agentStore.streaming" class="step-tool-pending"><Icon name="hourglass" :size="11" /></span>
                       </span>
                     </div>

@@ -22,6 +22,15 @@ const router = useRouter()
 
 useKeyboard()
 
+function commitUrl(repo: any): string {
+  const m = repo.clone_url.match(/github\.com[\/:]([^\/]+)\/([^\/\.]+)/)
+  if (!m || !repo.commit_sha) return '#'
+  return `https://github.com/${m[1]}/${m[2]}/commit/${repo.commit_sha}`
+}
+function openCommitUrl(repo: any) {
+  window.open(commitUrl(repo), '_blank')
+}
+
 const initialized = ref(false)
 
 onMounted(async () => {
@@ -186,9 +195,10 @@ watch(() => authStore.authenticated, async (val) => {
             <div v-for="repo in reposStore.repos" :key="repo.id" class="list-item">
               <div class="item-main">
                 <span class="item-title">{{ repo.repo }}</span>
+                <div class="item-meta-url">{{ repo.clone_url }}</div>
                 <div class="item-meta">
-                  <span class="item-meta-tag">{{ repo.clone_url }}</span>
                   <span class="item-meta-tag">分支: {{ repo.branch || 'main' }}</span>
+                  <span v-if="repo.commit_sha" class="commit-link" @click="openCommitUrl(repo)">{{ repo.commit_sha.slice(0, 7) }}</span>
                   <span v-if="repo.last_synced_at" class="item-meta-tag">最后同步: {{ new Date(repo.last_synced_at).toLocaleString() }}</span>
                 </div>
               </div>
@@ -217,3 +227,27 @@ watch(() => authStore.authenticated, async (val) => {
     </div>
   </Teleport>
 </template>
+
+<style>
+.item-meta-url {
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  word-break: break-all;
+  margin-top: var(--space-1);
+  line-height: 1.4;
+}
+.commit-link {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--primary-glow);
+  text-underline-offset: 2px;
+  transition: opacity var(--t-fast);
+}
+.commit-link:hover {
+  opacity: 0.75;
+}
+</style>

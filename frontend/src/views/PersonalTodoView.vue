@@ -1,20 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useTodoStore } from '@/stores/todo'
-import { useAppStore } from '@/stores/app'
-import { timeAgo } from '@/utils/helpers'
 import { useUsersStore } from '@/stores/users'
-import { useIntelStore } from '@/stores/intel'
 import { useReposStore } from '@/stores/repos'
 import { useRouter } from 'vue-router'
 import { statusLabel, sourceLabel, priorityClass, statusClass } from '@/utils/helpers'
+import type { TodoTask } from '@/utils/types'
 import { renderMarkdown } from '@/composables/useMarkdown'
 import Icon from '@/components/common/Icon.vue'
 
 const todoStore = useTodoStore()
-const appStore = useAppStore()
 const usersStore = useUsersStore()
-const intelStore = useIntelStore()
 const reposStore = useReposStore()
 const router = useRouter()
 
@@ -78,13 +74,13 @@ function onColumnDragEnter(e: DragEvent, priority: string) {
 function onColumnDragLeave(e: DragEvent) {
   // Only clear when the pointer truly leaves the column (relatedTarget is outside)
   const related = e.relatedTarget as Node | null
-  if (related && e.currentTarget && e.currentTarget.contains(related)) {
+  if (related && e.currentTarget && (e.currentTarget as HTMLElement).contains(related)) {
     return
   }
   dragOverPriority.value = null
 }
 
-function onColumnDrop(e: DragEvent, targetPriority: string) {
+function onColumnDrop(e: DragEvent, targetPriority: TodoTask['priority']) {
   e.preventDefault()
   const taskId = draggedTaskId.value
   draggedTaskId.value = null
@@ -214,7 +210,7 @@ async function generateInsight(task: any) {
               @dragover="onColumnDragOver"
               @dragenter="onColumnDragEnter($event, priority)"
               @dragleave="onColumnDragLeave($event)"
-              @drop="onColumnDrop($event, priority)">
+              @drop="onColumnDrop($event, priority as TodoTask['priority'])">
           <h3 class="kanban-column-title" :class="priorityClass(priority)">{{ priority }}</h3>
           <div v-for="task in items" :key="task.id" class="kanban-card"
                draggable="true"
@@ -237,7 +233,7 @@ async function generateInsight(task: any) {
                 <span>{{ ref.repo }}#{{ ref.number }}</span>
                 <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state">{{ ref.state }}</span>
               </span>
-              <span v-if="(task.related_refs || []).length > 2" class="kanban-tag">+{{ task.related_refs.length - 2 }}</span>
+              <span v-if="(task.related_refs || []).length > 2" class="kanban-tag">+{{ (task.related_refs || []).length - 2 }}</span>
               <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
               <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success kanban-tag-icon"><Icon name="check" :size="11" /> 无重复</span>
               <span v-if="task.has_ai_insight" class="kanban-tag is-info kanban-tag-icon"><Icon name="search" :size="11" /> 有洞察</span>
@@ -270,7 +266,7 @@ async function generateInsight(task: any) {
                 <span>{{ ref.repo }}#{{ ref.number }}</span>
                 <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state">{{ ref.state }}</span>
               </span>
-              <span v-if="(task.related_refs || []).length > 3" class="kanban-tag">+{{ task.related_refs.length - 3 }}</span>
+              <span v-if="(task.related_refs || []).length > 3" class="kanban-tag">+{{ (task.related_refs || []).length - 3 }}</span>
               <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
               <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success kanban-tag-icon"><Icon name="check" :size="11" /> 无重复</span>
               <span v-if="task.has_ai_insight" class="kanban-tag is-info kanban-tag-icon"><Icon name="search" :size="11" /> 有洞察</span>

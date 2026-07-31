@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 import { usePRCenterStore } from '@/stores/prCenter'
 import { useUsersStore } from '@/stores/users'
 import { useAppStore } from '@/stores/app'

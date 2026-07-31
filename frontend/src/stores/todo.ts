@@ -29,6 +29,7 @@ export const useTodoStore = defineStore('todo', () => {
   const taskDrawerLoading = ref(false)
   const editingTask = ref(false)
   const editTaskForm = ref<any>({})
+  const taskSaving = ref(false)
 
   // Dedup
   const dedupLoading = ref(false)
@@ -156,7 +157,7 @@ export const useTodoStore = defineStore('todo', () => {
     dedupResult.value = null
     subtasks.value = []
     showSubtaskForm.value = false
-    newSubtask.value = { title: '', priority: 'P2', assignee_id: null, related_refs: [], refInput: '' }
+    newSubtask.value = { title: '', description: '', priority: 'P2', assignee_id: null, related_refs: [], refInput: '' }
   }
 
   async function loadTaskDetails(taskId: number) {
@@ -490,7 +491,7 @@ export const useTodoStore = defineStore('todo', () => {
   }
 
   // Insight
-  async function moveTaskPriority(taskId: number, newPriority: string) {
+  async function moveTaskPriority(taskId: number, newPriority: TodoTask['priority']) {
     const idx = tasks.value.findIndex(t => t.id === taskId)
     if (idx < 0) return
     const oldPriority = tasks.value[idx].priority
@@ -588,7 +589,7 @@ export const useTodoStore = defineStore('todo', () => {
   return {
     tasks, todoStats, loading, filterStatus, filterPriority, sortBy, sortOrder,
     useKanban, showAddModal, newTask, newTaskLoading,
-    selectedTask, selectedTaskDetails, taskDrawerLoading, editingTask, editTaskForm,
+    selectedTask, selectedTaskDetails, taskDrawerLoading, editingTask, editTaskForm, taskSaving,
     dedupLoading, dedupResult, insightGenLoading,
     showInsightSourceModal, insightSourceTask, insightSourceSelected, insightSourceSaving,
     subtasks, subtasksLoading, showSubtaskForm, newSubtask,

@@ -7,6 +7,7 @@ import { useAnatomyStore } from '@/stores/anatomy'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useUsersStore } from '@/stores/users'
 import { useAIAgentStore } from '@/stores/aiAgent'
+import { useAppStore } from '@/stores/app'
 
 export function useKeyboard() {
   function handleKeydown(e: KeyboardEvent) {

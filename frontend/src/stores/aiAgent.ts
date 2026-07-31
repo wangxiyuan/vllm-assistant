@@ -302,7 +302,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
             case 'tool_result': {
               const steps = streamingSteps.value
               for (const s of steps) {
-                if (s.type === 'tool_call' && s.tool.result === undefined) {
+                if (s.type === 'tool_call' && s.tool && s.tool.result === undefined) {
                   s.tool.result = event.data.result
                   s.round = event.round
                   break
