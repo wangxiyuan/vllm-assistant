@@ -7,12 +7,14 @@
 """
 import json
 import logging
+import traceback
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import Config
@@ -784,6 +786,175 @@ def _refresh_personal_task_refs():
         db.close()
 
 
+def generate_daily_vllm_report():
+    """每天早上8点生成 vLLM 每日全景报告（指导贡献者新一天的贡献方向）"""
+    job_id = "daily_vllm_report"
+    if job_id in _running_jobs:
+        logger.debug(f"{job_id} already running, skipping")
+        return
+    _running_jobs.add(job_id)
+    try:
+        db = None
+        today_start = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+        from app.services.intelligence_report import IntelligenceReportGenerator
+        from app.models import IntelligenceReport
+
+        db = SessionLocal()
+        # 从 RepoCache 动态构建 sources 列表
+        active_repos = db.query(RepoCache).filter(
+            RepoCache.status == "active"
+        ).all()
+        repo_sources = [r.repo for r in active_repos]
+        sources = list(repo_sources)
+
+        # 检查今天是否已经生成过成功报告
+        today_start_dt = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d 00:00:00")
+        existing = db.query(IntelligenceReport).filter(
+            IntelligenceReport.category == "daily",
+            IntelligenceReport.status == "completed",
+            IntelligenceReport.created_at >= today_start_dt,
+        ).first()
+        if existing:
+            logger.info(f"Daily report already exists for {today_start}, skipping")
+            return
+
+        title = f"vLLM 每日全景报告 - {today_start}"
+
+        # 生成报告前释放 DB session（Agent 循环可能耗时 1-5 分钟，避免长时间占用 SQLite）
+        # 但 IntelligenceReportGenerator 需要 db 来构建 source_config，从 session 中提取所需数据后关闭
+        repo_clone_urls = {r.repo: r.clone_url for r in active_repos}
+
+        # 在关闭 DB 前，从知识库召回相关记忆，注入到 extra_prompt 中
+        memory_context = _build_daily_report_memory_context(db)
+        db.close()
+        db = None
+
+        generator = IntelligenceReportGenerator()
+        # 注入仓库信息到 generator，避免其自行查询 DB
+        generator._cached_source_config = {
+            r: {
+                "display_name": r,
+                "repos": [IntelligenceReportGenerator._parse_repo_url(repo_clone_urls[r])],
+                "type": "github",
+            }
+            for r in repo_sources
+            if repo_clone_urls.get(r)
+        }
+        REPORT_GENERATION_TIMEOUT = 600  # 10 分钟超时
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(
+            generator.generate_report,
+            task_title=title,
+            task_description=(
+                "请全面调研 vLLM 项目在过去24小时内发生的最新动态，"
+                "为vLLM贡献者提供一份全面的全景报告，包含以下内容：\n\n"
+                "## 核心内容要求\n"
+                "1. **昨日新增的 Issue/PR**：重点分析新提交的 issue 和 PR，"
+                "标注哪些是bug报告、哪些是feature request、哪些是WIP PR\n"
+                "2. **昨日新增 Commit 的 Bug 分析**：读取昨日合并的 PR 的 diff，"
+                "分析新提交的代码本身是否存在以下问题：\n"
+                "   - 逻辑缺陷（边界条件遗漏、错误处理缺失、并发安全问题）\n"
+                "   - 性能隐患（不必要的拷贝、O(n²) 复杂度、显存泄漏）\n"
+                "   - 设计问题（抽象不当、接口不兼容、未来扩展困难）\n"
+                "   - 测试不足（关键路径无覆盖、边界值未测试）\n"
+                "3. **最新代码质量评估**：关注昨日提交的代码本身的质量，包括：\n"
+                "   - 代码规范问题（命名、注释、类型标注）\n"
+                "   - 与现有架构的契合度（是否引入重复逻辑、是否破坏模块边界）\n"
+                "   - 向后兼容性（API 变更是否影响下游）\n"
+                "4. **SGLang 对比分析**：检查 SGLang 近期是否有新功能或改进，"
+                "评估 vLLM 是否缺失对应功能，是否需要补齐\n"
+                "5. **贡献机会推荐**：包括：\n"
+                "   - 初级：good first issue / help wanted（适合入门）\n"
+                "   - **专业：需要深入理解 vLLM 架构的改进方向**（如注意力机制优化、"
+                "调度策略改进、新硬件后端适配、显存管理优化、推理引擎重构）\n"
+                "   - **研究型：需要原型验证的前沿方向**（如新的投机解码策略、"
+                "量化方案适配、多模态扩展）\n"
+                "6. **架构变更提醒**：如果有重要架构变更的 PR，提醒贡献者关注\n\n"
+                "## 数据源和时间范围\n"
+                "- 主要搜索 vllm 主仓库最近24小时到48小时的 issue/PR\n"
+                "- 同时搜索 sglang 仓库最近24小时的新动态用于对比\n"
+                "- 获取各仓库的最新 release\n\n"
+                "## 报告风格\n"
+                "报告面向 vLLM 贡献者，使用中文，语言简洁务实。"
+                "每个 issue/PR 都要包含编号和链接，方便直接跳转。"
+                "对复杂问题给出简要技术分析，帮助读者快速理解。"
+            ),
+            sources=sources,
+            extra_prompt=(
+                "特别注意：\n"
+                "- 优先关注过去24小时内创建的 issue/PR，标记为【昨日新增】\n"
+                "- 对每个 issue/PR 简要说明其技术价值或影响范围\n"
+                "- **Commit Bug 分析要求**：首先用 search_issues(state=merged) 搜索最近24-48小时内合并的 PR，"
+                "然后用 get_pr_diff 读取这些 PR 的 diff，"
+                "从代码层面分析：\n"
+                "  1) 逻辑缺陷（错误处理、并发安全、边界条件）\n"
+                "  2) 性能隐患（不必要的拷贝、显存泄漏、复杂度）\n"
+                "  3) 设计问题（抽象不当、接口兼容性、扩展性）\n"
+                "  4) 测试覆盖（关键路径是否测试、边界值覆盖）\n"
+                "- 对昨日新增的 bug report，分析：影响范围、复现难度、修复方向\n"
+                "- 贡献机会要分三级：初级（good first issue）、"
+                "专业（架构改进、新后端适配、性能优化）、"
+                "研究型（新算法原型、新硬件探索）\n"
+                "- 如果发现 SGLang 有 vLLM 未实现的功能，单独列出并建议优先级\n"
+                "- 最后给出「今日贡献指南」：按难度和价值排序，今天做什么最有贡献"
+                f"{memory_context}"
+            ),
+        )
+        try:
+            result = future.result(timeout=REPORT_GENERATION_TIMEOUT)
+        except TimeoutError:
+            future.cancel()
+            logger.error("Daily report generation timed out after 10 minutes")
+            raise
+        finally:
+            executor.shutdown(wait=False)
+
+        report = IntelligenceReport(
+            title=title,
+            content=result["content"],
+            sources=json.dumps(result["sources"]),
+            status="completed",
+            category="daily",
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        db = SessionLocal()
+        db.add(report)
+        db.commit()
+        logger.info(f"Daily vLLM report generated: {title}")
+    except Exception:
+        logger.exception("Failed to generate daily vLLM report")
+        # 异常发生时 db 可能处于异常状态，重新获取 session
+        try:
+            if db is not None:
+                db.close()
+        except Exception:
+            pass
+        db = None
+        try:
+            db = SessionLocal()
+            failed_sources = json.dumps(locals().get("sources", ["academic", "news"]))
+            failed_report = IntelligenceReport(
+                title=f"vLLM 每日全景报告 - {today_start}（生成失败）",
+                content="",
+                sources=failed_sources,
+                status="failed",
+                category="daily",
+                error_message=traceback.format_exc(),
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+            db.add(failed_report)
+            db.commit()
+        except Exception:
+            logger.exception("Failed to write failed daily report status")
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
+        _running_jobs.discard(job_id)
+
+
 def start_scheduler():
     """启动定时调度器
 
@@ -869,6 +1040,16 @@ def start_scheduler():
         id="refresh_personal_task_refs",
         name="Refresh Personal Task Ref States",
         replace_existing=True,
+    )
+
+    # vLLM 每日全景报告（每天早上 8 点北京时间）
+    scheduler.add_job(
+        generate_daily_vllm_report,
+        trigger=CronTrigger(hour=8, minute=0, timezone="Asia/Shanghai"),
+        id="daily_vllm_report",
+        name="Daily vLLM Panorama Report",
+        replace_existing=True,
+        misfire_grace_time=3600,  # 允许 1 小时内错过的触发
     )
 
     scheduler.start()
@@ -1120,6 +1301,102 @@ def cleanup_old_data():
     - intelligence_reports 表：删除 failed 状态且超过 30 天的记录
     - 每周执行一次 VACUUM 回收磁盘空间
     """
+
+
+def _build_daily_report_memory_context(db) -> str:
+    """从知识库召回与日报相关的记忆，返回格式化文本注入到 extra_prompt"""
+    from app.services.memory_service import MemoryService
+
+    mem = MemoryService()
+    parts = []
+
+    # 1. 召回近期高频 issue/PR（了解社区热点和常见问题）
+    try:
+        issues = mem.recall(
+            query="vLLM bug issue PR 性能 功能",
+            top_k=8,
+            source_types=["issue", "pr"],
+            exclude_stale=True,
+        )
+        if issues:
+            lines = ["### 近期社区热点 Issue/PR"]
+            for item in issues:
+                title = (item.get("content") or "").split("\n")[0][:100]
+                ref = item.get("source_ref", "")
+                tags = ", ".join(item.get("tags", [])[:4])
+                lines.append(f"- {title} ({ref}) [{tags}]")
+            parts.append("\n".join(lines))
+    except Exception:
+        logger.warning("Failed to recall issues for daily report", exc_info=True)
+
+    # 2. 召回近期 Bug 报告和代码变更（为 commit diff 分析提供上下文）
+    try:
+        bugs = mem.recall(
+            query="bug 错误 异常 崩溃 失败 regression 回归 缺陷",
+            top_k=10,
+            source_types=["issue"],
+            tags=["bug", "regression", "critical"],
+            exclude_stale=True,
+        )
+        if bugs:
+            lines = ["### 当前待解决的 Bug"]
+            for item in bugs[:6]:
+                content = item.get("content") or ""
+                title = content.split("\n")[0][:120]
+                ref = item.get("source_ref", "")
+                tags = ", ".join(item.get("tags", [])[:4])
+                lines.append(f"- {title} ({ref}) [{tags}]")
+            lines.append("")
+            lines.append("> 提示：分析这些 bug 时，重点关注其根因是否在近期的 commit 中引入，"
+                         "评估修复时是否会影响现有代码结构。")
+            parts.append("\n".join(lines))
+    except Exception:
+        logger.warning("Failed to recall bugs for daily report", exc_info=True)
+
+    # 3. 召回最近的 intelligence report（参考之前报告的风格和内容）
+    try:
+        reports = mem.recall(
+            query="vLLM 每日全景报告 洞察报告 动态",
+            top_k=3,
+            source_types=["report"],
+            exclude_stale=True,
+        )
+        if reports:
+            lines = ["### 历史报告参考"]
+            for item in reports:
+                summary = (item.get("content") or "")[:200]
+                ref = item.get("source_ref", "")
+                lines.append(f"- {ref}: {summary}")
+            parts.append("\n".join(lines))
+    except Exception:
+        logger.warning("Failed to recall past reports", exc_info=True)
+
+    # 4. 召回架构相关知识（帮助 AI 理解代码上下文）
+    try:
+        arch = mem.recall(
+            query="vLLM 架构 模块 设计 attention scheduler 推理 引擎",
+            top_k=5,
+            source_types=["code_structure"],
+            tags=["code", "vllm"],
+            exclude_stale=True,
+        )
+        if arch:
+            lines = ["### 架构知识参考"]
+            for item in arch:
+                content = (item.get("content") or "")[:200]
+                ref = item.get("source_ref", "")
+                lines.append(f"- {ref}: {content}")
+            parts.append("\n".join(lines))
+    except Exception:
+        logger.warning("Failed to recall architecture knowledge", exc_info=True)
+
+    if not parts:
+        return ""
+
+    return "\n\n## 知识库参考信息\n" + "\n\n".join(parts)
+
+
+def cleanup_old_data():
     from app.models import FileChangeHistory, AICache, IntelligenceReport
     from sqlalchemy import text
 
@@ -1159,14 +1436,29 @@ def cleanup_old_data():
             deleted_cache = 0
             logger.debug(f"ai_cache has {total_cache} records (max {ai_cache_max}), no cleanup needed")
 
-        # 4. 清理 intelligence_reports 表：删除 failed 状态超过 30 天的
+        # 4. 清理 intelligence_reports 表：删除 stale 报告
+        #    - failed/daily 报告保留 30 天
+        #    - manual 非 daily 报告保留 retention_days
         failed_cutoff = now - timedelta(days=30)
-        deleted_reports = db.query(IntelligenceReport).filter(
+        # 删除 failed 状态超过 30 天的
+        deleted_failed = db.query(IntelligenceReport).filter(
             IntelligenceReport.status == "failed",
             IntelligenceReport.created_at < failed_cutoff,
         ).delete(synchronize_session=False)
-        if deleted_reports:
-            logger.info(f"Cleaned {deleted_reports} failed intelligence_reports")
+        if deleted_failed:
+            logger.info(f"Cleaned {deleted_failed} failed intelligence_reports")
+        # 删除 manual 非 daily 且超过 retention_days 的 completed 报告
+        manual_cutoff = now - timedelta(days=retention_days)
+        deleted_manual = db.query(IntelligenceReport).filter(
+            IntelligenceReport.status == "completed",
+            db.or_(
+                IntelligenceReport.category == "manual",
+                IntelligenceReport.category.is_(None),
+            ),
+            IntelligenceReport.created_at < manual_cutoff,
+        ).delete(synchronize_session=False)
+        if deleted_manual:
+            logger.info(f"Cleaned {deleted_manual} manual intelligence_reports older than {retention_days}d")
 
         db.commit()
 
@@ -1180,7 +1472,7 @@ def cleanup_old_data():
             logger.info("VACUUM completed")
 
         logger.info(f"Cleanup completed: {deleted_items} items, {deleted_fch} file_changes, "
-                     f"{deleted_cache} ai_cache, {deleted_reports} reports")
+                     f"{deleted_cache} ai_cache, {deleted_failed} failed_reports, {deleted_manual} manual_reports")
     except Exception:
         logger.exception("Error during data cleanup")
         db.rollback()

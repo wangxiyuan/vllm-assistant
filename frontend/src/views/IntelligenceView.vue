@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useIntelStore } from '@/stores/intel'
 import { useReposStore } from '@/stores/repos'
 import { renderMarkdown } from '@/composables/useMarkdown'
 
+const route = useRoute()
 const intelStore = useIntelStore()
 const reposStore = useReposStore()
 
@@ -19,9 +21,23 @@ const intelSourceOptions = computed(() => {
   ]
 })
 
-onMounted(() => {
-  intelStore.loadReports()
+onMounted(async () => {
+  await intelStore.loadReports()
   intelStore.loadIntelTasks()
+  // 如果 URL 中有 report_id 参数，自动打开报告
+  const reportId = route.query.report_id
+  if (reportId) {
+    const id = parseInt(reportId as string, 10)
+    if (!isNaN(id)) {
+      const found = intelStore.reports.find(r => r.id === id)
+      if (found) {
+        intelStore.viewReport(found)
+      } else {
+        // 报告不在当前列表（可能是刚生成还未加载），直接通过 API 获取
+        intelStore.viewReport({ id } as any)
+      }
+    }
+  }
 })
 </script>
 

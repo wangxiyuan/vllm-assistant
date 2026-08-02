@@ -2,6 +2,7 @@
 import Sidebar from './Sidebar.vue'
 import MobileSidebar from './MobileSidebar.vue'
 import Header from './Header.vue'
+import DailyReportBanner from '@/components/common/DailyReportBanner.vue'
 </script>
 
 <template>
@@ -10,6 +11,7 @@ import Header from './Header.vue'
     <MobileSidebar />
     <Header />
     <main class="main">
+      <DailyReportBanner />
       <router-view />
     </main>
   </div>

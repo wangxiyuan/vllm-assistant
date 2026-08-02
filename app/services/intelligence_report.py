@@ -27,13 +27,25 @@ MAX_TOOL_ROUNDS = 10
 class IntelligenceReportGenerator:
     """洞察报告生成器（Agent 模式）"""
 
-    @staticmethod
-    def _get_source_config(db=None) -> Dict[str, dict]:
-        """动态构建来源配置
+    def __init__(self, db=None):
+        self.client = get_github_client()
+        self.llm: Optional[LLMClient] = None
+        self.db = db
+        self._cached_source_config: Optional[dict] = None
 
-        从 RepoCache 读取已配置的仓库作为 GitHub 类型来源，
-        加上固定的 academic/news 来源。
-        """
+    @staticmethod
+    def _parse_repo_url(clone_url: str) -> str:
+        url = clone_url
+        if url.endswith('.git'):
+            url = url[:-4]
+        parts = url.rstrip('/').split('/')
+        if len(parts) >= 2:
+            return f"{parts[-2]}/{parts[-1]}"
+        return ""
+
+    def _get_source_config(self, db=None) -> Dict[str, dict]:
+        if self._cached_source_config is not None:
+            return self._cached_source_config
         config = {}
 
         # 从 RepoCache 动态构建 GitHub 类型来源
@@ -44,16 +56,9 @@ class IntelligenceReportGenerator:
                     RepoCache.status == "active"
                 ).all()
                 for r in repos:
-                    # 从 clone_url 解析 owner/repo
-                    clone_url = r.clone_url
-                    if clone_url.endswith('.git'):
-                        clone_url = clone_url[:-4]
-                    parts = clone_url.rstrip('/').split('/')
-                    if len(parts) >= 2:
-                        owner_repo = f"{parts[-2]}/{parts[-1]}"
-                    else:
+                    owner_repo = self._parse_repo_url(r.clone_url)
+                    if not owner_repo:
                         continue
-
                     config[r.repo] = {
                         "display_name": r.repo,
                         "repos": [owner_repo],
@@ -94,11 +99,6 @@ class IntelligenceReportGenerator:
             "search_memory",
         ])
 
-    def __init__(self, db=None):
-        self.client = get_github_client()
-        self.llm: Optional[LLMClient] = None
-        self.db = db  # 用于动态构建来源配置
-
     def _get_llm(self) -> LLMClient:
         if self.llm is None:
             self.llm = LLMClient()
@@ -117,9 +117,9 @@ class IntelligenceReportGenerator:
         AI 通过 function calling 自主搜索 GitHub issue/PR、读取正文和评论，
         多轮迭代后生成结构化的 Markdown 报告。
         """
-        effective_sources = self._resolve_sources(sources, excluded_sources, source_config)
-
         source_config = self._get_source_config(self.db)
+
+        effective_sources = self._resolve_sources(sources, excluded_sources, source_config)
 
         # 构建可用仓库列表
         github_repos = []
@@ -755,7 +755,10 @@ class IntelligenceReportGenerator:
 
         query_parts = [f"repo:{repo}"]
         state = args.get("state", "all")
-        if state in ("open", "closed"):
+        if state == "merged":
+            query_parts.append("is:pr")
+            query_parts.append("is:merged")
+        elif state in ("open", "closed"):
             query_parts.append(f"is:{state}")
 
         days_back = args.get("days_back", 90)

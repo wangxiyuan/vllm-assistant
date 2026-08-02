@@ -129,6 +129,7 @@ export interface IntelReport {
   extra_prompt?: string
   created_at: string
   status: 'generating' | 'completed' | 'failed'
+  category?: string
   word_count: number
   error_message?: string
   content?: string

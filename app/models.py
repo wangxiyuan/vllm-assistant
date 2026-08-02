@@ -377,6 +377,7 @@ class IntelligenceReport(Base):
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     status = Column(String(20), default="completed")  # generating / completed / failed
     error_message = Column(Text)
+    category = Column(String(50), default="manual", index=True)  # daily / manual
 
     def to_dict(self, include_content: bool = False, task_title: str = None) -> Dict[str, Any]:
         d = {
@@ -389,6 +390,7 @@ class IntelligenceReport(Base):
             "extra_prompt": self.extra_prompt or "",
             "created_at": _iso_utc(self.created_at),
             "status": self.status,
+            "category": self.category or "manual",
             "error_message": self.error_message,
             "word_count": len((self.content or "").split()) if self.content else 0,
         }

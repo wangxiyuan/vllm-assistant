@@ -33,6 +33,20 @@ async def list_reports(db: Session = Depends(get_db)):
     return {"reports": result}
 
 
+@router.get("/reports/daily/latest")
+async def get_latest_daily_report(db: Session = Depends(get_db)):
+    """获取最新一份 vLLM 每日全景报告"""
+    today_start = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d 00:00:00")
+    report = db.query(IntelligenceReport).filter(
+        IntelligenceReport.category == "daily",
+        IntelligenceReport.status == "completed",
+        IntelligenceReport.created_at >= today_start,
+    ).order_by(IntelligenceReport.created_at.desc()).first()
+    if not report:
+        return {"report": None}
+    return {"report": report.to_dict(include_content=True)}
+
+
 @router.get("/reports/{report_id}")
 async def get_report(report_id: int, db: Session = Depends(get_db)):
     """获取洞察报告详情（DESIGN-PERSONAL-TODO.md 3.3 GET 详情）"""
