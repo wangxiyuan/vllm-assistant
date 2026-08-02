@@ -6,6 +6,7 @@ Agent 模式：通过 OpenAI function calling，让 AI 自主决定搜索什么�
 """
 import json
 import logging
+import os
 import re
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -79,6 +80,29 @@ class IntelligenceReportGenerator:
             "type": "web",
             "description": "行业新闻、版本发布信息",
         }
+
+        # Slack 来源（凭证有效时注册）
+        has_slack_creds = bool(Config.SLACK_TOKEN and Config.SLACK_COOKIE)
+        if not has_slack_creds:
+            try:
+                from app.database import SessionLocal
+                from app.models import SlackConfig
+                db_s = SessionLocal()
+                try:
+                    sc = db_s.query(SlackConfig).first()
+                    if sc and sc.token and sc.cookie:
+                        has_slack_creds = True
+                finally:
+                    db_s.close()
+            except Exception:
+                pass
+
+        if has_slack_creds:
+            config["slack"] = {
+                "display_name": "Slack 社群讨论",
+                "type": "slack",
+                "description": "vLLM Slack 工作区各频道的讨论消息",
+            }
 
         return config
 
@@ -324,6 +348,12 @@ class IntelligenceReportGenerator:
                     parts.append(
                         f"同时调用 get_github_releases 获取 {github_repos[0] if github_repos else '已配置仓库'} 的最近 release。"
                     )
+                if "slack" in effective_sources:
+                    parts.append(
+                        "同时调用 search_memory 搜索 Slack 社群讨论。"
+                        "用关键词如 `vLLM Slack 讨论 问题`，"
+                        "指定 tags 参数为 `slack` 来筛选 Slack 内容。"
+                    )
                 return "\n".join(parts)
             return ""  # 后续搜索轮让 AI 自由发挥
 
@@ -419,6 +449,19 @@ class IntelligenceReportGenerator:
                             news_lines.append(f"- {r['tag']} ({r.get('published_at', '')})")
                             news_lines.append(f"  {r.get('body', '')[:200]}")
                     sections.append("\n".join(news_lines))
+                elif source == "slack":
+                    slack_result = self._execute_tool("search_memory", {
+                        "query": "vLLM Slack 讨论 问题",
+                        "top_k": 10,
+                        "tags": "slack",
+                    })
+                    if slack_result.get("results"):
+                        lines = ["Slack 社群讨论:"]
+                        for item in slack_result["results"][:10]:
+                            lines.append(f"- {item.get('content', '')[:200]}")
+                        sections.append("\n".join(lines))
+                    else:
+                        sections.append("Slack 社群讨论: 未找到相关内容（可能未配置 Slack 采集）")
             except Exception:
                 logger.exception(f"Failed to collect data from source '{source}' in single-shot mode")
                 display_name = source_config.get(source, {}).get("display_name", source)
@@ -570,6 +613,8 @@ class IntelligenceReportGenerator:
                 source_descriptions.append(f"- {name}（用户提供的论文信息，见下方补充）")
             elif s == "news":
                 source_descriptions.append(f"- {name}（基于你的已有知识）")
+            elif s == "slack":
+                source_descriptions.append(f"- {name}（通过 search_memory 搜索 tags=slack 获取）")
 
         sources_text = "\n".join(source_descriptions) if source_descriptions else "无"
         repos_text = ", ".join(github_repos) if github_repos else "无"
@@ -619,13 +664,15 @@ class IntelligenceReportGenerator:
 - **search_web**：在互联网上搜索行业新闻、技术文章、博客等。用于了解业界动态、竞品信息。
   - 默认使用 Tavily 兼容协议，无需额外配置。
 - **extract_web_content**：从指定 URL 提取清洁的文本内容。当搜索结果中的某篇文章需要深入了解时，用此工具获取完整正文。
+- **search_memory**：搜索本地知识库，包括 Slack 社群讨论、历史报告等。当包含 Slack 来源时，用关键词如 `vLLM Slack 讨论` 并指定 tags=slack 来检索。
 
 ## 工作原则
 1. **搜索要高效**：每个仓库搜索 1-2 次即可，用核心关键词，不要用长句。不同轮用不同关键词。
 2. **深入要聚焦**：搜索后选出 5-8 个最相关的条目读详情，优先 RFC issue 和高评论量的 issue。
 3. **学术用 arXiv**：如果包含学术来源，用英文关键词调 search_arxiv 搜 1 次即可。**如果任务标题是中文，请先将其翻译成英文关键词再搜索**。
 4. **新闻用 search_web + release**：如果包含新闻来源，先用 search_web 搜索行业新闻，再调 get_github_releases 获取真实版本信息，不要编造版本号。
-5. **报告要基于证据**：每个结论引用具体 issue/PR 编号或论文标题。不确定的内容不要编造。
+5. **Slack 用 search_memory**：如果包含 Slack 来源，用 search_memory 搜索 tags=slack 获取社群讨论内容。
+6. **报告要基于证据**：每个结论引用具体 issue/PR 编号或论文标题。不确定的内容不要编造。
 6. **接受局限性**：你的搜索轮次有限，不可能遍历所有 issue/PR。对于未能深入调研的部分，在报告中提供 GitHub 搜索链接和关键词建议，让用户自行深入。这比假装覆盖了所有内容更有价值。
 7. 会按阶段引导你：先搜索，再深入，最后生成报告。
 

@@ -19,7 +19,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import Config
 from app.database import SessionLocal
-from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask, RepoCache
+from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask, RepoCache, SlackConfig
 from app.services.github_client import GitHubClient, DEFAULT_PER_PAGE
 from app.services.area_mapper import AreaMapper
 
@@ -896,7 +896,8 @@ def generate_daily_vllm_report():
                 "专业（架构改进、新后端适配、性能优化）、"
                 "研究型（新算法原型、新硬件探索）\n"
                 "- 如果发现 SGLang 有 vLLM 未实现的功能，单独列出并建议优先级\n"
-                "- 最后给出「今日贡献指南」：按难度和价值排序，今天做什么最有贡献"
+                "- 最后给出「今日贡献指南」：按难度和价值排序，今天做什么最有贡献\n"
+                "- 分析 Slack 社群讨论中的热点问题和求助方向，识别对贡献者有价值的线索"
                 f"{memory_context}"
             ),
         )
@@ -953,6 +954,17 @@ def generate_daily_vllm_report():
             except Exception:
                 pass
         _running_jobs.discard(job_id)
+
+
+def collect_slack_messages():
+    """定时采集 Slack 消息到知识库"""
+    from app.services.slack_collector import SlackCollector
+    collector = SlackCollector()
+    stats = collector.collect()
+    if "error" not in stats:
+        logger.info(f"Slack collection complete: {stats}")
+    else:
+        logger.info(f"Slack collection skipped: {stats.get('error')}")
 
 
 def start_scheduler():
@@ -1050,6 +1062,17 @@ def start_scheduler():
         name="Daily vLLM Panorama Report",
         replace_existing=True,
         misfire_grace_time=3600,  # 允许 1 小时内错过的触发
+    )
+
+    # Slack 消息采集（默认 6 小时间隔，由 SlackConfig 表控制）
+    # 定时任务本身每 30 分钟触发一次，但内部检查凭证和配置，无配置时跳过
+    scheduler.add_job(
+        collect_slack_messages,
+        trigger=IntervalTrigger(minutes=30),
+        id="collect_slack",
+        name="Collect Slack Messages",
+        replace_existing=True,
+        misfire_grace_time=600,
     )
 
     scheduler.start()
@@ -1389,6 +1412,24 @@ def _build_daily_report_memory_context(db) -> str:
             parts.append("\n".join(lines))
     except Exception:
         logger.warning("Failed to recall architecture knowledge", exc_info=True)
+
+    # 5. 召回 Slack 社群讨论
+    try:
+        slack_msgs = mem.recall(
+            query="vLLM Slack 讨论 问题 求助 反馈",
+            top_k=15,
+            source_types=["slack"],
+            tags=["slack"],
+            exclude_stale=True,
+        )
+        if slack_msgs:
+            lines = ["### Slack 社群讨论"]
+            for item in slack_msgs:
+                content = (item.get("content") or "")[:200]
+                lines.append(f"- {content}")
+            parts.append("\n".join(lines))
+    except Exception:
+        logger.warning("Failed to recall slack messages", exc_info=True)
 
     if not parts:
         return ""

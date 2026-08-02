@@ -52,6 +52,15 @@ class Config:
     # 数据清理间隔（小时）
     CLEANUP_INTERVAL: int = int(os.getenv("CLEANUP_INTERVAL", "24"))
 
+    # ===== Slack 采集配置 =====
+    # slackdump 凭证文件路径（容器内路径，可选）
+    # 凭证通过 slackdump -auth 在服务器上生成
+    SLACKDUMP_CRED_FILE: str = os.getenv("SLACKDUMP_CRED_FILE", "/app/data/slack_cred.json")
+    # Slack xoxc token（从浏览器 DevTools 获取，可选）
+    SLACK_TOKEN: str = os.getenv("SLACK_TOKEN", "")
+    # Slack xoxd cookie（从浏览器 DevTools 获取，可选）
+    SLACK_COOKIE: str = os.getenv("SLACK_COOKIE", "")
+
     @classmethod
     def validate(cls) -> bool:
         if not cls.GITHUB_PAT:

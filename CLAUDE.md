@@ -179,3 +179,43 @@ ip1 Nginx 0.0.0.0:9527  →  ip2 宿主机 :9527  →  容器内 :9527
 | ip2 宿主机 | `9527` | 宿主机端口（由 `docker-compose.yml` 的 `${PORT:-8000}` 决定） |
 | ip2 容器内 | `9527` | 应用服务监听端口（通过 `.env` 中 `PORT=9527` 配置） |
 | ip1 → ip2 透传 | `ip2:9527` | Nginx `proxy_pass` 目标地址 |
+
+---
+
+## 四、Slack 消息采集配置
+
+Slack 消息采集功能通过 Slack Web API 直接获取频道消息，存入知识库，供 AI 在生成报告和对话时参考。
+
+### 1. 获取凭证（SLACK_TOKEN + SLACK_COOKIE）
+
+打开浏览器访问你的 Slack 工作区（如 `https://vllm-workspace.slack.com`）并登录，按 F12 打开开发者工具：
+
+**获取 xoxc token：**
+
+- 切换到 **Console** 标签
+- 粘贴以下代码后回车：
+  ```javascript
+  JSON.parse(localStorage.localConfig_v2).teams[document.location.pathname.match(/^\/client\/([A-Z0-9]+)/)[1]].token
+  ```
+- 复制输出的一长串 `xoxc-` 开头的值
+
+**获取 xoxd cookie：**
+
+- 切换到 **Application**（Chrome）或 **Storage**（Firefox）标签
+- 展开左侧 **Cookies**，选择 `slack.com`
+- 找到名为 `d` 的 cookie，复制其 **Value** 列的值
+
+### 2. 配置到 .env
+
+```env
+SLACK_TOKEN=xoxc-xxxxxxxxxx-xxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SLACK_COOKIE=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### 3. 通过前端配置频道
+
+部署后，在左侧导航栏底部点击 **Slack 配置** 按钮，添加频道（如 `#general`、`#development`），保存后定时任务会自动采集。也可手动触发采集测试。
+
+### 4. 无配置时的行为
+
+不配置 `SLACK_TOKEN` 和 `SLACK_COOKIE` 时，Slack 采集功能自动跳过，不影响其他功能。日志中会提示 `Slack credentials not configured`。

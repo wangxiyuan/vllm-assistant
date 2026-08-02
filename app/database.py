@@ -398,12 +398,37 @@ def _ensure_my_prs_repo_column():
             raise
 
 
+def _ensure_slack_configs_schema():
+    """确保 slack_configs 表包含 token, cookie 列（向后兼容迁移）"""
+    from sqlalchemy import inspect, DDL
+
+    with engine.connect() as conn:
+        try:
+            existing_cols = {c["name"] for c in inspect(conn).get_columns("slack_configs")}
+        except Exception:
+            return
+
+        migrations = {
+            "token": "ALTER TABLE slack_configs ADD COLUMN token TEXT DEFAULT ''",
+            "cookie": "ALTER TABLE slack_configs ADD COLUMN cookie TEXT DEFAULT ''",
+        }
+
+        for col_name, ddl in migrations.items():
+            if col_name not in existing_cols:
+                try:
+                    conn.execute(DDL(ddl))
+                    conn.commit()
+                except Exception as e:
+                    logger.warning(f"Failed to add column {col_name} to slack_configs: {e}")
+
+
 _ensure_indexes()
 _ensure_fts_triggers()
 _ensure_repo_caches_schema()
 _ensure_items_repo_column()
 _ensure_watchlist_repo_column()
 _ensure_my_prs_repo_column()
+_ensure_slack_configs_schema()
 # 重建表会丢失索引，迁移后重新补建
 _ensure_indexes()
 

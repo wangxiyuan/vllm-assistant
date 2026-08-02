@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from starlette.staticfiles import StaticFiles as StarletteStaticFiles
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -220,6 +220,7 @@ from app.api.model_anatomy import router as model_anatomy_router
 from app.api.users import router as users_router
 from app.api.repos import router as repos_router
 from app.api.ai_agent import router as ai_agent_router
+from app.api.slack import router as slack_router
 
 app.include_router(community_router, prefix="/api/community", tags=["Community Pulse"])
 app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command Center"])
@@ -233,6 +234,7 @@ app.include_router(model_anatomy_router, prefix="/api/anatomy", tags=["Model Ana
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(repos_router, prefix="/api/repos", tags=["Repos"])
 app.include_router(ai_agent_router, prefix="/api/ai-agent", tags=["AI Agent"])
+app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])
 
 
 # 静态文件

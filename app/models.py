@@ -748,3 +748,33 @@ class QuickPrompt(Base):
     sort_order = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+class SlackConfig(Base):
+    """Slack 采集配置"""
+    __tablename__ = "slack_configs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token = Column(Text)  # Slack xoxc token（前端配置）
+    cookie = Column(Text)  # Slack xoxd cookie（前端配置）
+    channels = Column(Text)  # JSON 数组，如 '["#general","#development"]'
+    collect_interval = Column(Integer, default=360)  # 采集间隔（分钟）
+    cred_exists = Column(Boolean, default=False)
+    last_collect_at = Column(DateTime)
+    total_messages = Column(Integer, default=0)
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "token": bool(self.token),
+            "cookie": bool(self.cookie),
+            "cred_exists": self.cred_exists or False,
+            "channels": json.loads(self.channels) if self.channels else [],
+            "collect_interval": self.collect_interval or 360,
+            "last_collect_at": _iso_utc(self.last_collect_at),
+            "total_messages": self.total_messages or 0,
+            "updated_at": _iso_utc(self.updated_at),
+            "created_at": _iso_utc(self.created_at),
+        }

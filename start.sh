@@ -123,6 +123,14 @@ if [ -z "$VLLM_ASSISTANT_PAT" ]; then
 fi
 
 print_success "配置验证通过"
+
+# Slack 凭证检查
+if [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_COOKIE" ]; then
+    print_success "Slack 凭证已配置"
+else
+    print_info "Slack 凭证未配置，Slack 消息采集功能不可用"
+    print_info "如需使用，请参考 .env.example 中的说明获取 SLACK_TOKEN 和 SLACK_COOKIE"
+fi
 echo ""
 
 # 构建前端（Vue 3 SPA）

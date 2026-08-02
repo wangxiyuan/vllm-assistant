@@ -269,6 +269,28 @@ if [ $NEED_CONFIG -eq 1 ]; then
 fi
 
 # ============================================================================
+# Slack 凭证检查与引导
+# ============================================================================
+print_step "Slack 凭证检查"
+if [ -n "${SLACK_TOKEN}" ] && [ -n "${SLACK_COOKIE}" ]; then
+    print_success "Slack 凭证已配置（环境变量）"
+else
+    print_info "Slack 凭证未配置"
+    echo "  如果需要 Slack 消息采集功能，请从浏览器 DevTools 获取凭证："
+    echo "    1. 打开 vLLM Slack → F12 → Application → Cookies → slack.com"
+    echo "    2. 复制 d cookie 的值作为 SLACK_COOKIE"
+    echo "    3. 在 Network 标签找任意请求的 Authorization header"
+    echo "       获取 xoxc- 开头的值作为 SLACK_TOKEN"
+    echo "    4. 添加到 .env 文件"
+    echo ""
+    echo "  或者通过容器内的 slackdump 生成凭证："
+    echo "    docker exec -it vllm-assistant slackdump workspace new vllm"
+    echo ""
+    echo "  不配置则 Slack 采集功能不可用，不影响其他功能。"
+    echo ""
+fi
+
+# ============================================================================
 # 检测当前部署状态，决定是否重建
 # ============================================================================
 print_step "检测部署状态"
