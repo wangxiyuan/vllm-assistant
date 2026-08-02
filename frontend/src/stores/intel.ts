@@ -21,6 +21,7 @@ export const useIntelStore = defineStore('intel', () => {
   const reportDetails = ref<any>(null)
   const reportModalLoading = ref(false)
   const pollingTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+  const dailyGenLoading = ref(false)
 
   async function loadReports() {
     loading.value = true
@@ -298,6 +299,24 @@ export const useIntelStore = defineStore('intel', () => {
     }
   }
 
+  async function triggerDailyReport() {
+    if (dailyGenLoading.value) return
+    dailyGenLoading.value = true
+    try {
+      const result: any = await api('/api/intelligence/reports/daily/trigger', { method: 'POST' })
+      if (result.status === 'skipped') {
+        useAppStore().showToast('无需生成', result.message, 'info', 5000)
+      } else {
+        useAppStore().showToast('每日报告生成中', result.message, 'success', 6000)
+        setTimeout(() => loadReports(), 5000)
+      }
+    } catch (e: any) {
+      useAppStore().showToast('触发失败', e.message, 'error')
+    } finally {
+      dailyGenLoading.value = false
+    }
+  }
+
   function intelSourceLabel(source: string): string {
     const map: Record<string, string> = { academic: '学术', news: '新闻' }
     return map[source] || source
@@ -312,7 +331,8 @@ export const useIntelStore = defineStore('intel', () => {
     selectedReport, reportDetails, reportModalLoading, pollingTimer,
     loadReports, loadIntelTasks, openModal, toggleSource, isSourceSelected,
     generateReport, pollReportStatus, viewReport, closeReport,
-    deleteReport, regenerateReport, copyReportMarkdown,
+    deleteReport, regenerateReport, copyReportMarkdown, triggerDailyReport,
+    dailyGenLoading,
     intelSourceLabel, intelSourceClass,
   }
 })

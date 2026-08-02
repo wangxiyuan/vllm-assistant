@@ -46,8 +46,12 @@ onMounted(async () => {
     <div class="view-header">
       <h2 class="view-title">洞察面板</h2>
       <div class="view-actions">
+        <button class="btn btn-primary btn-sm" :disabled="intelStore.dailyGenLoading" @click="intelStore.triggerDailyReport()">
+          <svg v-if="intelStore.dailyGenLoading" class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          {{ intelStore.dailyGenLoading ? '生成中…' : '生成每日报告' }}
+        </button>
         <button class="btn btn-primary btn-sm" @click="intelStore.openModal()">
-          + 生成报告
+          + 生成自定义报告
         </button>
       </div>
     </div>
@@ -56,9 +60,12 @@ onMounted(async () => {
       <div v-for="report in intelStore.reports" :key="report.id" class="report-card" @click="intelStore.viewReport(report)">
         <div class="report-header">
           <h3 class="report-title">{{ report.title || '无标题' }}</h3>
-          <span class="badge" :class="'status-' + report.status">
-            {{ report.status === 'completed' ? '已完成' : report.status === 'generating' ? '生成中' : '失败' }}
-          </span>
+          <div class="report-header-badges">
+            <span v-if="report.category === 'daily'" class="badge badge-daily">每日</span>
+            <span class="badge" :class="'status-' + report.status">
+              {{ report.status === 'completed' ? '已完成' : report.status === 'generating' ? '生成中' : '失败' }}
+            </span>
+          </div>
         </div>
         <div class="report-meta">
           <span v-if="report.task_title" class="meta-item" @click.stop="intelStore.viewReport(report)" title="触发任务">触发任务: <strong>{{ report.task_title }}</strong></span>

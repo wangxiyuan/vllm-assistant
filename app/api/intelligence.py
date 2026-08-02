@@ -6,6 +6,7 @@ Intelligence Reports API - 情报面板洞察报告
 """
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -72,3 +73,33 @@ async def delete_report(report_id: int, db: Session = Depends(get_db)):
     db.delete(report)
     db.commit()
     return {"deleted": True}
+
+
+@router.post("/reports/daily/trigger")
+async def trigger_daily_report():
+    """手动触发每日全景报告生成"""
+    from datetime import datetime, timezone
+    from app.database import SessionLocal
+    from app.models import IntelligenceReport
+    from app.scheduler import generate_daily_vllm_report, _running_jobs
+
+    job_id = "daily_vllm_report"
+    if job_id in _running_jobs:
+        return {"status": "skipped", "message": "每日报告正在生成中，请稍候"}
+
+    today_start = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d 00:00:00")
+    db = SessionLocal()
+    try:
+        existing = db.query(IntelligenceReport).filter(
+            IntelligenceReport.category == "daily",
+            IntelligenceReport.status == "completed",
+            IntelligenceReport.created_at >= today_start,
+        ).first()
+        if existing:
+            return {"status": "skipped", "message": "今日每日报告已存在，如需重新生成请先删除旧报告"}
+    finally:
+        db.close()
+
+    thread = threading.Thread(target=generate_daily_vllm_report, daemon=True)
+    thread.start()
+    return {"status": "triggered", "message": "每日报告正在生成中，预计需要 2-10 分钟"}

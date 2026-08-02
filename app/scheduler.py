@@ -818,7 +818,7 @@ def generate_daily_vllm_report():
             logger.info(f"Daily report already exists for {today_start}, skipping")
             return
 
-        title = f"vLLM 每日全景报告 - {today_start}"
+        title = f"[{today_start}][每日]vLLM 全景报告"
 
         # 生成报告前释放 DB session（Agent 循环可能耗时 1-5 分钟，避免长时间占用 SQLite）
         # 但 IntelligenceReportGenerator 需要 db 来构建 source_config，从 session 中提取所需数据后关闭
@@ -935,7 +935,7 @@ def generate_daily_vllm_report():
             db = SessionLocal()
             failed_sources = json.dumps(locals().get("sources", ["academic", "news"]))
             failed_report = IntelligenceReport(
-                title=f"vLLM 每日全景报告 - {today_start}（生成失败）",
+                title=f"[{today_start}][每日]vLLM 全景报告（生成失败）",
                 content="",
                 sources=failed_sources,
                 status="failed",
