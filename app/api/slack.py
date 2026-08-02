@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import AIMemory, SlackConfig
+from app.models import AIMemory, SlackConfig, _iso_utc
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -21,6 +21,7 @@ class SlackConfigUpdate(BaseModel):
     cookie: str = ""
     channels: list[str] = []
     collect_interval: int = 360
+    collect_lookback: int = 1440
 
 
 def _utcnow() -> datetime:
@@ -58,6 +59,7 @@ async def update_slack_config(req: SlackConfigUpdate, db: Session = Depends(get_
         config.cookie = req.cookie
     config.channels = json.dumps(req.channels)
     config.collect_interval = req.collect_interval
+    config.collect_lookback = req.collect_lookback or 1440
     config.cred_exists = bool(req.token and req.cookie)
     config.updated_at = _utcnow()
     db.commit()
@@ -107,11 +109,15 @@ async def get_slack_status(db: Session = Depends(get_db)):
     cred_exists = collector.has_credentials()
     config = _get_or_create_config(db)
     total = db.query(AIMemory).filter(AIMemory.source_type == "slack").count()
+    cred_valid = collector.check_credential() if cred_exists else False
     return {
         "cred_exists": cred_exists or config.cred_exists or False,
-        "last_collect_at": config.last_collect_at.isoformat() if config.last_collect_at else None,
+        "cred_valid": cred_valid,
+        "last_collect_at": _iso_utc(config.last_collect_at),
         "total_messages": total,
         "collect_interval": config.collect_interval or 360,
+        "collect_lookback": config.collect_lookback or 1440,
+        "last_refresh_at": _iso_utc(config.last_refresh_at),
     }
 
 
@@ -131,6 +137,18 @@ async def trigger_collect(db: Session = Depends(get_db)):
     collector = SlackCollector()
     stats = collector.collect()
     return stats
+
+
+@router.post("/refresh-token")
+async def refresh_slack_token(db: Session = Depends(get_db)):
+    """手动触发凭证刷新"""
+    from app.services.slack_collector import SlackCollector
+    collector = SlackCollector()
+    ok = collector._refresh_credentials()
+    if ok:
+        config = _get_or_create_config(db)
+        return {"ok": True, **config.to_dict()}
+    return {"ok": False, "error": "refresh failed, check SLACK_EMAIL / SLACK_PASSWORD in .env"}
 
 
 @router.post("/test-auth")

@@ -759,22 +759,26 @@ class SlackConfig(Base):
     cookie = Column(Text)  # Slack xoxd cookie（前端配置）
     channels = Column(Text)  # JSON 数组，如 '["#general","#development"]'
     collect_interval = Column(Integer, default=360)  # 采集间隔（分钟）
+    collect_lookback = Column(Integer, default=1440)  # 每次采集回溯多少分钟的数据（默认1天）
     cred_exists = Column(Boolean, default=False)
     last_collect_at = Column(DateTime)
     total_messages = Column(Integer, default=0)
+    last_refresh_at = Column(DateTime)  # 最近一次成功刷新凭证的时间
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
-            "token": bool(self.token),
-            "cookie": bool(self.cookie),
+            "token": self.token or "",
+            "cookie": self.cookie or "",
             "cred_exists": self.cred_exists or False,
             "channels": json.loads(self.channels) if self.channels else [],
             "collect_interval": self.collect_interval or 360,
+            "collect_lookback": self.collect_lookback or 1440,
             "last_collect_at": _iso_utc(self.last_collect_at),
             "total_messages": self.total_messages or 0,
+            "last_refresh_at": _iso_utc(self.last_refresh_at),
             "updated_at": _iso_utc(self.updated_at),
             "created_at": _iso_utc(self.created_at),
         }

@@ -30,14 +30,7 @@ WORKDIR /build/frontend
 RUN npm install && npm run build
 
 # ============================================================================
-# 阶段三：slackdump 构建
-# ============================================================================
-FROM golang:1.22-alpine AS slackdump-builder
-
-RUN go install github.com/rusq/slackdump/v4/cmd/slackdump@latest
-
-# ============================================================================
-# 阶段四：运行镜像
+# 阶段三：运行镜像
 # ============================================================================
 FROM python:3.12-slim
 
@@ -53,9 +46,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 从 Python 构建阶段复制已安装的依赖
 COPY --from=python-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=python-builder /usr/local/bin /usr/local/bin
-
-# 从 slackdump 构建阶段复制二进制
-COPY --from=slackdump-builder /go/bin/slackdump /usr/local/bin/slackdump
 
 # 复制应用源代码
 COPY app/ ./app/

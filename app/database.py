@@ -399,7 +399,7 @@ def _ensure_my_prs_repo_column():
 
 
 def _ensure_slack_configs_schema():
-    """确保 slack_configs 表包含 token, cookie 列（向后兼容迁移）"""
+    """确保 slack_configs 表包含必要列（向后兼容迁移）"""
     from sqlalchemy import inspect, DDL
 
     with engine.connect() as conn:
@@ -411,6 +411,8 @@ def _ensure_slack_configs_schema():
         migrations = {
             "token": "ALTER TABLE slack_configs ADD COLUMN token TEXT DEFAULT ''",
             "cookie": "ALTER TABLE slack_configs ADD COLUMN cookie TEXT DEFAULT ''",
+            "collect_lookback": "ALTER TABLE slack_configs ADD COLUMN collect_lookback INTEGER DEFAULT 1440",
+            "last_refresh_at": "ALTER TABLE slack_configs ADD COLUMN last_refresh_at DATETIME",
         }
 
         for col_name, ddl in migrations.items():

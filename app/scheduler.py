@@ -964,7 +964,10 @@ def collect_slack_messages():
     if "error" not in stats:
         logger.info(f"Slack collection complete: {stats}")
     else:
-        logger.info(f"Slack collection skipped: {stats.get('error')}")
+        err = stats.get("error", "")
+        logger.info(f"Slack collection skipped: {err}")
+        if "auth failed" in err:
+            logger.warning("Slack 凭证已过期，请通过前端配置页面重新设置 token 和 cookie")
 
 
 def start_scheduler():

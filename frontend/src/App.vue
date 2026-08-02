@@ -26,6 +26,7 @@ const router = useRouter()
 useKeyboard()
 
 const showSlackDropdown = ref(false)
+const showCredGuide = ref(false)
 const highlightedSlackIdx = ref(0)
 const slackSearchInput = ref('')
 const slackInputRef = ref<HTMLInputElement | null>(null)
@@ -40,13 +41,7 @@ const filteredSlackChannels = computed(() => {
 })
 
 function updateSlackDropdownPosition() {
-  if (!slackInputRef.value) return
-  const rect = slackInputRef.value.getBoundingClientRect()
-  slackDropdownStyle.value = {
-    top: rect.bottom + 4 + 'px',
-    left: rect.left + 'px',
-    width: rect.width + 'px',
-  }
+  slackDropdownStyle.value = {}
 }
 
 function onSlackSearchInput() {
@@ -92,6 +87,11 @@ function copyText(text: string) {
     document.body.removeChild(ta)
     useAppStore().showToast('已复制', '', 'success')
   })
+}
+
+function copySubmitScript() {
+  const script = `(async()=>{try{const teams=JSON.parse(localStorage.localConfig_v2||localStorage.localConfig||'{}').teams||{};const m=document.location.pathname.match(/^\\/client\\/([A-Z0-9]+)/);const teamId=m?m[1]:Object.keys(teams)[0];const token=teamId?teams[teamId]?.token||teams[teamId]:'';if(!token)return alert('no token found');copy(token);alert('xoxc token \\u5df2\\u590d\\u5236\\uff01\\n\\n\\u4e0b\\u4e00\\u6b65\\uff1a\\u624b\\u52a8\\u590d\\u5236 d cookie\\nF12 \\u2192 Application \\u2192 Cookies \\u2192 slack.com\\n\\u627e\\u5230 d \\u884c\\uff0c\\u590d\\u5236 Value \\u5217\\u7684\\u503c')}catch(e){alert('\\u5931\\u8d25:'+e.message)}})();`
+  copyText(script)
 }
 
 function commitUrl(repo: any): string {
@@ -302,101 +302,177 @@ watch(() => authStore.authenticated, async (val) => {
   <!-- Slack Manager Modal -->
   <Teleport to="body">
     <div v-if="slackStore.showManager" class="modal-backdrop" @click="slackStore.closeManager()">
-      <div class="modal modal-lg" @click.stop>
+      <div class="modal modal-xl" @click.stop style="overflow:visible;">
         <div class="modal-header">
           <h3>Slack 配置</h3>
           <button class="modal-close" @click="slackStore.closeManager()" title="关闭">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
-        <div class="modal-body">
-          <!-- 凭证状态 -->
-          <div class="form-row" style="margin-bottom:var(--space-4);">
-            <div class="field" style="flex:1">
-              <label class="form-label">凭证状态</label>
-              <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
-                <span v-if="slackStore.config?.cred_exists" class="badge badge-success">已配置</span>
-                <span v-else class="badge badge-warning">未配置</span>
-              </div>
-            </div>
+        <div class="modal-body" style="overflow:visible;padding:var(--space-5) var(--space-6);position:relative;">
+          <div v-if="slackStore.configLoading || slackStore.channelsLoading" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg-elev-1);border-radius:var(--radius-lg);z-index:10;gap:12px;">
+            <div class="spinner" style="width:28px;height:28px;border:3px solid var(--border-faint);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;"></div>
+            <span style="font-size:var(--text-sm);color:var(--text-secondary);">正在加载 Slack 配置...</span>
           </div>
-
-          <!-- Token / Cookie -->
-          <div class="form-row" style="margin-bottom:var(--space-3);gap:8px;">
-            <div class="field" style="flex:1">
-              <label class="form-label">xoxc token</label>
-              <input type="password" class="input input-mono" v-model="slackStore.tokenInput" placeholder="xoxc-..." />
-            </div>
-            <div class="field" style="flex:1">
-              <label class="form-label">xoxd cookie</label>
-              <input type="password" class="input input-mono" v-model="slackStore.cookieInput" placeholder="xoxd-..." />
-            </div>
-            <div class="field" style="flex:0 0 auto;justify-content:flex-end;">
-              <button class="btn" :disabled="slackStore.testing" @click="slackStore.testAuth()">
-                {{ slackStore.testing ? '测试中...' : '测试凭证' }}
-              </button>
-            </div>
-          </div>
-
-          <!-- 获取凭证指引 -->
-          <div class="slack-cred-guide">
-            <div class="slack-cred-row">
-              <span class="slack-cred-label">xoxc token：</span>
-              <span class="slack-cred-desc">F12 → Console → 粘贴下方代码后回车：</span>
-            </div>
-            <div class="slack-cred-code">
-              <code>JSON.parse(localStorage.localConfig_v2).teams[document.location.pathname.match(/^\/client\/([A-Z0-9]+)/)[1]].token</code>
-              <button class="slack-copy-btn" @click="copyText(`JSON.parse(localStorage.localConfig_v2).teams[document.location.pathname.match(/^\\/client\\/([A-Z0-9]+)/)[1]].token`)">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              </button>
-            </div>
-            <div class="slack-cred-row">
-              <span class="slack-cred-label">xoxd cookie：</span>
-              <span class="slack-cred-desc">F12 → Application → Cookies → slack.com → 复制 <code>d</code> 的值</span>
-            </div>
-          </div>
-
-          <!-- 频道列表 -->
-          <div class="form-row" style="margin-bottom:var(--space-4);align-items:flex-end;">
-            <div class="field" style="flex:1">
-              <label class="form-label">频道列表</label>
-              <div class="list" style="margin-top:4px;">
-                <div v-for="ch in slackStore.config?.channels || []" :key="ch" class="list-item" style="padding:6px 8px;">
-                  <div class="item-main">
-                    <span class="item-title" style="font-family:var(--font-mono);font-size:var(--text-sm);">{{ ch }}</span>
-                  </div>
-                  <div class="item-side">
-                    <button class="card-action-btn is-danger" @click="slackStore.removeChannel(ch)" title="移除">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                      移除
-                    </button>
-                  </div>
-                </div>
-                <div v-if="(slackStore.config?.channels?.length || 0) === 0" class="empty-state is-compact" style="padding:12px;">
-                  <p>暂无频道，请从下方列表选择添加</p>
+          <div style="display:flex;gap:var(--space-6);">
+            <!-- 左列：凭证配置 -->
+            <div style="flex:1;min-width:0;">
+              <!-- 凭证状态 -->
+              <div style="margin-bottom:var(--space-4);">
+                <label class="form-label">凭证状态</label>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap;">
+                  <span v-if="!slackStore.config?.cred_exists" class="badge badge-warning">未配置</span>
+                  <template v-else>
+                    <span v-if="slackStore.status?.cred_valid" class="badge badge-success">有效</span>
+                    <span v-else class="badge badge-danger">已过期</span>
+                  </template>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <!-- 从频道列表选择添加 -->
-          <div class="form-row" style="margin-bottom:var(--space-4);align-items:flex-end;">
-            <div class="field" style="flex:1">
-              <label class="form-label">从已有频道添加</label>
-              <div v-if="slackStore.channelsLoading" style="margin-top:4px;font-size:var(--text-sm);color:var(--text-tertiary);">加载频道列表中...</div>
-              <div v-else-if="slackStore.availableChannels.length === 0" style="margin-top:4px;font-size:var(--text-sm);color:var(--text-tertiary);">无法获取频道列表（凭证可能未配置）</div>
-              <div v-else style="position:relative;margin-top:4px;">
-                <input type="text" class="input input-mono"
-                       ref="slackInputRef"
-                       v-model="slackStore.newChannel"
-                       :placeholder="`搜索 ${slackStore.getAvailableNotConfigured().length} 个可用频道...`"
-                       @input="onSlackSearchInput()"
-                       @focus="onSlackSearchFocus()"
-                       @blur="onSlackSearchBlur()"
-                       @keydown.escape="showSlackDropdown = false"
-                       @keydown.enter.prevent="onSlackDropdownSelect()"
-                       style="width:100%;" />
-                <Teleport to="body">
+              <!-- Token / Cookie -->
+              <div style="margin-bottom:var(--space-3);">
+                <div class="form-row" style="gap:8px;align-items:flex-end;flex-wrap:nowrap;">
+                  <div class="field" style="flex:1;">
+                    <label class="form-label">xoxc token</label>
+                    <input type="text" class="input input-mono" v-model="slackStore.tokenInput" placeholder="xoxc-..." />
+                  </div>
+                  <div class="field" style="flex:1;">
+                    <label class="form-label">xoxd cookie</label>
+                    <input type="text" class="input input-mono" v-model="slackStore.cookieInput" placeholder="xoxd-..." />
+                  </div>
+                  <div class="field" style="flex:0 0 auto;">
+                    <label class="form-label" style="visibility:hidden;">测试</label>
+                    <div style="display:flex;gap:6px;">
+                      <button class="btn" :disabled="slackStore.testing" @click="slackStore.testAuth()">
+                        {{ slackStore.testing ? '测试中...' : '测试凭证' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 获取凭证指引（默认折叠） -->
+              <div class="slack-cred-guide" style="margin-bottom:var(--space-4);">
+                <div @click="showCredGuide = !showCredGuide" style="display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;margin-bottom:4px;">
+                  <span style="font-weight:600;font-size:var(--text-sm);">获取凭证</span>
+                  <span style="font-size:11px;color:var(--text-tertiary);">（自动刷新失败时使用）</span>
+                  <span style="margin-left:auto;font-size:11px;color:var(--text-tertiary);">{{ showCredGuide ? '收起' : '展开' }}</span>
+                </div>
+                <div v-if="showCredGuide" style="padding:10px 12px;background:var(--bg-primary);border-radius:6px;border:1px solid var(--border-faint);">
+                  <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:8px;line-height:1.6;">
+                    <div><b>Step 1</b> — 获取 xoxc token：</div>
+                    <div style="margin-left:12px;">Slack 页面 → F12 → Console → 点击下方按钮 → 粘贴到 Console 回车执行</div>
+                  </div>
+                  <button class="btn" @click="copySubmitScript()" style="width:100%;margin-bottom:10px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    复制提取 token 脚本 → 粘贴到 Slack Console
+                  </button>
+                  <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:8px;line-height:1.6;">
+                    <div><b>Step 2</b> — 获取 xoxd cookie：</div>
+                    <div style="margin-left:12px;">F12 → Application → Cookies → slack.com → 复制 <code style="font-size:11px;padding:1px 4px;background:var(--bg-secondary);border-radius:3px;">d</code> 的 Value</div>
+                  </div>
+                  <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:8px;line-height:1.6;">
+                    <div><b>Step 3</b> — 粘贴到上方输入框，点击"测试凭证"验证</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 采集间隔 + 回溯范围 -->
+              <div style="margin-bottom:var(--space-4);display:flex;gap:12px;">
+                <div>
+                  <label class="form-label">采集间隔</label>
+                  <div style="display:flex;align-items:center;gap:4px;margin-top:4px;">
+                    <input type="number" class="input" v-model.number="slackStore.collectInterval" min="30" style="width:80px;" />
+                    <span style="font-size:var(--text-sm);color:var(--text-tertiary);">分钟</span>
+                  </div>
+                </div>
+                <div>
+                  <label class="form-label">回溯范围</label>
+                  <div style="display:flex;align-items:center;gap:4px;margin-top:4px;">
+                    <input type="number" class="input" v-model.number="slackStore.collectLookback" min="30" style="width:80px;" />
+                    <span style="font-size:var(--text-sm);color:var(--text-tertiary);">分钟</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 状态信息 -->
+              <div v-if="slackStore.status" style="margin-bottom:var(--space-4);padding:12px;background:var(--bg-secondary);border-radius:6px;">
+                <div style="display:flex;gap:24px;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:var(--text-sm);color:var(--text-tertiary);">上次采集</span>
+                    <span style="font-size:var(--text-sm);">{{ slackStore.status.last_collect_at ? new Date(slackStore.status.last_collect_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '尚未采集' }}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:var(--text-sm);color:var(--text-tertiary);">消息总数</span>
+                    <span style="font-size:var(--text-sm);">{{ slackStore.status.total_messages }}</span>
+                  </div>
+                </div>
+                <div v-if="slackStore.status.last_refresh_at" style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:var(--text-sm);color:var(--text-tertiary);">最近刷新</span>
+                  <span style="font-size:var(--text-sm);">{{ new Date(slackStore.status.last_refresh_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</span>
+                </div>
+                <div v-if="slackStore.config?.cred_exists && slackStore.status?.cred_valid === false" style="margin-top:8px;padding:6px 10px;background:var(--signal-red-glow);border-radius:4px;font-size:var(--text-sm);color:var(--signal-red);">
+                  凭证已过期，采集将无法执行。请按上方指引重新获取 token 和 cookie。
+                </div>
+              </div>
+
+              <!-- 操作按钮 -->
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn btn-primary" :disabled="slackStore.saving" @click="slackStore.saveConfig()">
+                  {{ slackStore.saving ? '保存中...' : '保存配置' }}
+                </button>
+                <button class="btn" :disabled="slackStore.refreshing" @click="slackStore.refreshToken()">
+                  {{ slackStore.refreshing ? '刷新中...' : '手动刷新凭证' }}
+                </button>
+                <button class="btn" :disabled="slackStore.collecting" @click="slackStore.triggerCollect()">
+                  {{ slackStore.collecting ? '采集中...' : '手动采集' }}
+                </button>
+                <button class="btn btn-danger" @click="slackStore.clearData()">清除数据</button>
+              </div>
+            </div>
+
+            <!-- 右列：频道管理 -->
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+              <!-- 频道列表 -->
+              <div style="margin-bottom:var(--space-3);">
+                <label class="form-label">频道列表</label>
+                <div class="list" style="margin-top:4px;max-height:240px;overflow-y:auto;">
+                  <div v-for="ch in slackStore.config?.channels || []" :key="ch" class="list-item" style="padding:6px 8px;">
+                    <div class="item-main">
+                      <span class="item-title" style="font-family:var(--font-mono);font-size:var(--text-sm);">{{ ch }}</span>
+                    </div>
+                    <div class="item-side">
+                      <button class="card-action-btn is-danger" @click="slackStore.removeChannel(ch)" title="移除">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        移除
+                      </button>
+                    </div>
+                  </div>
+                  <div v-if="(slackStore.config?.channels?.length || 0) === 0" class="empty-state is-compact" style="padding:12px;">
+                    <p>暂无频道，请从下方列表选择添加</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 从频道列表选择添加 -->
+              <div style="flex:1;">
+                <label class="form-label">从已有频道添加</label>
+                <div v-if="slackStore.channelsLoading" style="margin-top:4px;font-size:var(--text-sm);color:var(--text-tertiary);">加载频道列表中...</div>
+                <div v-else-if="slackStore.availableChannels.length === 0" style="margin-top:4px;font-size:var(--text-sm);color:var(--text-tertiary);">无法获取频道列表（凭证可能未配置）</div>
+                <div v-else style="position:relative;margin-top:4px;">
+                  <div style="display:flex;gap:8px;">
+                    <input type="text" class="input input-mono"
+                           ref="slackInputRef"
+                           v-model="slackStore.newChannel"
+                           :placeholder="`搜索 ${slackStore.getAvailableNotConfigured().length} 个可用频道...`"
+                           @input="onSlackSearchInput()"
+                           @focus="onSlackSearchFocus()"
+                           @blur="onSlackSearchBlur()"
+                           @keydown.escape="showSlackDropdown = false"
+                           @keydown.enter.prevent="onSlackDropdownSelect()"
+                           style="flex:1;" />
+                    <button class="btn btn-primary" :disabled="!slackStore.newChannel.trim() || !slackStore.newChannel.trim().startsWith('#')" @click="slackStore.addChannel()">添加</button>
+                  </div>
                   <div v-if="showSlackDropdown && filteredSlackChannels.length" class="slack-channel-dropdown" :style="slackDropdownStyle">
                     <div v-for="ch in filteredSlackChannels" :key="ch.id"
                          class="slack-channel-option"
@@ -408,47 +484,9 @@ watch(() => authStore.authenticated, async (val) => {
                       <span v-if="ch.topic" class="slack-channel-topic">{{ ch.topic }}</span>
                     </div>
                   </div>
-                </Teleport>
+                </div>
               </div>
             </div>
-            <div class="field" style="flex:0 0 auto;justify-content:flex-end;">
-              <button class="btn btn-primary" :disabled="!slackStore.newChannel.trim() || !slackStore.newChannel.trim().startsWith('#')" @click="slackStore.addChannel()">添加</button>
-            </div>
-          </div>
-
-          <!-- 采集间隔 + 保存 -->
-          <div class="form-row" style="margin-bottom:var(--space-4);">
-            <div class="field" style="flex:0 0 200px">
-              <label class="form-label">采集间隔（分钟）</label>
-              <input type="number" class="input" v-model.number="slackStore.collectInterval" min="30" />
-            </div>
-            <div class="field" style="flex:1;justify-content:flex-end;align-items:flex-end;">
-              <button class="btn btn-primary" :disabled="slackStore.saving" @click="slackStore.saveConfig()">
-                {{ slackStore.saving ? '保存中...' : '保存配置' }}
-              </button>
-            </div>
-          </div>
-
-          <!-- 状态信息 -->
-          <div v-if="slackStore.status" style="margin-bottom:var(--space-4);padding:12px;background:var(--bg-secondary);border-radius:6px;">
-            <div class="form-row" style="gap:24px;">
-              <div class="field">
-                <label class="form-label" style="font-size:var(--text-sm);color:var(--text-tertiary);">上次采集</label>
-                <span style="font-size:var(--text-sm);">{{ slackStore.status.last_collect_at ? new Date(slackStore.status.last_collect_at).toLocaleString('zh-CN') : '尚未采集' }}</span>
-              </div>
-              <div class="field">
-                <label class="form-label" style="font-size:var(--text-sm);color:var(--text-tertiary);">消息总数</label>
-                <span style="font-size:var(--text-sm);">{{ slackStore.status.total_messages }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 操作按钮 -->
-          <div class="form-row" style="gap:8px;">
-            <button class="btn" :disabled="slackStore.collecting" @click="slackStore.triggerCollect()">
-              {{ slackStore.collecting ? '采集中...' : '手动采集' }}
-            </button>
-            <button class="btn btn-danger" @click="slackStore.clearData()">清除数据</button>
           </div>
         </div>
       </div>
@@ -480,14 +518,17 @@ watch(() => authStore.authenticated, async (val) => {
 }
 
 .slack-channel-dropdown {
-  position: fixed;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
   max-height: 300px;
   overflow-y: auto;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-  z-index: 1000;
+  z-index: 100;
   min-width: 280px;
 }
 .slack-channel-option {
@@ -586,5 +627,8 @@ watch(() => authStore.authenticated, async (val) => {
 .slack-copy-btn:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

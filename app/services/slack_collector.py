@@ -5,13 +5,14 @@ Slack 消息采集服务
 存入 AIMemory 知识库（source_type="slack"），
 并自动清理超过 30 天的旧数据。
 
-认证方式（二选一）：
-1. 环境变量 SLACK_TOKEN + SLACK_COOKIE（从浏览器 DevTools 获取）
-2. slackdump 凭证文件（通过 slackdump workspace new 生成）
+认证方式：
+- 通过前端配置页面设置 token + cookie
+- 过期后自动用环境变量中的邮箱密码重新登录获取
 """
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -30,18 +31,16 @@ SLACK_API_BASE = "https://slack.com/api/"
 class SlackCollector:
     """Slack 消息采集器
 
-    认证优先级：环境变量 > DB 配置
+    凭证从数据库 SlackConfig 表读取（通过前端配置页面设置）
     """
 
     def __init__(self):
-        self.token = Config.SLACK_TOKEN
-        self.cookie = Config.SLACK_COOKIE
+        self.token = ""
+        self.cookie = ""
         self._session: Optional[requests.Session] = None
         self._load_db_credentials()
 
     def _load_db_credentials(self):
-        if self.token and self.cookie:
-            return
         try:
             db = SessionLocal()
             try:
@@ -84,9 +83,21 @@ class SlackCollector:
     def has_credentials(self) -> bool:
         return bool(self.token) and bool(self.cookie)
 
+    def _ensure_valid_auth(self) -> bool:
+        """确保凭证有效，失效时自动刷新"""
+        if not self.has_credentials():
+            return False
+        test = self._api_call("auth.test")
+        if test.get("ok"):
+            return True
+        logger.info("Credentials expired, attempting refresh...")
+        if self._refresh_credentials():
+            return True
+        return False
+
     def list_channels(self) -> list:
         """获取所有可见频道的列表（名称 + ID）"""
-        if not self.has_credentials():
+        if not self._ensure_valid_auth():
             return []
         result = []
         cursor = None
@@ -117,15 +128,9 @@ class SlackCollector:
 
     def collect(self) -> dict:
         """执行一次采集：读取 SlackConfig 配置，逐个频道采集消息"""
-        if not self.has_credentials():
-            logger.info("Slack credentials not configured, skipping collection")
-            return {"error": "credentials not configured"}
-
-        # 验证凭证
-        test = self._api_call("auth.test")
-        if not test.get("ok"):
-            return {"error": f"auth failed: {test.get('error', 'unknown')}"}
-        logger.info(f"Slack auth ok: team={test.get('team', '')}, user={test.get('user', '')}")
+        if not self._ensure_valid_auth():
+            return {"error": "credentials not configured or auth failed"}
+        logger.info("Slack auth ok, starting collection")
 
         db = SessionLocal()
         try:
@@ -138,7 +143,7 @@ class SlackCollector:
             if not channels:
                 return {"error": "empty channel list"}
 
-            interval = config.collect_interval or 360
+            interval = config.collect_lookback or 1440
             oldest = (datetime.now() - timedelta(minutes=interval)).timestamp()
             stats = {"channels": len(channels), "total_fetched": 0, "total_stored": 0}
 
@@ -267,3 +272,71 @@ class SlackCollector:
             return False
         test = self._api_call("auth.test")
         return test.get("ok", False)
+
+    def _refresh_credentials(self) -> bool:
+        """用环境变量中的邮箱密码重新登录，获取新 token 和 cookie 并存入数据库"""
+        email = Config.SLACK_EMAIL
+        password = Config.SLACK_PASSWORD
+        if not email or not password:
+            logger.warning("SLACK_EMAIL / SLACK_PASSWORD not configured, cannot refresh credentials")
+            return False
+
+        ws = "vllm-dev"
+        try:
+            s = requests.Session()
+            s.headers.update({
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+            })
+
+            r = s.get(f"https://{ws}.slack.com/sign_in_with_password", timeout=15)
+            m = re.search(r'crumbValue&quot;:&quot;(.*?)&quot;', r.text)
+            if not m:
+                logger.error("Failed to extract crumb from signin page")
+                return False
+            crumb = m.group(1).encode().decode("unicode_escape")
+
+            login_data = {
+                "signin": "1", "redir": "", "has_remember": "true",
+                "crumb": crumb, "remember": "remember",
+                "email": email, "password": password,
+            }
+            s.post(f"https://{ws}.slack.com/sign_in_with_password", data=login_data,
+                   allow_redirects=True, timeout=15)
+
+            d_cookie = s.cookies.get("d", domain=".slack.com")
+            if not d_cookie:
+                logger.error("No d cookie after login")
+                return False
+
+            r2 = s.get(f"https://{ws}.slack.com/", timeout=15)
+            m2 = re.search(r'xoxc-[a-zA-Z0-9-]+', r2.text)
+            if not m2:
+                logger.error("No xoxc token found after login")
+                return False
+            new_token = m2.group(0)
+
+            new_cookie = d_cookie
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+            db = SessionLocal()
+            try:
+                config = db.query(SlackConfig).first()
+                if not config:
+                    config = SlackConfig(channels="[]", collect_interval=360)
+                    db.add(config)
+                config.token = new_token
+                config.cookie = new_cookie
+                config.cred_exists = True
+                config.last_refresh_at = now
+                db.commit()
+            finally:
+                db.close()
+
+            self.token = new_token
+            self.cookie = new_cookie
+            self._session = None
+            logger.info("Credentials refreshed successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to refresh credentials: {e}")
+            return False

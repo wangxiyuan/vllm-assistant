@@ -10,17 +10,22 @@ export interface SlackConfig {
   cred_exists: boolean
   channels: string[]
   collect_interval: number
+  collect_lookback: number
   last_collect_at: string | null
   total_messages: number
+  last_refresh_at: string | null
   updated_at: string
   created_at: string
 }
 
 export interface SlackStatus {
   cred_exists: boolean
+  cred_valid: boolean
   last_collect_at: string | null
   total_messages: number
   collect_interval: number
+  collect_lookback: number
+  last_refresh_at: string | null
 }
 
 export interface SlackChannel {
@@ -36,23 +41,33 @@ export const useSlackStore = defineStore('slack', () => {
   const config = ref<SlackConfig | null>(null)
   const status = ref<SlackStatus | null>(null)
   const showManager = ref(false)
+  const configLoading = ref(false)
   const availableChannels = ref<SlackChannel[]>([])
   const channelsLoading = ref(false)
   const tokenInput = ref('')
   const cookieInput = ref('')
   const newChannel = ref('')
   const collectInterval = ref(360)
+  const collectLookback = ref(1440)
   const saving = ref(false)
   const collecting = ref(false)
   const testing = ref(false)
+  const refreshing = ref(false)
 
   async function loadConfig() {
+    configLoading.value = true
     try {
       const data: any = await api('/api/slack/config')
       config.value = data as SlackConfig
       collectInterval.value = data.collect_interval || 360
+      collectLookback.value = data.collect_lookback || 1440
+      if (data.token) tokenInput.value = data.token
+      if (data.cookie) cookieInput.value = data.cookie
     } catch (e: any) {
-      useAppStore().showToast('加载 Slack 配置失败', e.message, 'error')
+      useAppStore().showToast('加载 Slack 配置失败，尝试自动刷新凭证...', e.message, 'error')
+      await refreshToken()
+    } finally {
+      configLoading.value = false
     }
   }
 
@@ -93,6 +108,7 @@ export const useSlackStore = defineStore('slack', () => {
       })
       if (data.ok) {
         useAppStore().showToast('凭证有效', `用户: ${data.user}，团队: ${data.team}`, 'success')
+        await loadStatus()
       } else {
         useAppStore().showToast('凭证无效', data.error || 'unknown', 'error')
       }
@@ -110,6 +126,7 @@ export const useSlackStore = defineStore('slack', () => {
       const payload: any = {
         channels: config.value?.channels || [],
         collect_interval: collectInterval.value,
+        collect_lookback: collectLookback.value,
       }
       if (tokenInput.value.trim()) payload.token = tokenInput.value.trim()
       if (cookieInput.value.trim()) payload.cookie = cookieInput.value.trim()
@@ -119,8 +136,8 @@ export const useSlackStore = defineStore('slack', () => {
         body: JSON.stringify(payload),
       })
       config.value = data as SlackConfig
-      tokenInput.value = ''
-      cookieInput.value = ''
+      if (data.token) tokenInput.value = data.token
+      if (data.cookie) cookieInput.value = data.cookie
       useAppStore().showToast('Slack 配置已保存', '', 'success')
     } catch (e: any) {
       useAppStore().showToast('保存 Slack 配置失败', e.message, 'error')
@@ -157,7 +174,13 @@ export const useSlackStore = defineStore('slack', () => {
   }
 
   async function removeChannel(channel: string) {
-    if (!confirm(`确认移除频道 ${channel}？`)) return
+    const result = await useAppStore().showConfirm({
+      title: '移除频道',
+      message: `确认移除频道 ${channel}？`,
+      confirmText: '移除',
+      danger: true,
+    })
+    if (!result.confirmed) return
     try {
       const data: any = await api(`/api/slack/config/channels/${encodeURIComponent(channel)}`, {
         method: 'DELETE',
@@ -185,13 +208,39 @@ export const useSlackStore = defineStore('slack', () => {
   }
 
   async function clearData() {
-    if (!confirm('确认清除所有 Slack 采集数据？此操作不可恢复。')) return
+    const result = await useAppStore().showConfirm({
+      title: '清除 Slack 数据',
+      message: '确认清除所有 Slack 采集数据？此操作不可恢复。',
+      confirmText: '清除',
+      danger: true,
+    })
+    if (!result.confirmed) return
     try {
       const data: any = await api('/api/slack/data', { method: 'DELETE' })
       useAppStore().showToast('Slack 数据已清除', `删除了 ${data.deleted} 条记录`, 'info')
       await loadStatus()
     } catch (e: any) {
       useAppStore().showToast('清除失败', e.message, 'error')
+    }
+  }
+
+  async function refreshToken() {
+    refreshing.value = true
+    try {
+      const data: any = await api('/api/slack/refresh-token', { method: 'POST' })
+      if (data.ok) {
+        config.value = data as SlackConfig
+        if (data.token) tokenInput.value = data.token
+        if (data.cookie) cookieInput.value = data.cookie
+        useAppStore().showToast('凭证已刷新', '', 'success')
+        await loadStatus()
+      } else {
+        useAppStore().showToast('刷新失败', data.error || '请检查 .env 中 SLACK_EMAIL / SLACK_PASSWORD', 'error')
+      }
+    } catch (e: any) {
+      useAppStore().showToast('刷新失败', e.message, 'error')
+    } finally {
+      refreshing.value = false
     }
   }
 
@@ -212,11 +261,11 @@ export const useSlackStore = defineStore('slack', () => {
   }
 
   return {
-    config, status, showManager, availableChannels, channelsLoading,
-    tokenInput, cookieInput, newChannel, collectInterval, saving, collecting, testing,
+    config, status, showManager, configLoading, availableChannels, channelsLoading,
+    tokenInput, cookieInput, newChannel, collectInterval, collectLookback, saving, collecting, testing, refreshing,
     loadConfig, loadStatus, loadAvailableChannels,
     testAuth, saveConfig, addChannel, removeChannel,
-    triggerCollect, clearData, getAvailableNotConfigured,
+    triggerCollect, clearData, refreshToken, getAvailableNotConfigured,
     openManager, closeManager,
   }
 })
