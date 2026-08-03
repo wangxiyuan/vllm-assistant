@@ -29,6 +29,9 @@ EVENT_TOOL_RESULT = "tool_result"
 EVENT_DONE = "done"
 EVENT_ERROR = "error"
 
+# 模型 max_tokens 硬上限（实际由模型决定，配置值超过此值时截断）
+MODEL_MAX_TOKENS_LIMIT = 393216
+
 # 默认超时
 DEFAULT_TIMEOUT = 120.0
 CHAT_TIMEOUT = 600.0
@@ -154,11 +157,9 @@ class LLMClient:
     # ======================================================================
 
     def chat_sync(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        """同步 chat 调用 + 重试 + 错误处理
-
-        退避策略：优先用 Retry-After 头，否则指数退避（1s→max 10s），最多 10 次。
-        """
+        """同步 chat 调用 + 重试 + 错误处理"""
         last_exc: Optional[Exception] = None
+        max_tokens = min(max_tokens, MODEL_MAX_TOKENS_LIMIT)
         for attempt in range(10):
             try:
                 response = self._sync_openai.chat.completions.create(
@@ -200,7 +201,7 @@ class LLMClient:
         """
         kwargs["messages"] = messages
         kwargs.setdefault("model", self.model)
-        kwargs.setdefault("max_tokens", Config.LLM_MAX_TOKENS)
+        kwargs.setdefault("max_tokens", min(Config.LLM_MAX_TOKENS, MODEL_MAX_TOKENS_LIMIT))
         kwargs.setdefault("temperature", 0.7)
         kwargs.setdefault("timeout", CHAT_TIMEOUT)
         kwargs["stream"] = False
@@ -254,7 +255,7 @@ class LLMClient:
         """
         kwargs["messages"] = messages
         kwargs.setdefault("model", self.model)
-        kwargs.setdefault("max_tokens", Config.LLM_MAX_TOKENS)
+        kwargs.setdefault("max_tokens", min(Config.LLM_MAX_TOKENS, MODEL_MAX_TOKENS_LIMIT))
         kwargs.setdefault("temperature", 0.7)
         kwargs.setdefault("timeout", CHAT_TIMEOUT)
         kwargs["stream"] = True

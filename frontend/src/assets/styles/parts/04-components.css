@@ -1693,7 +1693,13 @@ a.item-title:hover { color: var(--amber-bright); }
 .pr-body table {
     border-collapse: collapse;
     margin: 0 0 var(--space-4);
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
+    width: 100%;
+    table-layout: auto;
+}
+.pr-body td, .pr-body th {
+    word-break: break-word;
+    white-space: normal;
 }
 .pr-body th, .pr-body td {
     border: 1px solid var(--border-faint);

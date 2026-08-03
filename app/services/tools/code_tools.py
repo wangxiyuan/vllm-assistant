@@ -136,7 +136,9 @@ SEARCH_CODE = {
     "function": {
         "name": "search_code",
         "description": (
-            "在本地缓存的代码中搜索关键词。返回匹配的文件路径和行号。"
+            "在本地缓存的代码中搜索关键词。返回匹配的文件路径、总匹配行数、和最多3行示例。"
+            "结果按匹配行数降序排列，匹配最多的文件排最前。"
+            "搜到结果后，应调用 read_local_code 读取关键文件的完整上下文来确认功能是否已实现。"
             "可用 file_pattern 限定到某目录/文件前缀，节省全仓库扫描。"
         ),
         "parameters": {
@@ -180,7 +182,6 @@ async def handle_search_code(args: dict) -> dict:
         repo = get_default_repo_short()
     max_results = min(args.get("max_results", 10), 30)
 
-    # file_pattern 当作前缀：去末尾 /，转义 LIKE 通配符，再追加 %
     raw_pattern = (args.get("file_pattern") or "").strip().rstrip("/")
     like_pattern: Optional[str] = None
     if raw_pattern:
@@ -189,17 +190,31 @@ async def handle_search_code(args: dict) -> dict:
 
     db = SessionLocal()
     try:
+        # 先查询所有匹配文件（不设 limit），统计每个文件的匹配行数
         query = db.query(LocalCodeCache).filter(
             LocalCodeCache.repo == repo,
             LocalCodeCache.content.contains(keyword),
         )
         if like_pattern:
             query = query.filter(LocalCodeCache.file_path.like(like_pattern, escape="\\"))
-        query = query.limit(max_results)
 
+        all_entries = query.all()
+        total_matched_files = len(all_entries)
+
+        # 统计每个文件的匹配行数
+        file_stats = []
+        for entry in all_entries:
+            match_count = entry.content.count(keyword)
+            if match_count == 0:
+                continue
+            file_stats.append((entry, match_count))
+
+        # 按匹配行数降序排列
+        file_stats.sort(key=lambda x: x[1], reverse=True)
+
+        # 截取前 max_results 个
         results = []
-        for entry in query.all():
-            # 找到匹配的行号
+        for entry, match_count in file_stats[:max_results]:
             matched_lines = []
             for i, line in enumerate(entry.content.split("\n"), 1):
                 if keyword in line:
@@ -207,19 +222,21 @@ async def handle_search_code(args: dict) -> dict:
                         "line": i,
                         "content": line.strip()[:200],
                     })
-                    if len(matched_lines) >= 3:  # 每个文件最多 3 行
+                    if len(matched_lines) >= 3:
                         break
 
             results.append({
                 "file_path": entry.file_path,
                 "repo": entry.repo,
                 "matched_lines": matched_lines,
-                "total_matches": len(matched_lines),
+                "total_matches_in_file": match_count,
             })
 
         return {
             "results": results,
             "total": len(results),
+            "total_matched_files": total_matched_files,
+            "truncated": total_matched_files > max_results,
             "keyword": keyword,
             "repo": repo,
         }

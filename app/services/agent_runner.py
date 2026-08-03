@@ -246,6 +246,8 @@ class AgentRunner(BaseAgent):
 ## 高效读取代码（重要）
 读取本地代码有 **总轮次预算**（默认 30 轮），过度读取会被强制收尾。请遵循：
 - 先用 `search_code` 搜索关键词/类名/函数名定位关键行号（可用 `file_pattern` 限定目录前缀）
+- **search_code 搜到结果后，必须再调 `read_local_code` 读关键文件的前 50-100 行来确认功能是否真的已实现，不能仅凭匹配行片段做判断。**
+- `search_code` 的 `total_matched_files` 字段越大，说明该功能嵌入越深，越可能是已实现功能。
 - 再用 `read_local_code` 精准读取：`file_path` 必填，`repo` 不传则用默认仓库，`start_line` 0-based（含），`max_lines` 默认 100、上限 1500
 - 大文件分**不重叠**的连续区间读：上一段结束行 = 下一段 `start_line`，避免重叠浪费
 - 拿到关键信息后**立即给最终回答**，不要无限读文件

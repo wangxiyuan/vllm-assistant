@@ -16,7 +16,7 @@ from app.services.base_agent import BaseAgent
 logger = logging.getLogger(__name__)
 
 # Agent 各阶段轮次预算
-MAX_TOOL_ROUNDS = 10
+MAX_TOOL_ROUNDS = 30
 
 
 class IntelligenceReportGenerator(BaseAgent):
@@ -346,7 +346,16 @@ class IntelligenceReportGenerator(BaseAgent):
         if detail_count == 1:
             return (
                 "继续深入。如果搜索结果中有重要的 PR，可以调用 get_pr_diff 查看 1-2 个核心 PR 的代码变更。\n"
-                "如果已经足够了解，可以直接生成报告（不再调用工具）。"
+                "**做 SGLang 对比分析时，用 search_code 搜索本地代码验证 vLLM 是否已实现对应功能，搜到后调 read_local_code 读关键文件确认。**"
+            )
+
+        if detail_count == 5:
+            return (
+                "深入阶段已过半。请确认是否已覆盖以下关键任务：\n"
+                "1) 所有核心 issue/PR 的正文和评论已阅读\n"
+                "2) SGLang 对比分析中每个功能的 search_code 验证已完成\n"
+                "3) 贡献机会已识别\n"
+                "如果还有遗漏，请尽快补充。完成后即可生成报告。"
             )
 
         remaining = MAX_TOOL_ROUNDS - round_num
@@ -614,6 +623,8 @@ class IntelligenceReportGenerator(BaseAgent):
 4. **新闻用 search_web + release**：如果包含新闻来源，先用 search_web 搜索行业新闻，再调 get_github_releases 获取真实版本信息，不要编造版本号。
 5. **Slack 用 search_memory**：如果包含 Slack 来源，用 search_memory 搜索 tags=slack 获取社群讨论内容。
 6. **判断 vLLM 是否已实现某功能时，先用 search_code 搜索本地缓存代码验证，不要仅依赖 GitHub Issues/PRs 搜索结果。**
+   - **search_code 搜到结果后，必须再调 read_local_code 读取关键文件（如配置/注册/模型文件）的前 50-100 行来确认功能是否真的已实现，不能仅凭匹配行片段判断。**
+   - 注意 search_code 的 total_matched_files 字段：值越大说明该功能在代码库中嵌入越深，越可能是已实现功能。如果只有 1-2 个匹配文件，可能是注释或边缘引用。
 7. **报告要基于证据**：每个结论引用具体 issue/PR 编号或论文标题。不确定的内容不要编造。
 8. **接受局限性**：你的搜索轮次有限，不可能遍历所有 issue/PR。对于未能深入调研的部分，在报告中提供 GitHub 搜索链接和关键词建议，让用户自行深入。这比假装覆盖了所有内容更有价值。
 9. 会按阶段引导你：先搜索，再深入，最后生成报告。
