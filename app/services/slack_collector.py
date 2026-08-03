@@ -310,9 +310,20 @@ class SlackCollector:
 
             d_cookie = s.cookies.get("d")
             if not d_cookie:
-                logger.error(f"No d cookie after login. Status={login_resp.status_code}, URL={login_resp.url}")
-                logger.error(f"Response snippet: {login_resp.text[:2000]}")
-                logger.error(f"All cookies: {dict(s.cookies)}")
+                # 登录失败时尝试提取错误信息
+                err_msg = "unknown"
+                for err_pat in [
+                    r'class="[^"]*error[^"]*"[^>]*>(.*?)<',
+                    r'<p[^>]*class="[^"]*error[^"]*"[^>]*>(.*?)<',
+                    r'invalid_email_or_password',
+                    r'account_not_found',
+                    r'signin_bad_password',
+                ]:
+                    em = re.search(err_pat, login_resp.text, re.DOTALL)
+                    if em:
+                        err_msg = em.group(1).strip()[:200] if em.groups() else em.group(0)
+                        break
+                logger.error(f"Login failed: {err_msg} (status={login_resp.status_code}, url={login_resp.url})")
                 return False
 
             r2 = s.get(f"https://{ws}.slack.com/", timeout=15)
