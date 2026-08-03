@@ -21,44 +21,21 @@ import uuid
 from typing import AsyncIterator, List, Dict, Optional, Any
 
 from app.config import Config
+from app.services.base_agent import BaseAgent
 from app.services.llm import LLMClient, EVENT_TOKEN, EVENT_THINKING, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_DONE, EVENT_ERROR
 from app.services.tools import registry as tool_registry
 
 logger = logging.getLogger(__name__)
 
 
-class AgentRunner:
+class AgentRunner(BaseAgent):
     """Agent 执行引擎——只做流程控制，不做业务逻辑"""
 
-    # 最大 tool 循环轮次（防止无限循环、低效读取）
-    MAX_TOOL_ROUNDS = 30
     # 还剩多少轮时提醒模型收尾
     WRAP_UP_REMAINING_ROUNDS = 5
-    # 单次 tool 执行超时（秒）
-    TOOL_TIMEOUT = 30.0
 
     def __init__(self):
-        self.llm = LLMClient()
-        self._memory_service = None
-        # 工具调用缓存：同 (tool_name, args) 不重复执行，节省时间和 token
-        self._tool_cache: Dict[str, dict] = {}
-
-    async def close(self):
-        """显式关闭 HTTP 客户端，避免资源泄漏"""
-        await self.llm.aclose()
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        await self.close()
-
-    @property
-    def memory_service(self):
-        if self._memory_service is None:
-            from app.services.memory_service import MemoryService
-            self._memory_service = MemoryService()
-        return self._memory_service
+        super().__init__()
 
     async def chat(
         self,
@@ -99,11 +76,10 @@ class AgentRunner:
                 full_messages.append(m)
 
         # 3. 获取 tool schemas
-        #    None -> 使用全部；[] -> 不使用工具
         if tools is not None:
-            tool_schemas = tool_registry.get_tool_schemas(tools)  # 空列表 = 不使用
+            tool_schemas = tool_registry.get_tool_schemas(tools)
         else:
-            tool_schemas = tool_registry.get_tool_schemas()  # 全部
+            tool_schemas = tool_registry.get_tool_schemas()
 
         # 4. Tool 循环
         logger.info(
@@ -112,13 +88,10 @@ class AgentRunner:
         )
         for round_num in range(self.MAX_TOOL_ROUNDS):
             logger.info("Agent round %d begin", round_num + 1)
-            kwargs = {
-                "messages": full_messages,
-            }
+            kwargs = {"messages": full_messages}
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
 
-            # 用 LLMClient.chat_stream 调用（含重试 + streaming 解析）
             try:
                 if stream:
                     assistant_message, text_content = await self.llm.chat_stream(**kwargs)
@@ -129,8 +102,7 @@ class AgentRunner:
                 yield {"type": EVENT_ERROR, "data": str(e)}
                 return
 
-            # 文本回落：模型可能不支持 function calling，把工具调用意图以 JSON 形式写在文本里
-            # 如果没有拿到 tool_calls 字段但文本里能解析出 JSON 工具调用，照样识别
+            # 文本回落：模型可能不支持 function calling
             if not assistant_message.get("tool_calls") and text_content:
                 parsed = self._try_parse_text_tool_call(text_content)
                 if parsed:
@@ -140,21 +112,16 @@ class AgentRunner:
                         len(parsed),
                     )
 
-            # 如果有文本内容，区分 thinking 和最终回答
             if text_content:
                 if assistant_message.get("tool_calls"):
-                    # 工具调用之前的文本视为思考过程，多次 thinking 用分隔线区分
                     prefix = "\n\n---\n\n" if round_num > 0 else ""
                     yield {"type": EVENT_THINKING, "data": prefix + text_content, "round": round_num + 1}
                 else:
-                    # 没有工具调用，是最终回答
                     yield {"type": EVENT_TOKEN, "data": text_content}
 
             full_messages.append(assistant_message)
 
-            # 检查是否有 tool_calls
             if assistant_message.get("tool_calls"):
-                # 发出 tool_call 事件
                 for tc in assistant_message["tool_calls"]:
                     yield {
                         "type": EVENT_TOOL_CALL,
@@ -165,42 +132,21 @@ class AgentRunner:
                         "round": round_num + 1,
                     }
 
-                # 执行所有 tool_calls（带去重缓存 + 收尾提醒）
                 for tc in assistant_message["tool_calls"]:
                     tool_name = tc["function"]["name"]
                     tool_args = self.llm.safe_json_loads(tc["function"]["arguments"])
 
-                    # 剔除 schema 未声明的字段：模型常会塞一些工具不认的 key
-                    # （如 search_code 的 file_pattern 旧版），如果不剔除，同语义不同
-                    # 噪声字段会导致缓存 miss、重复执行。
-                    declared = self._get_declared_tool_props(tool_name)
-                    if declared is not None:
-                        filtered_args = {k: v for k, v in tool_args.items() if k in declared}
-                    else:
-                        filtered_args = tool_args
+                    result = await self.execute_tool_cached(tool_name, tool_args)
 
-                    # 去重：缓存 key 只按 handler 真正使用的字段计算
-                    cache_key = f"{tool_name}::{json.dumps(filtered_args, sort_keys=True, ensure_ascii=False)}"
-                    if cache_key in self._tool_cache:
-                        result = self._tool_cache[cache_key]
-                        logger.info("Agent tool %s cache hit (filtered args=%s)", tool_name, filtered_args)
-                    else:
-                        logger.info("Agent executing tool: %s args=%s", tool_name, filtered_args)
-                        result = await tool_registry.execute_tool(tool_name, filtered_args)
-                        self._tool_cache[cache_key] = result
-                        logger.info("Agent tool %s done, result keys=%s", tool_name, list(result.keys()) if isinstance(result, dict) else type(result).__name__)
-
-                    # 发出 tool_result 事件
                     yield {"type": EVENT_TOOL_RESULT, "data": {"name": tool_name, "result": result}, "round": round_num + 1}
 
-                    # 将 tool 结果加入消息列表
                     full_messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
                         "content": json.dumps(result, ensure_ascii=False),
                     })
 
-                # 接近预算上限时，下一轮插入收尾提醒，让模型强制收敛
+                # 接近预算上限时收尾提醒
                 remaining = self.MAX_TOOL_ROUNDS - (round_num + 1)
                 if remaining == self.WRAP_UP_REMAINING_ROUNDS:
                     full_messages.append({
@@ -213,18 +159,16 @@ class AgentRunner:
                     })
                     logger.warning("Agent wrap-up reminder injected (remaining=%d)", remaining)
 
-                # 继续下一轮循环
                 continue
 
             # 没有 tool_calls，对话结束
-            # 自动存储新知识
             if text_content:
                 self._auto_remember(messages, text_content, session_id)
 
             yield {"type": EVENT_DONE, "data": None}
             return
 
-        # 超过最大轮次——强制收尾：调用一次模型让它在没有 tools 的情况下给最终回答
+        # 超过最大轮次——强制收尾
         logger.warning("Agent exceeded MAX_TOOL_ROUNDS=%d, forcing final answer", self.MAX_TOOL_ROUNDS)
         try:
             kwargs_final = {
@@ -247,15 +191,7 @@ class AgentRunner:
         yield {"type": EVENT_DONE, "data": None}
 
     async def run_task(self, task_type: str, params: dict) -> dict:
-        """异步任务——查 tasks/registry -> 执行，返回结果
-
-        Args:
-            task_type: 任务类型（如 "daily_report", "tech_news"）
-            params: 任务参数
-
-        Returns:
-            任务结果 dict
-        """
+        """异步任务——查 tasks/registry -> 执行，返回结果"""
         from app.services.tasks import registry as task_registry
 
         handler = task_registry.get_task(task_type)
@@ -276,47 +212,9 @@ class AgentRunner:
     def _build_system_prompt(self, messages: List[dict], custom_prompt: Optional[str] = None) -> str:
         """构建 system prompt，注入相关记忆"""
         user_query = self._last_user_message(messages)
-
-        memories = []
-        if user_query.strip():
-            memories = self.memory_service.recall(query=user_query, top_k=3)
-
-        memory_context = ""
-        if memories:
-            memory_lines = []
-            for i, mem in enumerate(memories, 1):
-                content_preview = mem.get("content", "")[:300]
-                source_ref = mem.get("source_ref", "")
-                source_type = mem.get("source_type", "")
-                tags = ", ".join(mem.get("tags", [])[:5])
-                memory_lines.append(
-                    f"[{i}] 来源: {source_type} | 引用: {source_ref} | 标签: {tags}\n{content_preview}"
-                )
-            memory_context = "\n\n---\n### 相关上下文（来自知识库）\n" + "\n\n".join(memory_lines)
-
-        # 注入当前日期时间（UTC），让 AI 能正确计算"最近 N 天"等时间范围
-        from datetime import datetime, timezone
-        now_utc = datetime.now(timezone.utc)
-        time_context = (
-            f"\n\n## 当前时间\n当前 UTC 时间：{now_utc.strftime('%Y-%m-%d %H:%M:%S')}。\n"
-            f"用户问题中的时间范围（如'最近 N 天'）请以这个日期为基准计算。\n"
-            f"搜索时优先使用工具的 days_back 参数指定时间范围，而不是依赖默认值。"
-        )
-
-        # 构建已配置仓库列表，让 AI 知道它能操作哪些项目
-        from app.database import SessionLocal
-        from app.models import RepoCache
-        db = SessionLocal()
-        try:
-            configured_repos = [r.repo for r in db.query(RepoCache).filter(
-                RepoCache.status == "active"
-            ).all()]
-        finally:
-            db.close()
-        repo_list_text = ""
-        if configured_repos:
-            repo_names = "、".join(configured_repos)
-            repo_list_text = f"\n\n## 已配置的代码仓库\n当前支持的项目：{repo_names}。GitHub 搜索工具（search_issues 等）可搜索任意 GitHub 仓库，不受此限制。"
+        memory_context = self._build_memory_context(user_query, top_k=3)
+        time_context = self._build_time_context()
+        repo_list_text = self._build_repo_list_text()
 
         system_prompt = f"""你是一个技术领域的 AI 助手，帮助开发者分析代码/issue/PR、搜索技术资料、搜索互联网新闻、生成报告。
 
@@ -328,7 +226,7 @@ class AgentRunner:
 5. 中文回答，技术术语保留英文
 6. 不确定的内容不要编造，说明"需要进一步确认"
 7. 你可以同时调用多个工具来提高效率
-8. 统计文件数量时，先用工具（如 ls、find）确认实际总数，不要靠视觉估算。如果不确定，优先使用工具而不是猜测。{time_context}
+8. 统计文件数量时，使用 search_code 或 read_local_code 工具确认实际数量，不要靠猜测。{time_context}
 
 ## 可用工具
 你可以在对话中调用工具搜索 GitHub、arXiv、互联网、本地代码库和知识库。
@@ -367,37 +265,13 @@ class AgentRunner:
                 return m.get("content", "")[:200]
         return ""
 
-    @staticmethod
-    def _get_declared_tool_props(tool_name: str):
-        """从 tool schema 里取出声明的属性名集合。
-
-        用来在执行/缓存前剔除模型塞进来的 schema 外字段，避免同语义不同噪声
-        key 导致缓存 miss、重复执行。
-        """
-        from app.services.tools._shared import get_declared_tool_props
-        return get_declared_tool_props(tool_name)
-
     def _try_parse_text_tool_call(self, text: str) -> Optional[List[dict]]:
-        """从模型输出文本中解析 tool call（用于不支持 function calling 的模型）。
-
-        部分模型（如某些国产模型的 coding API 代理）会忽略 OpenAI 的 ``tools``
-        字段，把调用工具的意图以 JSON 形式写在 ``content`` 里。本方法扫描
-        文本中的 JSON 对象，按 OpenAI function calling schema 还原成 ``tool_calls``。
-
-        支持格式：
-        1. JSON 代码块：```json\\n{"name": "...", "arguments": {...}}\\n```
-        2. 行内 JSON：{"name": "...", "arguments": {...}}
-        3. 字段名兼容：``name`` / ``function`` / ``tool``；``arguments`` / ``args`` / ``parameters``
-
-        Returns:
-            解析成功返回 OpenAI 格式 tool_call 列表；解析失败返回 ``None``
-        """
+        """从模型输出文本中解析 tool call（用于不支持 function calling 的模型）。"""
         if not text:
             return None
 
         candidates: List[str] = []
 
-        # 候选 1：JSON 代码块
         code_block_pattern = re.compile(
             r"```(?:json)?\s*\n?\s*(\{.*?\})\s*\n?\s*```",
             re.DOTALL,
@@ -405,7 +279,6 @@ class AgentRunner:
         for m in code_block_pattern.finditer(text):
             candidates.append(m.group(1))
 
-        # 候选 2：行内 JSON（用括号匹配处理嵌套对象）
         for raw_obj in self._iter_top_level_json(text):
             candidates.append(raw_obj)
 
@@ -421,7 +294,6 @@ class AgentRunner:
             if not isinstance(name, str) or not name:
                 continue
 
-            # 必须是已注册的工具，防止把模型回答里偶然出现的 JSON 误判成 tool_call
             if tool_registry.get_tool(name) is None:
                 continue
 
@@ -446,11 +318,6 @@ class AgentRunner:
 
     @staticmethod
     def _iter_top_level_json(text: str):
-        """遍历文本中所有顶层 JSON 对象（按括号匹配处理嵌套 {}）。
-
-        只在对象的顶层 key 包含 ``"name"`` / ``"function"`` / ``"tool"`` 时 yield，
-        避免无意义的 JSON 片段。
-        """
         i = 0
         n = len(text)
         while i < n:
@@ -483,16 +350,11 @@ class AgentRunner:
                 j += 1
             if depth == 0 and j > i + 1:
                 snippet = text[i:j]
-                # 顶层 key 必须是 name/function/tool 之一
                 if re.search(r'"(?:name|function|tool)"\s*:', snippet):
                     yield snippet
             i = j if j > i else i + 1
 
     def _auto_remember(self, messages: List[dict], response_content: str, session_id: Optional[str] = None) -> None:
-        """自动存储对话中的新知识
-
-        从最后一条 user message 和 AI 的最终回答中提取有价值的对话知识。
-        """
         if not response_content or len(response_content) < 100:
             return
 

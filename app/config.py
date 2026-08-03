@@ -19,7 +19,7 @@ class Config:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "65536"))
+    LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1048576"))
 
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")

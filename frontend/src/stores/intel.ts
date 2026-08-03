@@ -94,7 +94,7 @@ export const useIntelStore = defineStore('intel', () => {
         extra_prompt: intelForm.value.extra_prompt,
       }
       if (intelForm.value.title.trim()) payload.title = intelForm.value.title.trim()
-      const result: any = await api('/api/ai-agent/reports/generate', {
+      const result: any = await api('/api/intelligence/reports/generate', {
         method: 'POST',
         body: JSON.stringify(payload),
       }, { timeout: 30000 })
@@ -207,7 +207,7 @@ export const useIntelStore = defineStore('intel', () => {
             extra_prompt: backup.extra_prompt || '',
           }
           if (backup.title) payload.title = backup.title
-          const result: any = await api('/api/ai-agent/reports/generate', {
+          const result: any = await api('/api/intelligence/reports/generate', {
             method: 'POST',
             body: JSON.stringify(payload),
           }, { timeout: 30000 })
@@ -243,7 +243,7 @@ export const useIntelStore = defineStore('intel', () => {
         excluded_sources: report.excluded_sources || [],
         extra_prompt: report.extra_prompt || '',
       }
-      const result: any = await api('/api/ai-agent/reports/generate', {
+      const result: any = await api('/api/intelligence/reports/generate', {
         method: 'POST',
         body: JSON.stringify(payload),
       }, { timeout: 30000 })

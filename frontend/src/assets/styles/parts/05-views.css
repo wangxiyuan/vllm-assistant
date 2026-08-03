@@ -1403,7 +1403,7 @@
     width: min(680px, 92vw);
 }
 .modal-xl {
-    width: min(860px, 94vw);
+    width: min(1100px, 94vw);
 }
 .modal-title {
     font-size: var(--text-lg);

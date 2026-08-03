@@ -794,6 +794,13 @@ a.item-title:hover { color: var(--amber-bright); }
     white-space: nowrap;
 }
 
+.badge-daily {
+    background: linear-gradient(135deg, #1a73e8, #1557b0);
+    color: #fff;
+    border-color: #1557b0;
+    font-weight: 600;
+}
+
 /* Related reference badges */
 .ref-badge {
     display: inline-flex;

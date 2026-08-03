@@ -333,7 +333,7 @@ class TaskDedupChecker:
 
         try:
             ai = self._get_ai()
-            result = ai._chat(prompt, max_tokens=2048, temperature=0.3)
+            result = ai.llm.chat_sync(prompt, max_tokens=2048, temperature=0.3)
             # AI 可能用 markdown 代码块包裹 JSON，需要剥离
             cleaned = result.strip()
             if cleaned.startswith("```"):

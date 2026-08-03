@@ -64,7 +64,7 @@ export function analyzeImpact(changedFiles: string[]) {
 
 /** 生成洞察报告 */
 export function generateIntelReport(payload: any) {
-  return api('/api/ai-agent/reports/generate', {
+  return api('/api/intelligence/reports/generate', {
     method: 'POST',
     body: JSON.stringify(payload),
   }, { timeout: 30000 })

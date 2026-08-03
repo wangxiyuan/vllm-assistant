@@ -67,7 +67,7 @@ PR Diff（超出 8000 字符的部分已截断，仅展示前 8000 字符）：
 输出纯 markdown，不要用代码块包裹整个内容。"""
 
         try:
-            content = self.llm.chat_sync(prompt, max_tokens=4096, temperature=0.7)
+            content = self.llm.chat_sync(prompt, max_tokens=Config.LLM_MAX_TOKENS, temperature=0.7)
         except Exception as e:
             return f"**Review 生成失败**：{e}"
 
@@ -114,7 +114,7 @@ Consider common project architecture:
 Return valid JSON only."""
 
         try:
-            content = self.llm.chat_sync(prompt, max_tokens=2048, temperature=0.5)
+            content = self.llm.chat_sync(prompt, max_tokens=Config.LLM_MAX_TOKENS, temperature=0.5)
         except Exception as e:
             return {"error": str(e)}
 
@@ -152,7 +152,7 @@ Return JSON with:
 Return valid JSON only."""
 
         try:
-            content = self.llm.chat_sync(prompt, max_tokens=1024, temperature=0.5)
+            content = self.llm.chat_sync(prompt, max_tokens=Config.LLM_MAX_TOKENS, temperature=0.5)
         except Exception as e:
             logger.warning(f"suggest_labels failed: {e}")
             return []
@@ -211,7 +211,7 @@ Return valid JSON only."""
 输出纯 markdown，不要用代码块包裹整个内容。"""
 
         try:
-            content = self.llm.chat_sync(prompt, max_tokens=1024, temperature=0.3)
+            content = self.llm.chat_sync(prompt, max_tokens=Config.LLM_MAX_TOKENS, temperature=0.3)
         except Exception as e:
             return f"**摘要生成失败**：{e}"
 
@@ -264,7 +264,7 @@ Return valid JSON only."""
 翻译："""
 
         try:
-            content = self.llm.chat_sync(prompt, max_tokens=65536, temperature=0.1)
+            content = self.llm.chat_sync(prompt, max_tokens=Config.LLM_MAX_TOKENS, temperature=0.1)
             return content.strip() if content else text
         except Exception:
             logger.exception("translate failed")

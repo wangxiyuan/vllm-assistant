@@ -527,7 +527,7 @@ export const useTodoStore = defineStore('todo', () => {
     if (insightGenLoading.value || insightSourceSaving.value) return
     insightGenLoading.value = true
     try {
-      const result: any = await api('/api/ai-agent/reports/generate', {
+      const result: any = await api('/api/intelligence/reports/generate', {
         method: 'POST',
         body: JSON.stringify({
           task_id: task.id,
