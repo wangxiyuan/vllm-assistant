@@ -186,36 +186,39 @@ ip1 Nginx 0.0.0.0:9527  →  ip2 宿主机 :9527  →  容器内 :9527
 
 Slack 消息采集功能通过 Slack Web API 直接获取频道消息，存入知识库，供 AI 在生成报告和对话时参考。
 
-### 1. 获取凭证（SLACK_TOKEN + SLACK_COOKIE）
+### 1. 生产环境自动刷新凭证（VNC 方式）
 
-打开浏览器访问你的 Slack 工作区（如 `https://vllm-workspace.slack.com`）并登录，按 F12 打开开发者工具：
+生产环境服务器 IP 可能被 Slack 风控拦截，导致自动刷新失败。解决方案：
 
-**获取 xoxc token：**
+**前提**：服务器安全组放行 TCP 5900 端口。
 
-- 切换到 **Console** 标签
-- 粘贴以下代码后回车：
-  ```javascript
-  JSON.parse(localStorage.localConfig_v2).teams[document.location.pathname.match(/^\/client\/([A-Z0-9]+)/)[1]].token
-  ```
-- 复制输出的一长串 `xoxc-` 开头的值
+**步骤**：
 
-**获取 xoxd cookie：**
+```bash
+# 1. 服务器上安装依赖
+apt-get update && apt-get install -y xvfb x11vnc chromium-browser
 
-- 切换到 **Application**（Chrome）或 **Storage**（Firefox）标签
-- 展开左侧 **Cookies**，选择 `slack.com`
-- 找到名为 `d` 的 cookie，复制其 **Value** 列的值
+# 2. 启动虚拟显示器 + VNC + chromium
+Xvfb :99 -screen 0 1280x720x24 &
+x11vnc -display :99 -forever -listen 0.0.0.0 -rfbport 5900 &
 
-### 2. 配置到 .env
+# 设置 VNC 密码（首次执行）
+x11vnc -storepasswd
 
-```env
-SLACK_TOKEN=xoxc-xxxxxxxxxx-xxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-SLACK_COOKIE=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# 用密码文件重启 VNC（后续执行）
+kill $(pgrep x11vnc)
+x11vnc -display :99 -forever -rfbauth ~/.vnc/passwd -listen 0.0.0.0 &
+
+# 3. 启动 chromium
+DISPLAY=:99 chromium-browser --no-sandbox https://vllm-dev.slack.com/sign_in_with_password &
 ```
 
-### 3. 通过前端配置频道
+**本地连接**：macOS Finder → 菜单栏「前往」→「连接服务器...」→ `vnc://190.92.220.4:5900`
 
-部署后，在左侧导航栏底部点击 **Slack 配置** 按钮，添加频道（如 `#general`、`#development`），保存后定时任务会自动采集。也可手动触发采集测试。
+在 VNC 窗口中正常登录 Slack（邮箱 → 密码 → 验证码）。登录后服务器 IP 被 Slack 信任，后续 `_refresh_credentials` 可正常工作。
 
-### 4. 无配置时的行为
-
-不配置 `SLACK_TOKEN` 和 `SLACK_COOKIE` 时，Slack 采集功能自动跳过，不影响其他功能。日志中会提示 `Slack credentials not configured`。
+**用完清理**：
+```bash
+kill $(pgrep -f "Xvfb|x11vnc|chromium") 2>/dev/null
+apt-get purge -y x11vnc chromium-browser xvfb 2>/dev/null
+```
