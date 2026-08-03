@@ -14,6 +14,18 @@ from app.services.tools.registry import register_tool
 logger = logging.getLogger(__name__)
 
 
+def _resolve_repo_name(repo: str) -> str:
+    """将 vllm-project/vllm 格式的完整仓库名解析为短名 vllm"""
+    if "/" not in repo:
+        return repo
+    from app.services._shared import get_active_repo_map
+    repo_map = get_active_repo_map()
+    for short, full in repo_map.items():
+        if full == repo:
+            return short
+    return repo
+
+
 # ======================================================================
 # Tool: read_local_code
 # ======================================================================
@@ -63,6 +75,7 @@ async def handle_read_local_code(args: dict) -> dict:
     if not repo:
         from app.services._shared import get_default_repo_short
         repo = get_default_repo_short()
+    repo = _resolve_repo_name(repo)
     # max_lines 默认 100，上限 1500；0 或负数视为「读到文件末尾」
     raw_max = args.get("max_lines", 100)
     try:
@@ -180,6 +193,7 @@ async def handle_search_code(args: dict) -> dict:
     if not repo:
         from app.services._shared import get_default_repo_short
         repo = get_default_repo_short()
+    repo = _resolve_repo_name(repo)
     max_results = min(args.get("max_results", 10), 30)
 
     raw_pattern = (args.get("file_pattern") or "").strip().rstrip("/")
