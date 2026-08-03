@@ -15,6 +15,7 @@ from tenacity import (
 )
 
 from app.config import Config
+from app.services.tools.rate_limiter import get_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,11 @@ class GitHubClient:
         ``_make_request``（仓库 REST API）与 ``_search_issues``（全局 Search API）
         共用此方法，统一退避策略。
         """
+        limiter = get_limiter("github_rest")
+        if limiter:
+            wait = limiter.acquire_sync()
+            if wait > 0:
+                time.sleep(wait)
         try:
             for attempt in Retrying(
                 stop=stop_after_attempt(3),

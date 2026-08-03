@@ -5,6 +5,7 @@
 """
 import asyncio
 import logging
+import threading
 import time
 from typing import Dict, Optional
 
@@ -26,7 +27,8 @@ class RateLimiter:
         self.burst = burst
         self._tokens: float = burst
         self._last_refill: float = time.monotonic()
-        self._lock = asyncio.Lock()
+        self._lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
 
     async def acquire(self) -> float:
         """获取一个令牌。等待直到有令牌可用。
@@ -34,7 +36,7 @@ class RateLimiter:
         Returns:
             等待时间（秒）
         """
-        async with self._lock:
+        async with self._async_lock:
             self._refill()
             if self._tokens >= 1.0:
                 self._tokens -= 1.0
@@ -43,6 +45,19 @@ class RateLimiter:
             wait_time = (1.0 - self._tokens) / self.rate
             self._tokens = 0.0
         await asyncio.sleep(wait_time)
+        return wait_time
+
+    def acquire_sync(self) -> float:
+        """同步版本的 acquire，用于非 asyncio 环境"""
+        with self._lock:
+            self._refill()
+            if self._tokens >= 1.0:
+                self._tokens -= 1.0
+                return 0.0
+            wait_time = (1.0 - self._tokens) / self.rate
+            self._tokens = 0.0
+        if wait_time > 0:
+            time.sleep(wait_time)
         return wait_time
 
     def _refill(self):
