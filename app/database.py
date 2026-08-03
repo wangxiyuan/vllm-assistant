@@ -424,6 +424,25 @@ def _ensure_slack_configs_schema():
                     logger.warning(f"Failed to add column {col_name} to slack_configs: {e}")
 
 
+def _ensure_intelligence_reports_category():
+    """确保 intelligence_reports 表包含 category 列（向后兼容迁移）"""
+    from sqlalchemy import inspect, DDL
+
+    with engine.connect() as conn:
+        try:
+            existing_cols = {c["name"] for c in inspect(conn).get_columns("intelligence_reports")}
+        except Exception:
+            return
+
+        if "category" not in existing_cols:
+            try:
+                conn.execute(DDL("ALTER TABLE intelligence_reports ADD COLUMN category VARCHAR(50) DEFAULT 'manual'"))
+                conn.commit()
+                logger.info("Added category column to intelligence_reports table")
+            except Exception as e:
+                logger.warning(f"Failed to add category column to intelligence_reports: {e}")
+
+
 _ensure_indexes()
 _ensure_fts_triggers()
 _ensure_repo_caches_schema()
@@ -431,6 +450,7 @@ _ensure_items_repo_column()
 _ensure_watchlist_repo_column()
 _ensure_my_prs_repo_column()
 _ensure_slack_configs_schema()
+_ensure_intelligence_reports_category()
 # 重建表会丢失索引，迁移后重新补建
 _ensure_indexes()
 

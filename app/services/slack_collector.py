@@ -291,7 +291,8 @@ class SlackCollector:
             r = s.get(f"https://{ws}.slack.com/sign_in_with_password", timeout=15)
             m = re.search(r'crumbValue&quot;:&quot;(.*?)&quot;', r.text)
             if not m:
-                logger.error("Failed to extract crumb from signin page")
+                logger.error(f"Failed to extract crumb from signin page, status={r.status_code}")
+                logger.debug(f"Signin page snippet: {r.text[:2000]}")
                 return False
             crumb = m.group(1).encode().decode("unicode_escape")
 
@@ -300,12 +301,20 @@ class SlackCollector:
                 "crumb": crumb, "remember": "remember",
                 "email": email, "password": password,
             }
-            s.post(f"https://{ws}.slack.com/sign_in_with_password", data=login_data,
+            login_resp = s.post(f"https://{ws}.slack.com/sign_in_with_password", data=login_data,
                    allow_redirects=True, timeout=15)
+
+            logger.debug(f"Login response status: {login_resp.status_code}")
+            logger.debug(f"Login response URL: {login_resp.url}")
+            logger.debug(f"Cookies after login: {dict(s.cookies)}")
 
             d_cookie = s.cookies.get("d", domain=".slack.com")
             if not d_cookie:
-                logger.error("No d cookie after login")
+                d_cookie = s.cookies.get("d")
+            if not d_cookie:
+                logger.error(f"No d cookie after login. Status={login_resp.status_code}, URL={login_resp.url}")
+                logger.debug(f"Response snippet: {login_resp.text[:2000]}")
+                logger.debug(f"All cookies: {dict(s.cookies)}")
                 return False
 
             r2 = s.get(f"https://{ws}.slack.com/", timeout=15)
