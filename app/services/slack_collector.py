@@ -308,9 +308,7 @@ class SlackCollector:
             logger.error(f"Login response URL: {login_resp.url}")
             logger.error(f"Cookies after login: {dict(s.cookies)}")
 
-            d_cookie = s.cookies.get("d", domain=".slack.com")
-            if not d_cookie:
-                d_cookie = s.cookies.get("d")
+            d_cookie = s.cookies.get("d")
             if not d_cookie:
                 logger.error(f"No d cookie after login. Status={login_resp.status_code}, URL={login_resp.url}")
                 logger.error(f"Response snippet: {login_resp.text[:2000]}")
