@@ -46,22 +46,6 @@ export function clearAICache(itemType: string, number: number, action: string) {
   }, { timeout: 5000 })
 }
 
-/** 推荐标签 */
-export function suggestLabels(issueTitle: string, issueBody: string) {
-  return api('/api/ai-assistant/suggest-labels', {
-    method: 'POST',
-    body: JSON.stringify({ issue_title: issueTitle, issue_body: issueBody }),
-  })
-}
-
-/** 分析影响范围 */
-export function analyzeImpact(changedFiles: string[]) {
-  return api('/api/ai-assistant/analyze-impact', {
-    method: 'POST',
-    body: JSON.stringify({ changed_files: changedFiles }),
-  })
-}
-
 /** 生成洞察报告 */
 export function generateIntelReport(payload: any) {
   return api('/api/intelligence/reports/generate', {

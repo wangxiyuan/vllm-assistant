@@ -19,7 +19,7 @@ export const useTodoStore = defineStore('todo', () => {
   const newTask = ref({
     title: '', description: '', source: 'self', priority: 'P2',
     area: '', assignee_id: null, due_date: '', related_refs: [] as any[],
-    refInput: '', trigger_dedup_check: false,
+    refInput: '',
   })
   const newTaskLoading = ref(false)
 
@@ -30,10 +30,6 @@ export const useTodoStore = defineStore('todo', () => {
   const editingTask = ref(false)
   const editTaskForm = ref<any>({})
   const taskSaving = ref(false)
-
-  // Dedup
-  const dedupLoading = ref(false)
-  const dedupResult = ref<any>(null)
 
   // Insight
   const insightGenLoading = ref(false)
@@ -111,7 +107,7 @@ export const useTodoStore = defineStore('todo', () => {
     if (newTaskLoading.value) return
     newTaskLoading.value = true
     try {
-      const { trigger_dedup_check, refInput, ...payload } = newTask.value as any
+      const { refInput, ...payload } = newTask.value as any
       if (!payload.due_date) delete payload.due_date
       if (!payload.area) delete payload.area
       if (!payload.related_refs || payload.related_refs.length === 0) delete payload.related_refs
@@ -125,11 +121,8 @@ export const useTodoStore = defineStore('todo', () => {
         (todoStats.value.by_priority as any)[result.priority] = ((todoStats.value.by_priority as any)[result.priority] || 0) + 1
       }
       useAppStore().showToast('任务已创建', `#${result.id} ${result.title}`, 'success')
-      newTask.value = { title: '', description: '', source: 'self', priority: 'P2', area: '', assignee_id: null, due_date: '', related_refs: [], refInput: '', trigger_dedup_check: false }
+      newTask.value = { title: '', description: '', source: 'self', priority: 'P2', area: '', assignee_id: null, due_date: '', related_refs: [], refInput: '' }
       showAddModal.value = false
-      if (result.dedup_check_result?.matches?.length > 0) {
-        useAppStore().showToast('发现可能重复', `${result.dedup_check_result.matches.length} 个相似 issue/PR`, 'info', 6000)
-      }
     } catch (e: any) {
       useAppStore().showToast('创建失败', e.message, 'error')
     } finally {
@@ -143,7 +136,6 @@ export const useTodoStore = defineStore('todo', () => {
     selectedTaskDetails.value = null
     taskDrawerLoading.value = false
     editingTask.value = false
-    dedupResult.value = (task as any).dedup_check_result || null
     subtasks.value = []
     showSubtaskForm.value = false
     loadTaskDetails(task.id)
@@ -154,7 +146,6 @@ export const useTodoStore = defineStore('todo', () => {
     selectedTask.value = null
     selectedTaskDetails.value = null
     editingTask.value = false
-    dedupResult.value = null
     subtasks.value = []
     showSubtaskForm.value = false
     newSubtask.value = { title: '', description: '', priority: 'P2', assignee_id: null, related_refs: [], refInput: '' }
@@ -166,7 +157,6 @@ export const useTodoStore = defineStore('todo', () => {
     try {
       const details = await api(`/api/personal-todo/tasks/${taskId}`)
       selectedTaskDetails.value = details
-      dedupResult.value = details.dedup_check_result || null
     } catch (e: any) {
       useAppStore().showToast('加载详情失败', e.message, 'error')
     } finally {
@@ -284,38 +274,6 @@ export const useTodoStore = defineStore('todo', () => {
       useAppStore().showToast(newStatus === 'done' ? '已完成' : '已恢复', '', 'success')
     } catch (e: any) {
       useAppStore().showToast('操作失败', e.message, 'error')
-    }
-  }
-
-  // Dedup
-  async function runDedupCheck(task: TodoTask) {
-    if (dedupLoading.value) return
-    dedupLoading.value = true
-    try {
-      const result: any = await api(`/api/personal-todo/tasks/${task.id}/dedup-check`, {
-        method: 'POST',
-        body: JSON.stringify({ repos: [], check_type: 'hybrid' }),
-      }, { timeout: 120000 })
-      dedupResult.value = { checked: true, matches: result.results || [] }
-      const idx = tasks.value.findIndex(t => t.id === task.id)
-      if (idx >= 0) {
-        tasks.value[idx].dedup_check_result = dedupResult.value
-        tasks.value[idx].has_dedup_check = true
-      }
-      if (selectedTaskDetails.value?.id === task.id) {
-        selectedTaskDetails.value.dedup_check_result = dedupResult.value
-        selectedTaskDetails.value.has_dedup_check = true
-      }
-      const matchCount = (result.results || []).length
-      if (matchCount > 0) {
-        useAppStore().showToast('发现可能重复', `${matchCount} 个相似 issue/PR`, 'info', 6000)
-      } else {
-        useAppStore().showToast('无重复', '未发现相似 issue/PR', 'success')
-      }
-    } catch (e: any) {
-      useAppStore().showToast('去重检查失败', e.message, 'error')
-    } finally {
-      dedupLoading.value = false
     }
   }
 
@@ -590,7 +548,7 @@ export const useTodoStore = defineStore('todo', () => {
     tasks, todoStats, loading, filterStatus, filterPriority, sortBy, sortOrder,
     useKanban, showAddModal, newTask, newTaskLoading,
     selectedTask, selectedTaskDetails, taskDrawerLoading, editingTask, editTaskForm, taskSaving,
-    dedupLoading, dedupResult, insightGenLoading,
+    insightGenLoading,
     showInsightSourceModal, insightSourceTask, insightSourceSelected, insightSourceSaving,
     subtasks, subtasksLoading, showSubtaskForm, newSubtask,
     editingSubtaskId, editSubtaskForm,
@@ -599,7 +557,7 @@ export const useTodoStore = defineStore('todo', () => {
     loadTasks, createTask, deleteTask, toggleTaskDone,
     openTask, closeTask, loadTaskDetails,
     startEditTask, cancelEditTask, saveTask,
-    runDedupCheck, moveTaskPriority, openTaskInsight, generateInsightFromTask,
+    moveTaskPriority, openTaskInsight, generateInsightFromTask,
     openInsightSourceModal, toggleInsightSource, isInsightSourceSelected, confirmGenerateInsight,
     loadSubtasks, createSubtask, toggleSubtaskDone, deleteSubtask,
     startEditSubtask, cancelEditSubtask, saveSubtask,

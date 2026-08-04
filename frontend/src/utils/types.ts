@@ -110,8 +110,6 @@ export interface TodoTask {
   updated_at: string
   related_refs?: any[]
   tags?: string[]
-  dedup_check_result?: any
-  has_dedup_check?: boolean
   has_ai_insight?: boolean
   latest_insight_report_id?: number
   children?: TodoTask[]

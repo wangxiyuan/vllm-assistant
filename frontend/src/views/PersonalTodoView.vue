@@ -234,8 +234,6 @@ async function generateInsight(task: any) {
                 <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state">{{ ref.state }}</span>
               </span>
               <span v-if="(task.related_refs || []).length > 2" class="kanban-tag">+{{ (task.related_refs || []).length - 2 }}</span>
-              <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
-              <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success kanban-tag-icon"><Icon name="check" :size="11" /> 无重复</span>
               <span v-if="task.has_ai_insight" class="kanban-tag is-info kanban-tag-icon"><Icon name="search" :size="11" /> 有洞察</span>
             </div>
           </div>
@@ -267,8 +265,6 @@ async function generateInsight(task: any) {
                 <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state">{{ ref.state }}</span>
               </span>
               <span v-if="(task.related_refs || []).length > 3" class="kanban-tag">+{{ (task.related_refs || []).length - 3 }}</span>
-              <span v-if="task.has_dedup_check && task.dedup_check_result?.matches?.length > 0" class="kanban-tag is-warning">{{ task.dedup_check_result.matches.length }} 重复</span>
-              <span v-if="task.has_dedup_check && (!task.dedup_check_result || !task.dedup_check_result.matches || task.dedup_check_result.matches.length === 0)" class="kanban-tag is-success kanban-tag-icon"><Icon name="check" :size="11" /> 无重复</span>
               <span v-if="task.has_ai_insight" class="kanban-tag is-info kanban-tag-icon"><Icon name="search" :size="11" /> 有洞察</span>
             </div>
           </div>
@@ -343,12 +339,6 @@ async function generateInsight(task: any) {
                 </span>
               </div>
             </div>
-            <div class="form-group">
-              <label class="toggle-label">
-                <input type="checkbox" v-model="todoStore.newTask.trigger_dedup_check" />
-                添加后自动去重检查
-              </label>
-            </div>
           </div>
           <div class="modal-footer">
             <button class="btn" @click="todoStore.showAddModal = false">取消</button>
@@ -406,10 +396,6 @@ async function generateInsight(task: any) {
                   <button class="btn btn-sm" @click="todoStore.startEditTask()">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                     编辑
-                  </button>
-                  <button class="btn btn-sm" @click="todoStore.runDedupCheck(todoStore.selectedTask!)" :disabled="todoStore.dedupLoading">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-                    {{ todoStore.dedupLoading ? '检查中…' : '去重检查' }}
                   </button>
                   <button class="btn btn-sm" @click="generateInsight(todoStore.selectedTask!)" :disabled="todoStore.insightGenLoading">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
@@ -538,24 +524,7 @@ async function generateInsight(task: any) {
               </div>
             </template>
 
-            <!-- Dedup result -->
-            <div v-if="!todoStore.editingTask && todoStore.dedupResult" style="margin-bottom:var(--space-4);">
-              <label class="form-label">去重结果</label>
-              <div v-if="todoStore.dedupResult.matches && todoStore.dedupResult.matches.length > 0" class="ai-result">
-                <div class="ai-result-body">
-                  <p>发现 <strong>{{ todoStore.dedupResult.matches.length }}</strong> 个可能重复的项：</p>
-                  <div v-for="m in todoStore.dedupResult.matches" :key="m.id || m.number" class="dedup-item">
-                    <a :href="m.url" target="_blank" class="dedup-item-link">{{ m.title }}</a>
-                    <span v-if="m.repo" class="badge">{{ m.repo }}#{{ m.number }}</span>
-                  </div>
-                </div>
-              </div>
-              <div v-else>
-                <span class="badge badge-success">未发现重复</span>
-              </div>
-            </div>
-
-            <!-- AI Insight -->
+            
             <div v-if="!todoStore.editingTask && (todoStore.selectedTask as any).latest_insight_report_id" style="margin-bottom:var(--space-4);">
               <label class="form-label">AI 洞察</label>
               <button class="btn btn-sm btn-subtle" @click="openInsight(todoStore.selectedTask!)">

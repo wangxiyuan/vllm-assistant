@@ -310,9 +310,6 @@ class PersonalTask(Base):
     due_date = Column(Date)
     completed_at = Column(DateTime)
 
-    # AI 辅助字段
-    dedup_check_result = Column(Text)  # JSON: 去重检查结果
-
     # ORM 关系
     children = relationship("PersonalTask", backref="parent", remote_side=[id],
                             cascade="all, delete")
@@ -335,20 +332,7 @@ class PersonalTask(Base):
             "updated_at": _iso_utc(self.updated_at),
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "completed_at": _iso_utc(self.completed_at),
-            "dedup_check_result": json.loads(self.dedup_check_result) if self.dedup_check_result else None,
         }
-
-
-class TaskDedupCache(Base):
-    """去重检查缓存（DESIGN-PERSONAL-TODO.md 2.2）"""
-
-    __tablename__ = "task_dedup_cache"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    task_id = Column(Integer, ForeignKey("personal_tasks.id"))
-    check_type = Column(String(20))  # 'keyword' / 'semantic' / 'hybrid'
-    matched_items = Column(Text)  # JSON: 匹配到的 issue/PR 列表
-    checked_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class IntelligenceReport(Base):

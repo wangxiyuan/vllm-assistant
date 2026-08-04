@@ -80,21 +80,10 @@ class AIChatSessionTitleRequest(BaseModel):
 
 
 class AIReviewRequest(BaseModel):
-    """AI Review请求"""
+    """AI Review 请求"""
     pr_number: int
     include_diff: bool = True
     repo: Optional[str] = None  # 完整 owner/repo，None 时用 Config 默认仓库
-
-
-class AIAnalyzeRequest(BaseModel):
-    """AI分析请求"""
-    changed_files: List[str]
-
-
-class AISuggestLabelRequest(BaseModel):
-    """AI 推荐 Issue 标签请求（DESIGN.md 135 行：查看 issue 时手动触发）"""
-    issue_title: str
-    issue_body: str = ""
 
 
 # ===== Personal TODO 请求模型 =====
@@ -112,7 +101,6 @@ class PersonalTaskCreate(BaseModel):
     related_refs: List[dict] = []
     parent_id: Optional[int] = None  # 父任务 ID，用于创建子任务
     subtask_order: Optional[int] = None  # 子任务排序序号（可选）
-    trigger_dedup_check: bool = False
 
     @field_validator("due_date", mode="before")
     @classmethod
@@ -178,19 +166,6 @@ class PersonalTaskUpdate(BaseModel):
     def validate_status(cls, v):
         if v is not None and v not in ("todo", "in_progress", "done", "cancelled"):
             raise ValueError("status must be one of: todo, in_progress, done, cancelled")
-        return v
-
-
-class DedupCheckRequest(BaseModel):
-    """去重检查请求"""
-    repos: List[str] = []
-    check_type: str = "hybrid"
-
-    @field_validator("check_type")
-    @classmethod
-    def validate_check_type(cls, v):
-        if v not in ("keyword", "semantic", "hybrid"):
-            raise ValueError("check_type must be one of: keyword, semantic, hybrid")
         return v
 
 

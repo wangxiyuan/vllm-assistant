@@ -2,7 +2,7 @@
 Personal TODO API - 个人任务管理
 对应 DESIGN-PERSONAL-TODO.md 3.1 / 3.2
 
-提供任务的 CRUD 以及去重检查接口。洞察报告生成接口见 app/api/intelligence.py。
+提供任务的 CRUD。洞察报告生成接口见 app/api/intelligence.py。
 """
 import json
 import logging
@@ -16,11 +16,10 @@ from sqlalchemy.orm import Session
 
 from app.config import Config
 from app.database import get_db
-from app.models import PersonalTask, TaskDedupCache, IntelligenceReport, _iso_utc
+from app.models import PersonalTask, IntelligenceReport, _iso_utc
 from app.schemas import (
     PersonalTaskCreate,
     PersonalTaskUpdate,
-    DedupCheckRequest,
 )
 from pydantic import BaseModel
 
@@ -44,14 +43,13 @@ def _utcnow() -> datetime:
 def _task_list_dict(task: PersonalTask, db: Session, insight_task_ids: set = None,
                     insight_report_ids: dict = None,
                     watchlist_set: set = None) -> dict:
-    """列表场景下返回的精简 dict（含 has_dedup_check / has_ai_insight 标记）
+    """列表场景下返回的精简 dict（含 has_ai_insight 标记）
 
     insight_task_ids: 已有 completed 报告的 task_id 集合（批量预查，避免 N+1）
     insight_report_ids: task_id → latest report id 映射（批量预查，避免 N+1）
     watchlist_set: {"issue:123", "pr:456"} 集合，用于标记关联 ref 是否在特别关注中
     """
     d = task.to_dict()
-    d["has_dedup_check"] = bool(task.dedup_check_result)
     if insight_task_ids is not None:
         d["has_ai_insight"] = task.id in insight_task_ids
         if d["has_ai_insight"] and insight_report_ids is not None:
@@ -221,10 +219,7 @@ async def list_tasks(
 
 @router.post("/tasks")
 async def create_task(req: PersonalTaskCreate, db: Session = Depends(get_db)):
-    """创建新任务（DESIGN-PERSONAL-TODO.md 3.1 POST）
-
-    trigger_dedup_check=true 时立即执行去重检查（同步），结果写入 dedup_check_result。
-    """
+    """创建新任务（DESIGN-PERSONAL-TODO.md 3.1 POST）"""
     now = _utcnow()
     task = PersonalTask(
         title=req.title,
@@ -247,16 +242,6 @@ async def create_task(req: PersonalTaskCreate, db: Session = Depends(get_db)):
     db.refresh(task)
 
     result = task.to_dict()
-
-    if req.trigger_dedup_check:
-        try:
-            from app.services._shared import get_active_repo_map
-            repos = list(get_active_repo_map().values())
-            dedup_result = _run_dedup_check(task, repos, "hybrid", db)
-            result["dedup_check_result"] = dedup_result
-        except Exception:
-            logger.exception("dedup check failed on task create")
-            result["dedup_check_result"] = {"checked": False, "error": "dedup check failed"}
 
     return result
 
@@ -303,8 +288,6 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Task not found")
     # 级联删除子任务
     db.query(PersonalTask).filter(PersonalTask.parent_id == task_id).delete()
-    # 级联清理去重缓存
-    db.query(TaskDedupCache).filter(TaskDedupCache.task_id == task_id).delete()
     # 级联清理关联的洞察报告
     db.query(IntelligenceReport).filter(IntelligenceReport.task_id == task_id).delete()
     db.delete(task)
@@ -354,63 +337,6 @@ async def get_task(task_id: int, db: Session = Depends(get_db)):
     watchlist_set = {f"{w.item_type}:{w.number}" for w in watchlist_items}
 
     return _task_list_dict(task, db, watchlist_set=watchlist_set)
-
-
-@router.post("/tasks/{task_id}/dedup-check")
-def dedup_check(task_id: int, req: DedupCheckRequest, db: Session = Depends(get_db)):
-    """对指定任务执行去重检查（DESIGN-PERSONAL-TODO.md 3.2）
-
-    用 def（非 async）避免同步 GitHub/AI 调用阻塞事件循环。
-    """
-    task = db.query(PersonalTask).filter(PersonalTask.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    from app.services._shared import get_active_repo_map
-    repos = req.repos or list(get_active_repo_map().values())
-    try:
-        result = _run_dedup_check(task, repos, req.check_type, db)
-        return {
-            "task_id": task.id,
-            "checked_at": _iso_utc(_utcnow()),
-            "results": result.get("matches", []),
-        }
-    except Exception:
-        logger.exception("dedup check failed")
-        raise HTTPException(status_code=500, detail="Dedup check failed")
-
-
-def _run_dedup_check(task: PersonalTask, repos: list, check_type: str, db: Session) -> dict:
-    """执行去重检查并持久化结果。
-
-    被 create_task 和 dedup_check 复用。返回 {"checked": bool, "matches": [...]}。
-    """
-    from app.services.task_dedup import TaskDedupChecker
-
-    checker = TaskDedupChecker()
-    matches = checker.check_duplicates(
-        title=task.title or "",
-        description=task.description or "",
-        repos=repos,
-        check_type=check_type,
-    )
-
-    result = {"checked": True, "matches": matches}
-
-    # 持久化到 task
-    task.dedup_check_result = json.dumps(result, ensure_ascii=False)
-    task.updated_at = _utcnow()
-    # 持久化到缓存表
-    cache_row = TaskDedupCache(
-        task_id=task.id,
-        check_type=check_type,
-        matched_items=json.dumps(matches, ensure_ascii=False),
-        checked_at=_utcnow(),
-    )
-    db.add(cache_row)
-    db.commit()
-    db.refresh(task)
-    return result
 
 
 class ResolveRefRequest(BaseModel):

@@ -443,6 +443,59 @@ def _ensure_intelligence_reports_category():
                 logger.warning(f"Failed to add category column to intelligence_reports: {e}")
 
 
+def _cleanup_obsolete_schema():
+    """清理已废弃的表和字段（dedup_check_result, task_dedup_cache）"""
+    from sqlalchemy import inspect, DDL, text
+
+    with engine.connect() as conn:
+        # 1. 删除废弃的 task_dedup_cache 表
+        try:
+            conn.execute(DDL("DROP TABLE IF EXISTS task_dedup_cache"))
+            conn.commit()
+            logger.info("Dropped obsolete table: task_dedup_cache")
+        except Exception as e:
+            logger.warning(f"Failed to drop task_dedup_cache: {e}")
+
+        # 2. 删除 personal_tasks.dedup_check_result 列
+        try:
+            cols = {c["name"] for c in inspect(conn).get_columns("personal_tasks")}
+            if "dedup_check_result" in cols:
+                # SQLite 不支持 DROP COLUMN，用重建方式
+                conn.execute(DDL("""
+                    CREATE TABLE personal_tasks_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        source VARCHAR(50) NOT NULL,
+                        priority VARCHAR(10) NOT NULL DEFAULT 'P2',
+                        status VARCHAR(20) NOT NULL DEFAULT 'todo',
+                        related_refs JSON DEFAULT '[]',
+                        area VARCHAR(50),
+                        tags TEXT,
+                        assignee_id INTEGER REFERENCES users(id),
+                        parent_id INTEGER REFERENCES personal_tasks(id),
+                        subtask_order INTEGER DEFAULT 0,
+                        created_at TIMESTAMP NOT NULL,
+                        updated_at TIMESTAMP NOT NULL,
+                        due_date DATE,
+                        completed_at TIMESTAMP
+                    )
+                """))
+                conn.execute(DDL("""
+                    INSERT INTO personal_tasks_new SELECT
+                        id, title, description, source, priority, status,
+                        related_refs, area, tags, assignee_id, parent_id,
+                        subtask_order, created_at, updated_at, due_date, completed_at
+                    FROM personal_tasks
+                """))
+                conn.execute(DDL("DROP TABLE personal_tasks"))
+                conn.execute(DDL("ALTER TABLE personal_tasks_new RENAME TO personal_tasks"))
+                conn.commit()
+                logger.info("Dropped obsolete column: personal_tasks.dedup_check_result")
+        except Exception as e:
+            logger.warning(f"Failed to drop dedup_check_result column: {e}")
+
+
 _ensure_indexes()
 _ensure_fts_triggers()
 _ensure_repo_caches_schema()
@@ -451,6 +504,7 @@ _ensure_watchlist_repo_column()
 _ensure_my_prs_repo_column()
 _ensure_slack_configs_schema()
 _ensure_intelligence_reports_category()
+_cleanup_obsolete_schema()
 # 重建表会丢失索引，迁移后重新补建
 _ensure_indexes()
 

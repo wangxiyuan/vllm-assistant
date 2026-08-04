@@ -27,8 +27,6 @@ export const useCommunityStore = defineStore('community', () => {
   const communityIssueArea = ref('')
   const communityPRArea = ref('')
   const communityRepo = ref('')  // 当前选中的仓库，'' 表示全部
-  const labelLoading = ref<number | null>(null)
-  const labelResult = ref<Record<number, string[]>>({})
 
   const trackedRepos = computed(() => {
     const reposStore = useReposStore()
@@ -153,40 +151,12 @@ export const useCommunityStore = defineStore('community', () => {
     }
   }
 
-  async function toggleLabelPopover(issue: Issue) {
-    if (labelResult.value[issue.number]) {
-      delete labelResult.value[issue.number]
-      return
-    }
-    labelResult.value = {}
-    labelLoading.value = issue.number
-    try {
-      const result: any = await api('/api/ai-assistant/suggest-labels', {
-        method: 'POST',
-        body: JSON.stringify({
-          issue_title: issue.title,
-          issue_body: (issue.body || '').slice(0, 2000),
-        }),
-      })
-      labelResult.value[issue.number] = result.suggested_labels || []
-      if (labelResult.value[issue.number].length === 0) {
-        useAppStore().showToast('无标签建议', 'AI 未给出建议（检查 OPENAI_API_KEY 配置）', 'info')
-      }
-    } catch (e: any) {
-      useAppStore().showToast('标签推荐失败', e.message, 'error')
-      labelResult.value[issue.number] = []
-    } finally {
-      labelLoading.value = null
-    }
-  }
-
   return {
     issues, prs, stats, sortBy, communityTab, communityPage, pageSize,
     communityLoadingMore, communityIssueType, communityIssueArea, communityPRArea,
     communityRepo, trackedRepos,
-    labelLoading, labelResult,
     filteredIssues, filteredPRs, pagedFilteredIssues, pagedFilteredPRs,
     hasMoreCommunity, filteredListEmpty, newIssuesCount, newPRsCount,
-    loadAreas, loadCommunityData, forceRefresh, toggleLabelPopover,
+    loadAreas, loadCommunityData, forceRefresh,
   }
 })

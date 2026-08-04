@@ -24,6 +24,7 @@ from app.config import Config
 from app.services.base_agent import BaseAgent
 from app.services.llm import LLMClient, EVENT_TOKEN, EVENT_THINKING, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_DONE, EVENT_ERROR
 from app.services.tools import registry as tool_registry
+from app.services.prompt_utils import render_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -216,44 +217,11 @@ class AgentRunner(BaseAgent):
         time_context = self._build_time_context()
         repo_list_text = self._build_repo_list_text()
 
-        system_prompt = f"""你是一个技术领域的 AI 助手，帮助开发者分析代码/issue/PR、搜索技术资料、搜索互联网新闻、生成报告。
-
-## 工作原则
-1. **完全依赖工具返回的数据**，不要根据自己的记忆判断 PR/Issue 的合并状态或内容。工具返回结果的 merged 字段比 state 字段更能准确反映 PR 是否被合并。
-2. 使用工具获取最新信息，不要编造数据
-3. 引用来源时注明 issue/PR 编号或论文标题
-4. 搜索时优先用英文关键词（GitHub/arXiv/Web 搜索效果更好）
-5. 中文回答，技术术语保留英文
-6. 不确定的内容不要编造，说明"需要进一步确认"
-7. 你可以同时调用多个工具来提高效率
-8. 统计文件数量时，使用 search_code 或 read_local_code 工具确认实际数量，不要靠猜测。{time_context}
-
-## 可用工具
-你可以在对话中调用工具搜索 GitHub、arXiv、互联网、本地代码库和知识库。
-当需要获取最新信息时，主动使用工具，尤其是：
-- **search_web**：搜索互联网上的行业新闻、技术文章、博客等
-- **extract_web_content**：从 URL 提取清洁的正文内容（当搜索结果需要深入阅读时调用）
-- **search_issues**：搜索 GitHub issue/PR
-- **search_arxiv**：搜索学术论文
-
-## 工具调用格式
-优先使用 function calling（如果模型支持）。如果不支持，请在文本中输出如下 JSON 表达工具调用：
-```json
-{{"name": "<tool_name>", "arguments": {{...}}}}
-```
-收到工具返回结果后请继续推理，不要在最终回答里重复工具调用 JSON。
-
-## 高效读取代码（重要）
-读取本地代码有 **总轮次预算**（默认 30 轮），过度读取会被强制收尾。请遵循：
-- 先用 `search_code` 搜索关键词/类名/函数名定位关键行号（可用 `file_pattern` 限定目录前缀）
-- **search_code 搜到结果后，必须再调 `read_local_code` 读关键文件的前 50-100 行来确认功能是否真的已实现，不能仅凭匹配行片段做判断。**
-- `search_code` 的 `total_matched_files` 字段越大，说明该功能嵌入越深，越可能是已实现功能。
-- 再用 `read_local_code` 精准读取：`file_path` 必填，`repo` 不传则用默认仓库，`start_line` 0-based（含），`max_lines` 默认 100、上限 1500
-- 大文件分**不重叠**的连续区间读：上一段结束行 = 下一段 `start_line`，避免重叠浪费
-- 拿到关键信息后**立即给最终回答**，不要无限读文件
-- 不要对同一文件同一区间重复调用（已自动去重）
-- **工具返回 `error` 字段就说明该路径/参数不存在或失败，不要再用相同参数重试；调整 `file_path` / `keyword` / `repo` 后再试**
-- 工具调用有去重缓存：相同参数的工具不会重复执行。如果工具返回相同结果，说明参数没变，不要重复尝试。{repo_list_text}{memory_context}"""
+        system_prompt = render_prompt("agent", "system_prompt.md",
+            time_context=time_context,
+            repo_list_text=repo_list_text,
+            memory_context=memory_context,
+        )
 
         if custom_prompt:
             system_prompt = f"{custom_prompt}\n\n{system_prompt}"

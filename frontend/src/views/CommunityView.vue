@@ -123,13 +123,6 @@ function switchRepo(repo: string) {
           </span>
           <span v-if="item.type === 'issue'" class="item-issue-type">{{ issueTypeLabel(issueType(item)) }}</span>
           <span v-if="item.is_new" class="badge badge-new">新</span>
-          <button v-if="item.type === 'issue' && communityStore.labelLoading === item.number" class="btn btn-sm btn-ghost" disabled style="padding:2px 4px;font-size:10px;">标签建议…</button>
-          <button v-if="item.type === 'issue' && communityStore.labelLoading !== item.number && !communityStore.labelResult[item.number]" class="btn btn-sm btn-ghost" @click.stop="communityStore.toggleLabelPopover(item)" title="AI 标签建议" style="padding:2px 4px;font-size:10px;">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-          </button>
-          <span v-if="item.type === 'issue' && communityStore.labelResult[item.number] && communityStore.labelResult[item.number].length > 0" class="badge-group" @click.stop="communityStore.toggleLabelPopover(item)">
-            <span v-for="(label, li) in communityStore.labelResult[item.number].slice(0, 3)" :key="li" class="badge badge-ai-suggest" style="cursor:pointer;font-size:9px;">{{ label }}</span>
-          </span>
         </div>
         <div class="item-title-row">
           <h3 class="item-title">{{ item.title }}</h3>

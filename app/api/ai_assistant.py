@@ -1,6 +1,6 @@
 """
 AI Assistant API - AI辅助功能
-提供Review意见生成、PR影响范围分析、Issue/PR 摘要等功能。
+提供Review意见生成、Issue/PR 摘要、翻译等功能。
 
 ⚠️ 重要：本模块只调用 GitHub REST API 的**只读**接口和 OpenAI 兼容 API，
 **绝不会**对 GitHub 做任何写操作（不会自动评论、自动修改 PR/Issue 状态）。
@@ -8,7 +8,6 @@ AI Assistant API - AI辅助功能
 
 AI 输出会缓存到本地 SQLite（ai_cache 表），刷新页面后仍可查看。
 """
-import json
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -17,11 +16,7 @@ from app.config import Config
 from app.services.ai_assistant import AIAssistant
 from app.services.ai_cache import ai_cache as cache_service
 from app.services._shared import get_github_client as _get_github_client
-from app.schemas import (
-    AIReviewRequest,
-    AIAnalyzeRequest,
-    AISuggestLabelRequest,
-)
+from app.schemas import AIReviewRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -75,35 +70,6 @@ def generate_review(request: AIReviewRequest):
         raise
     except Exception:
         logger.exception("Error in generate_review")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.post("/analyze-impact")
-def analyze_impact(request: AIAnalyzeRequest):
-    """分析 PR 影响范围"""
-    try:
-        _require_api_key()
-        ai = AIAssistant()
-        return ai.analyze_impact(request.changed_files)
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("Error in analyze-impact")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.post("/suggest-labels")
-def suggest_labels(request: AISuggestLabelRequest):
-    """根据 issue 内容推荐标签和领域（DESIGN.md 135 行）"""
-    try:
-        _require_api_key()
-        ai = AIAssistant()
-        labels = ai.suggest_labels(request.issue_title, request.issue_body)
-        return {"suggested_labels": labels}
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("Error in suggest_labels")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

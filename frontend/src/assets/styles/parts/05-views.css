@@ -18,6 +18,13 @@
     gap: var(--space-2);
     flex-wrap: wrap;
 }
+.view-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
 .view-stats {
     font-family: var(--font-mono);
     font-size: var(--text-sm);

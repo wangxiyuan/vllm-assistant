@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useIntelStore } from '@/stores/intel'
 import { useReposStore } from '@/stores/repos'
 import { renderMarkdown } from '@/composables/useMarkdown'
+import DailyReportRenderer from '@/components/common/DailyReportRenderer.vue'
 
 const route = useRoute()
 const intelStore = useIntelStore()
 const reposStore = useReposStore()
+
+const activeTab = ref<'daily' | 'manual'>('daily')
+
+const filteredReports = computed(() => {
+  return intelStore.reports.filter(r => (r.category || 'manual') === activeTab.value)
+})
 
 const intelSourceOptions = computed(() => {
   const repoOptions = reposStore.repos.map(r => ({
@@ -32,43 +39,61 @@ onMounted(async () => {
       const found = intelStore.reports.find(r => r.id === id)
       if (found) {
         intelStore.viewReport(found)
+        activeTab.value = (found.category || 'manual') as 'daily' | 'manual'
       } else {
-        // 报告不在当前列表（可能是刚生成还未加载），直接通过 API 获取
         intelStore.viewReport({ id } as any)
       }
     }
   }
 })
+
+function isDailyReport(report: any): boolean {
+  return (report.category || 'manual') === 'daily'
+}
 </script>
 
 <template>
   <div class="view-container">
     <div class="view-header">
       <h2 class="view-title">洞察面板</h2>
-      <div class="view-actions">
-        <button class="btn btn-primary btn-sm" :disabled="intelStore.dailyGenLoading" @click="intelStore.triggerDailyReport()">
-          <svg v-if="intelStore.dailyGenLoading" class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-          {{ intelStore.dailyGenLoading ? '生成中…' : '生成每日报告' }}
-        </button>
-        <button class="btn btn-primary btn-sm" @click="intelStore.openModal()">
-          + 生成自定义报告
-        </button>
+      <div class="view-header-row">
+        <div class="tab-bar">
+          <button :class="['tab', { active: activeTab === 'daily' }]" @click="activeTab = 'daily'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            每日报告
+          </button>
+          <button :class="['tab', { active: activeTab === 'manual' }]" @click="activeTab = 'manual'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            自定义洞察
+          </button>
+        </div>
+        <div class="view-actions">
+          <button v-if="activeTab === 'daily'" class="btn btn-primary btn-sm" :disabled="intelStore.dailyGenLoading" @click="intelStore.triggerDailyReport()">
+            <svg v-if="intelStore.dailyGenLoading" class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            {{ intelStore.dailyGenLoading ? '生成中…' : '生成每日报告' }}
+          </button>
+          <button v-if="activeTab === 'manual'" class="btn btn-primary btn-sm" @click="intelStore.openModal()">
+            + 生成自定义报告
+          </button>
+        </div>
       </div>
     </div>
 
+    <!-- Tab content -->
     <div class="report-list">
-      <div v-for="report in intelStore.reports" :key="report.id" class="report-card" @click="intelStore.viewReport(report)">
+      <div v-for="report in filteredReports" :key="report.id" class="report-card" @click="intelStore.viewReport(report)">
         <div class="report-header">
           <h3 class="report-title">{{ report.title || '无标题' }}</h3>
           <div class="report-header-badges">
-            <span v-if="report.category === 'daily'" class="badge badge-daily">每日</span>
+            <span v-if="isDailyReport(report) && activeTab === 'manual'" class="badge badge-daily">每日</span>
             <span class="badge" :class="'status-' + report.status">
               {{ report.status === 'completed' ? '已完成' : report.status === 'generating' ? '生成中' : '失败' }}
             </span>
           </div>
         </div>
         <div class="report-meta">
-          <span v-if="report.task_title" class="meta-item" @click.stop="intelStore.viewReport(report)" title="触发任务">触发任务: <strong>{{ report.task_title }}</strong></span>
+          <span v-if="report.task_title && !isDailyReport(report)" class="meta-item" @click.stop="intelStore.viewReport(report)" title="触发任务">触发任务: <strong>{{ report.task_title }}</strong></span>
+          <span v-if="isDailyReport(report)" class="meta-item">📅 {{ new Date(report.created_at).toLocaleDateString('zh-CN') }}</span>
           <span v-for="s in report.sources" :key="s" class="badge badge-source" :class="intelStore.intelSourceClass(s)">{{ intelStore.intelSourceLabel(s) }}</span>
           <span>{{ report.word_count }} 字</span>
           <span>{{ new Date(report.created_at).toLocaleDateString('zh-CN') }}</span>
@@ -88,9 +113,11 @@ onMounted(async () => {
           </button>
         </div>
       </div>
-      <div v-if="intelStore.reports.length === 0 && !intelStore.loading" class="empty-state">
-        <p>暂无报告</p>
-        <button class="btn btn-primary btn-sm" @click="intelStore.openModal()">生成第一份报告</button>
+      <div v-if="filteredReports.length === 0 && !intelStore.loading" class="empty-state">
+        <p v-if="activeTab === 'daily'">暂无每日报告</p>
+        <p v-else>暂无自定义报告</p>
+        <button v-if="activeTab === 'daily'" class="btn btn-primary btn-sm" @click="intelStore.triggerDailyReport()">生成每日报告</button>
+        <button v-else class="btn btn-primary btn-sm" @click="intelStore.openModal()">生成第一份自定义报告</button>
       </div>
     </div>
 
@@ -162,8 +189,15 @@ onMounted(async () => {
           <div v-if="intelStore.reportModalLoading" class="modal-body detail-loading">
             加载中…
           </div>
+          <div v-else-if="intelStore.reportDetails" class="modal-body report-content">
+            <DailyReportRenderer
+              v-if="isDailyReport(intelStore.selectedReport)"
+              :content="intelStore.reportDetails.content || ''"
+            />
+            <div v-else class="pr-body" v-html="renderMarkdown(intelStore.reportDetails.content || '(无内容)')"></div>
+          </div>
           <div v-else class="modal-body report-content">
-            <div class="pr-body" v-html="renderMarkdown(intelStore.reportDetails?.content || '(无内容)')"></div>
+            <div class="pr-body" v-html="renderMarkdown('(无内容)')"></div>
           </div>
         </div>
       </div>
