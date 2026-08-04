@@ -496,19 +496,31 @@ async def generate_report_redirect(request: Request):
 async def list_sessions():
     """获取会话列表（按 updated_at 倒序）"""
     from app.database import SessionLocal
-    from app.models import AIChatSession
+    from app.models import AIChatSession, AIChatMessage
+    from sqlalchemy import func
 
     db = SessionLocal()
     try:
-        sessions = db.query(AIChatSession).order_by(AIChatSession.updated_at.desc()).limit(50).all()
+        count_subq = db.query(
+            AIChatMessage.session_id,
+            func.count(AIChatMessage.id).label("cnt")
+        ).group_by(AIChatMessage.session_id).subquery()
+
+        sessions = db.query(
+            AIChatSession,
+            func.coalesce(count_subq.c.cnt, 0).label("real_count")
+        ).outerjoin(
+            count_subq, AIChatSession.id == count_subq.c.session_id
+        ).order_by(AIChatSession.updated_at.desc()).limit(50).all()
+
         return {
             "sessions": [
                 {
-                    "id": s.id,
-                    "title": s.title,
-                    "message_count": s.message_count,
-                    "created_at": s.created_at.isoformat() + "Z" if s.created_at else None,
-                    "updated_at": s.updated_at.isoformat() + "Z" if s.updated_at else None,
+                    "id": s.AIChatSession.id,
+                    "title": s.AIChatSession.title,
+                    "message_count": s.real_count,
+                    "created_at": s.AIChatSession.created_at.isoformat() + "Z" if s.AIChatSession.created_at else None,
+                    "updated_at": s.AIChatSession.updated_at.isoformat() + "Z" if s.AIChatSession.updated_at else None,
                 }
                 for s in sessions
             ]

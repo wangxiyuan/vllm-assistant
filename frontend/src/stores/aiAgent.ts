@@ -6,6 +6,7 @@ import { useAppStore } from './app'
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  created_at?: string
 }
 
 export interface Session {
@@ -139,6 +140,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
       messages.value = (data.messages || []).map((m: any) => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
+        created_at: m.created_at,
       }))
     } catch (e: any) {
       useAppStore().showToast('加载消息失败', e.message, 'error')
@@ -426,7 +428,10 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
 
     for (const msg of msgs) {
       const role = msg.role === 'user' ? 'User' : 'AI'
-      md += `### ${role}\n\n${msg.content}\n\n---\n\n`
+      const time = msg.created_at
+        ? new Date(msg.created_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })
+        : ''
+      md += `### ${role} — ${time}\n\n${msg.content}\n\n---\n\n`
     }
 
     return md

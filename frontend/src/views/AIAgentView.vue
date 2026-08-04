@@ -464,6 +464,96 @@ const sortedKbTypes = computed(() => {
     .filter(t => t in stats)
     .map(t => ({ key: t, label: KNOWLEDGE_TYPE_LABELS[t] || t, count: stats[t] }))
 })
+
+// ── Session grouping by date ──
+
+function formatTime(isoStr: string): string {
+  const d = new Date(isoStr)
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  // Same day → show time only
+  if (d.toDateString() === now.toDateString()) return hhmm
+  // Yesterday
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${hhmm}`
+  // This year → show M/D
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}/${d.getDate()} ${hhmm}`
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
+function formatTimeShort(isoStr: string): string {
+  const d = new Date(isoStr)
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  if (d.toDateString() === now.toDateString()) return hhmm
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${hhmm}`
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}/${d.getDate()} ${hhmm}`
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${hhmm}`
+}
+
+function formatRelativeTime(isoStr: string): string {
+  const d = new Date(isoStr)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '刚刚'
+  if (diffMin < 60) return `${diffMin}分钟前`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour}小时前`
+  const diffDay = Math.floor(diffHour / 24)
+  if (diffDay === 1) return '昨天'
+  if (diffDay < 7) return `${diffDay}天前`
+  if (diffDay < 30) return `${Math.floor(diffDay / 7)}周前`
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}/${d.getDate()}`
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
+function getDateGroupLabel(isoStr: string): string {
+  const d = new Date(isoStr)
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) return '今天'
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return '昨天'
+  // This week
+  const weekStart = new Date(now)
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay())
+  if (d >= weekStart) return '本周'
+  // This month
+  if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) return '本月'
+  return `${d.getFullYear()}年${d.getMonth() + 1}月`
+}
+
+const GROUP_ORDER = ['今天', '昨天', '本周', '本月']
+
+const groupedSessions = computed(() => {
+  const groups: Record<string, typeof agentStore.sessions> = {}
+  const otherGroups: string[] = []
+  for (const s of agentStore.sessions) {
+    const label = getDateGroupLabel(s.updated_at)
+    if (!groups[label]) {
+      groups[label] = []
+      if (!GROUP_ORDER.includes(label)) otherGroups.push(label)
+    }
+    groups[label].push(s)
+  }
+  // Build ordered list
+  const result: { label: string; sessions: typeof agentStore.sessions }[] = []
+  for (const key of GROUP_ORDER) {
+    if (groups[key]) result.push({ label: key, sessions: groups[key] })
+  }
+  // Sort other groups (most recent first by the year/month numeric comparison)
+  otherGroups.sort().reverse()
+  for (const key of otherGroups) {
+    result.push({ label: key, sessions: groups[key] })
+  }
+  return result
+})
 </script>
 
 <template>
@@ -485,16 +575,22 @@ const sortedKbTypes = computed(() => {
         <!-- Sessions tab -->
         <div v-if="sidebarTab === 'sessions'" class="agent-tab-content">
           <div class="agent-session-list">
-            <div v-for="s in agentStore.sessions" :key="s.id"
-                 class="agent-session-item"
-                 :class="{ active: s.id === agentStore.currentSessionId }"
-                 @click="agentStore.switchSession(s.id)">
-              <div class="agent-session-title">{{ s.title }}</div>
-              <div class="agent-session-meta">{{ s.message_count }} 条消息</div>
-              <button class="agent-session-delete" @click.stop="agentStore.deleteSession(s.id)" title="删除会话">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              </button>
-            </div>
+            <template v-for="group in groupedSessions" :key="group.label">
+              <div class="agent-session-date-group">{{ group.label }}</div>
+              <div v-for="s in group.sessions" :key="s.id"
+                   class="agent-session-item"
+                   :class="{ active: s.id === agentStore.currentSessionId }"
+                   @click="agentStore.switchSession(s.id)">
+                <div class="agent-session-title">{{ s.title }}</div>
+                <div class="agent-session-meta">
+                  <span>{{ s.message_count }} 条消息</span>
+                  <span class="agent-session-time">{{ formatRelativeTime(s.updated_at) }}</span>
+                </div>
+                <button class="agent-session-delete" @click.stop="agentStore.deleteSession(s.id)" title="删除会话">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </div>
+            </template>
             <div v-if="agentStore.sessions.length === 0" class="empty-state" style="padding:var(--space-5)">
               暂无会话
             </div>
@@ -559,14 +655,17 @@ const sortedKbTypes = computed(() => {
                 </div>
               </div>
               <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
-              <div v-if="msg.role === 'user'" class="msg-actions">
-                <button class="msg-action-btn" @click="startEditMsg(i)" title="编辑">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                </button>
-                <button class="msg-action-btn" @click="regenerateResponse(i)" title="重新生成回复" v-if="i < agentStore.messages.length - 1 && agentStore.messages[i + 1]?.role === 'assistant'">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                </button>
-              </div>
+              <div class="msg-footer">
+                <span v-if="msg.created_at" class="msg-time">{{ formatTimeShort(msg.created_at) }}</span>
+                <div v-if="msg.role === 'user'" class="msg-actions">
+                  <button class="msg-action-btn" @click="startEditMsg(i)" title="编辑">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                  <button class="msg-action-btn" @click="regenerateResponse(i)" title="重新生成回复" v-if="i < agentStore.messages.length - 1 && agentStore.messages[i + 1]?.role === 'assistant'">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  </button>
+                </div>
+</div>
             </div>
           </div>
 
@@ -863,7 +962,17 @@ const sortedKbTypes = computed(() => {
 .agent-session-item:hover { background: var(--bg-elev-2); }
 .agent-session-item.active { background: var(--bg-elev-3); border-left: 2px solid var(--amber); }
 .agent-session-title { font-size: var(--text-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 20px; }
-.agent-session-meta { font-size: var(--text-xs); color: var(--text-tertiary); }
+.agent-session-meta { font-size: var(--text-xs); color: var(--text-tertiary); display: flex; gap: var(--space-2); }
+.agent-session-time { color: var(--text-quaternary); }
+.agent-session-date-group {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--amber-bright);
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-faint);
+  margin-bottom: var(--space-1);
+}
 .agent-session-delete {
   position: absolute; top: 4px; right: 4px;
   background: none; border: none; color: var(--text-tertiary);
@@ -1488,5 +1597,16 @@ const sortedKbTypes = computed(() => {
   gap: var(--space-2);
   margin-top: var(--space-1);
   justify-content: flex-end;
+}
+.msg-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+  min-height: 20px;
+}
+.msg-time {
+  font-size: var(--text-xs);
+  color: var(--text-quaternary);
 }
 </style>
