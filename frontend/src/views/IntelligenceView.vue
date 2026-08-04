@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { useIntelStore } from '@/stores/intel'
 import { useReposStore } from '@/stores/repos'
 import { renderMarkdown } from '@/composables/useMarkdown'
+import { api } from '@/api/client'
 import DailyReportRenderer from '@/components/common/DailyReportRenderer.vue'
 
 const route = useRoute()
@@ -11,6 +12,7 @@ const intelStore = useIntelStore()
 const reposStore = useReposStore()
 
 const activeTab = ref<'daily' | 'manual'>('daily')
+const hasSlackCred = ref(false)
 
 const filteredReports = computed(() => {
   return intelStore.reports.filter(r => (r.category || 'manual') === activeTab.value)
@@ -21,16 +23,25 @@ const intelSourceOptions = computed(() => {
     value: r.repo,
     label: r.repo + ' 社区',
   }))
-  return [
+  const options = [
     ...repoOptions,
     { value: 'academic', label: '学术动态' },
     { value: 'news', label: '新闻动态' },
   ]
+  if (hasSlackCred.value) {
+    options.push({ value: 'slack', label: 'Slack 社群讨论' })
+  }
+  return options
 })
 
 onMounted(async () => {
   await intelStore.loadReports()
   intelStore.loadIntelTasks()
+  // 检查 Slack 是否有凭证
+  try {
+    const slackStatus: any = await api('/api/slack/status')
+    hasSlackCred.value = slackStatus.cred_exists === true
+  } catch (_) {}
   // 如果 URL 中有 report_id 参数，自动打开报告
   const reportId = route.query.report_id
   if (reportId) {

@@ -428,12 +428,14 @@ async function generateInsight(task: any) {
               <!-- Related refs -->
               <div v-if="todoStore.selectedTask.related_refs && todoStore.selectedTask.related_refs.length > 0" style="margin-bottom:var(--space-4);">
                 <label class="form-label">关联引用</label>
-                <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                  <span v-for="(ref, idx) in todoStore.selectedTask.related_refs" :key="idx" class="ref-badge clickable" @click.stop="openUrl(ref.url)" :title="ref.title || (ref.repo + '#' + ref.number)">
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <div v-for="(ref, idx) in todoStore.selectedTask.related_refs" :key="idx" class="ref-row clickable" @click.stop="openUrl(ref.url)">
                     <span class="ref-type" :class="'ref-type-' + ref.type">{{ ref.type === 'pr' ? 'PR' : 'I' }}</span>
-                    <span>{{ ref.repo }}#{{ ref.number }}</span>
+                    <span class="ref-number">#{{ ref.number }}</span>
                     <span v-if="ref.state" class="ref-state" :class="'ref-state-' + ref.state">{{ ref.state }}</span>
-                  </span>
+                    <span class="ref-repo">{{ ref.repo }}</span>
+                    <span class="ref-title">{{ ref.title || '' }}</span>
+                  </div>
                 </div>
               </div>
             </template>

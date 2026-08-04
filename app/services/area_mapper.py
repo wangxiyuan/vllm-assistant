@@ -17,7 +17,7 @@ class AreaMapper:
     # vLLM 主要领域定义（基于 CODEOWNERS 文件的实际结构）
     AREA_DEFINITIONS = {
         "compilation": {
-            "name": "编译优化",
+            "name": "Compilation",
             "description": "torch.compile、CUDA graph、IR",
             "paths": [
                 "vllm/compilation/",
@@ -25,7 +25,7 @@ class AreaMapper:
             ],
         },
         "distributed": {
-            "name": "分布式",
+            "name": "Distributed",
             "description": "分布式训练、KV transfer、Pipeline parallel",
             "paths": [
                 "vllm/distributed/",
@@ -56,7 +56,7 @@ class AreaMapper:
             ],
         },
         "quantization": {
-            "name": "量化",
+            "name": "Quantization",
             "description": "量化层（GPTQ、AWQ、FP8 等）",
             "paths": [
                 "vllm/model_executor/layers/quantization/",
@@ -70,7 +70,7 @@ class AreaMapper:
             ],
         },
         "model_loader": {
-            "name": "模型加载",
+            "name": "Model Loader",
             "description": "模型加载器、权重加载",
             "paths": [
                 "vllm/model_executor/model_loader/",
@@ -85,7 +85,7 @@ class AreaMapper:
             ],
         },
         "multimodal": {
-            "name": "多模态",
+            "name": "Multimodal",
             "description": "多模态输入处理、渲染器",
             "paths": [
                 "vllm/multimodal/",
@@ -94,7 +94,7 @@ class AreaMapper:
             ],
         },
         "config": {
-            "name": "配置",
+            "name": "Config",
             "description": "VllmConfig、参数解析",
             "paths": [
                 "vllm/config/",
@@ -103,7 +103,7 @@ class AreaMapper:
             ],
         },
         "entrypoints": {
-            "name": "入口点",
+            "name": "Entrypoints",
             "description": "API server、CLI、OpenAI/Anthropic/MCP 兼容层",
             "paths": [
                 "vllm/entrypoints/",
@@ -111,7 +111,7 @@ class AreaMapper:
             ],
         },
         "rust": {
-            "name": "Rust 前端",
+            "name": "Rust Frontend",
             "description": "Rust 前端、构建脚本",
             "paths": [
                 "rust/",
@@ -120,7 +120,7 @@ class AreaMapper:
             ],
         },
         "sampling": {
-            "name": "采样/参数",
+            "name": "Sampling/Params",
             "description": "采样参数、pooling、tokenizers、reasoning、tool_parsers",
             "paths": [
                 "vllm/sampling_params.py",
@@ -132,7 +132,7 @@ class AreaMapper:
             ],
         },
         "v1_core": {
-            "name": "V1 核心",
+            "name": "V1 Core",
             "description": "V1 核心：调度、KV cache、spec decode、structured output",
             "paths": [
                 "vllm/v1/core/",
@@ -148,7 +148,7 @@ class AreaMapper:
             ],
         },
         "ci": {
-            "name": "CI/构建",
+            "name": "CI/Build",
             "description": "CI 配置、Docker、构建工具",
             "paths": [
                 ".buildkite/",
@@ -160,14 +160,14 @@ class AreaMapper:
             ],
         },
         "tests": {
-            "name": "测试",
+            "name": "Tests",
             "description": "测试用例",
             "paths": [
                 "tests/",
             ],
         },
         "docs": {
-            "name": "文档",
+            "name": "Docs",
             "description": "文档、mkdocs 配置",
             "paths": [
                 "docs/",
@@ -191,7 +191,7 @@ class AreaMapper:
             ],
         },
         "gpu_hardware": {
-            "name": "GPU/硬件",
+            "name": "GPU/Hardware",
             "description": "GPU worker、平台适配（含 ROCm、TPU、Intel GPU）",
             "paths": [
                 "vllm/v1/worker/gpu/",
@@ -211,7 +211,7 @@ class AreaMapper:
             ],
         },
         "model": {
-            "name": "模型实现",
+            "name": "Model Implementation",
             "description": "具体模型实现（fallback：未被 CODEOWNERS 精确匹配的模型文件）",
             "paths": [
                 "vllm/model_executor/",

@@ -17,6 +17,7 @@ const tabs = [
   { key: 'news', label: '新闻动态' },
   { key: 'slack', label: 'Slack信息' },
   { key: 'contribution', label: '贡献机会' },
+  { key: 'other', label: '其他' },
 ]
 
 const tabHeadings: Record<string, string[]> = {
@@ -27,6 +28,7 @@ const tabHeadings: Record<string, string[]> = {
   news: ['新闻动态'],
   slack: ['Slack 信息'],
   contribution: ['贡献机会'],
+  other: ['其他'],
 }
 
 function extractSection(content: string, key: string): string {
@@ -149,7 +151,7 @@ function copyCurrentTab() {
     <!-- 报告头部摘要 -->
     <div class="daily-header">
       <div class="daily-header-left">
-        <span class="daily-header-title">每日全景报告</span>
+        <span class="daily-header-title">vLLM 社区报告</span>
         <span v-if="meta.date" class="daily-header-date">{{ meta.date }}</span>
       </div>
       <div class="daily-header-right">
@@ -296,9 +298,8 @@ function copyCurrentTab() {
   padding: 16px 18px;
   font-size: 13px;
   line-height: 1.6;
-  min-height: 320px;
-  display: flex;
-  flex-direction: column;
+  height: 560px;
+  overflow-y: auto;
 }
 
 .daily-tab-body {

@@ -840,6 +840,44 @@ a.item-title:hover { color: var(--amber-bright); }
     background: var(--signal-green-glow);
     color: var(--signal-green);
 }
+
+/* Related reference rows (list layout in task drawer) */
+.ref-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-faint);
+    background: var(--bg-elev-2);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.ref-row:hover {
+    border-color: var(--signal-blue);
+    background: var(--bg-elev-3);
+}
+.ref-row .ref-number {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+.ref-row .ref-repo {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+}
+.ref-row .ref-title {
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
 .ref-type-pr {
     background: var(--signal-purple-glow);
     color: var(--signal-purple);

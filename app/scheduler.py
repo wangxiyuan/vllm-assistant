@@ -787,7 +787,7 @@ def _refresh_personal_task_refs():
 
 
 def generate_daily_vllm_report():
-    """每天早上8点生成 vLLM 每日全景报告（指导贡献者新一天的贡献方向）"""
+    """每天早上8点生成 vLLM 每日社区报告（指导贡献者新一天的贡献方向）"""
     job_id = "daily_vllm_report"
     if job_id in _running_jobs:
         logger.debug(f"{job_id} already running, skipping")
@@ -818,7 +818,7 @@ def generate_daily_vllm_report():
             logger.info(f"Daily report already exists for {today_start}, skipping")
             return
 
-        title = f"[{today_start}][每日]vLLM 全景报告"
+        title = f"[{today_start}][每日]vLLM 社区报告"
 
         # 生成报告前释放 DB session（Agent 循环可能耗时 1-5 分钟，避免长时间占用 SQLite）
         # 但 IntelligenceReportGenerator 需要 db 来构建 source_config，从 session 中提取所需数据后关闭
@@ -845,53 +845,9 @@ def generate_daily_vllm_report():
         future = executor.submit(
             generator.generate_report,
             task_title=title,
-            task_description=(
-                "请全面调研 vLLM 项目在过去24小时内发生的最新动态，"
-                "为vLLM贡献者提供一份全面的全景报告。报告将按以下7个 tab 展示，"
-                "每个 tab 的内容需完整可独立阅读：\n\n"
-                "## 各 tab 内容要求\n"
-                "1. **昨日数据**：昨日概览统计表 + 新增 Issue 明细（含标签分类）"
-                "+ 新增 PR 明细（标注 merged/WIP） + 版本发布\n"
-                "2. **质量与架构**：分析昨日合并 PR 的 diff，"
-                "评估风险等级 [高/中/低]，标注影响文件数、新增/删除行数、涉及模块。"
-                "关注逻辑缺陷、性能隐患、设计问题、测试不足\n"
-                "3. **竞品动态与对比**：搜索 sglang 仓库做对比，"
-                "用对比表格列出各维度支持情况，标注 [建议优先级: 高/中/低]。"
-                "**判断 vLLM 是否已实现某功能时，先用 search_code 验证**\n"
-                "4. **学术动态**：用 search_arxiv 搜索英文关键词获取相关论文，"
-                "每篇标注 [相关性: 高/中/低] 和参考建议\n"
-                "5. **新闻动态**：搜索行业新闻和 GitHub Releases，"
-                "每条标注来源和与 vLLM 的关联度\n"
-                "6. **Slack 信息**：用 search_memory 搜索 tags=slack，"
-                "关键词用 `vLLM Slack 讨论` `vLLM 问题` `vLLM 求助` 等，"
-                "提取讨论话题、参与人数、消息数\n"
-                "7. **贡献机会**：分三级（初级/专业/研究型），"
-                "标注任务类型 `bug` `docs` `feature`，"
-                "标注 [预估: N小时/天/周]\n\n"
-                "## 数据源和时间范围\n"
-                "- 主要搜索 vllm 主仓库最近24小时到48小时的 issue/PR\n"
-                "- 同时搜索 sglang 仓库最近24小时的新动态用于对比\n"
-                "- 获取各仓库的最新 release\n"
-                "- 用 search_memory 获取 Slack 讨论（tags=slack）\n\n"
-                "## 报告风格\n"
-                "报告面向 vLLM 贡献者，使用中文，语言简洁务实。"
-                "每个 issue/PR 都要包含编号 #{{number}}，方便前端自动转为链接。"
-            ),
+            task_description="",
             sources=sources,
-            extra_prompt=(
-                "特别注意：\n"
-                "- 每个 ## 章节对应一个 tab，内容必须完整可独立阅读\n"
-                "- 优先关注过去24小时内创建的 issue/PR\n"
-                "- **判断 vLLM 是否已实现某功能时，先用 search_code 搜索本地缓存代码验证**\n"
-                "- 代码变更分析：用 get_pr_diff 读取 diff，统计影响文件数、新增/删除行数\n"
-                "- 风险等级标注：[高] [中] [低]\n"
-                "- Slack 内容标注参与人数和消息数\n"
-                "- 学术论文标注 [相关性: 高/中/低]\n"
-                "- 贡献机会标注任务类型 `bug` `docs` `feature` 和 [预估: N]\n"
-                "- 如果发现 SGLang 有 vLLM 未实现的功能，标注 [建议优先级: 高/中/低]\n"
-                "- 竞品对比表格中标注对应的 vLLM issue 编号"
-                f"{memory_context}"
-            ),
+            extra_prompt="",
             is_daily=True,
         )
         try:
@@ -928,7 +884,7 @@ def generate_daily_vllm_report():
             db = SessionLocal()
             failed_sources = json.dumps(locals().get("sources", ["academic", "news"]))
             failed_report = IntelligenceReport(
-                title=f"[{today_start}][每日]vLLM 全景报告（生成失败）",
+                title=f"[{today_start}][每日]vLLM 社区报告（生成失败）",
                 content="",
                 sources=failed_sources,
                 status="failed",
@@ -1050,7 +1006,7 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # vLLM 每日全景报告（每天早上 8 点北京时间）
+    # vLLM 每日社区报告（每天早上 8 点北京时间）
     scheduler.add_job(
         generate_daily_vllm_report,
         trigger=CronTrigger(hour=8, minute=0, timezone="Asia/Shanghai"),
@@ -1375,7 +1331,7 @@ def _build_daily_report_memory_context(db) -> str:
     # 3. 召回最近的 intelligence report（参考之前报告的风格和内容）
     try:
         reports = mem.recall(
-            query="vLLM 每日全景报告 洞察报告 动态",
+            query="vLLM 每日社区报告 洞察报告 动态",
             top_k=3,
             source_types=["report"],
             exclude_stale=True,

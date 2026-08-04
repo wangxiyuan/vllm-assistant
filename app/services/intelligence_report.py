@@ -28,40 +28,9 @@ def _render_daily_template() -> str:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return render_prompt("daily_report", "template.md", today=today)
 
-_TOOL_DESCRIPTIONS = """你有以下工具可用：
-- **search_issues**：在 GitHub 仓库搜索 issue/PR。每轮可并行调用多个。
-- **get_issue_detail**：读取 issue/PR 的正文和评论。每轮可并行调用多个。
-- **get_pr_diff**：读取 PR 的 diff 内容。调用后统计新增/删除行数、影响文件数。
-- **search_arxiv**：搜索 arXiv 论文。用于学术动态调研，**必须用英文关键词**。
-- **get_github_releases**：获取仓库最近的 release 列表。用于新闻动态，避免编造版本号。
-- **search_web**：在互联网上搜索行业新闻、技术文章、博客等。
-- **extract_web_content**：从指定 URL 提取清洁的文本内容。
-- **search_memory**：搜索本地知识库，包括 Slack 社群讨论、历史报告等。用关键词如 `vLLM Slack 讨论` 并指定 tags=slack 来检索 Slack 内容。
-- **search_code**：在本地缓存的代码中搜索关键词。
-- **read_local_code**：读取本地缓存的代码文件内容。"""
 
-_DAILY_WORK_PRINCIPLES = """1. **搜索要高效**：每个仓库搜索 1-2 次即可，用核心关键词。
-2. **深入要聚焦**：搜索后选出最相关的条目读详情，优先高评论量的 issue 和已合并的 PR。
-3. **报告要基于证据**：每个结论引用具体 issue/PR 编号。不确定的内容不要编造。
-4. **接受局限性**：搜索轮次有限，对于未能深入调研的部分，在报告中标注。
-5. **判断 vLLM 是否已实现某功能时，先用 search_code 搜索本地缓存代码验证，再用 read_local_code 读取关键文件确认。**
-6. **Slack 内容**：用 search_memory 搜索 tags=slack 获取社群讨论，提取话题标签和参与人数。
-7. **SGLang 对比**：搜索 sglang 仓库的 issue/PR 进行对比分析。
-8. **学术论文**：用 search_arxiv 搜索英文关键词，对每篇论文标注 [相关性: 高/中/低]。
-9. **代码变更分析**：用 get_pr_diff 读取 PR diff，统计影响文件数、新增/删除行数，评估风险等级 [高/中/低]。
-10. **每个 tab 内容需独立完整**：报告将被前端按 ## 标题分割为 7 个独立 tab，每个 tab 的内容必须能独立阅读。"""
 
-_MANUAL_WORK_PRINCIPLES = """1. **搜索要高效**：每个仓库搜索 1-2 次即可，用核心关键词，不要用长句。不同轮用不同关键词。
-2. **深入要聚焦**：搜索后选出 5-8 个最相关的条目读详情，优先 RFC issue 和高评论量的 issue。
-3. **学术用 arXiv**：如果包含学术来源，用英文关键词调 search_arxiv 搜 1 次即可。**如果任务标题是中文，请先将其翻译成英文关键词再搜索**。
-4. **新闻用 search_web + release**：如果包含新闻来源，先用 search_web 搜索行业新闻，再调 get_github_releases 获取真实版本信息，不要编造版本号。
-5. **Slack 用 search_memory**：如果包含 Slack 来源，用 search_memory 搜索 tags=slack 获取社群讨论内容。
-6. **判断 vLLM 是否已实现某功能时，先用 search_code 搜索本地缓存代码验证，不要仅依赖 GitHub Issues/PRs 搜索结果。**
-   - **search_code 搜到结果后，必须再调 read_local_code 读取关键文件（如配置/注册/模型文件）的前 50-100 行来确认功能是否真的已实现，不能仅凭匹配行片段判断。**
-   - 注意 search_code 的 total_matched_files 字段：值越大说明该功能在代码库中嵌入越深，越可能是已实现功能。如果只有 1-2 个匹配文件，可能是注释或边缘引用。
-7. **报告要基于证据**：每个结论引用具体 issue/PR 编号或论文标题。不确定的内容不要编造。
-8. **接受局限性**：你的搜索轮次有限，不可能遍历所有 issue/PR。对于未能深入调研的部分，在报告中提供 GitHub 搜索链接和关键词建议，让用户自行深入。这比假装覆盖了所有内容更有价值。
-9. 会按阶段引导你：先搜索，再深入，最后生成报告。"""
+
 
 
 class IntelligenceReportGenerator(BaseAgent):
@@ -639,11 +608,8 @@ class IntelligenceReportGenerator(BaseAgent):
         if is_daily:
             return self._build_daily_system_prompt(
                 task_title, task_description, sources_text, repos_text,
-                extra_section, memory_context,
+                memory_context,
             )
-
-        tool_descriptions = _TOOL_DESCRIPTIONS
-        work_principles = _MANUAL_WORK_PRINCIPLES
 
         return render_prompt("intelligence", "system_prompt.md",
             task_title=task_title,
@@ -652,8 +618,6 @@ class IntelligenceReportGenerator(BaseAgent):
             sources_text=sources_text,
             repos_text=repos_text,
             memory_context=memory_context,
-            tool_descriptions=tool_descriptions,
-            work_principles=work_principles,
         )
 
     def _build_daily_system_prompt(
@@ -662,28 +626,16 @@ class IntelligenceReportGenerator(BaseAgent):
         task_description: str,
         sources_text: str,
         repos_text: str,
-        extra_section: str,
         memory_context: str,
     ) -> str:
         return render_prompt("daily_report", "system_prompt.md",
             task_title=task_title,
             task_description=task_description,
-            extra_section=extra_section,
             sources_text=sources_text,
             repos_text=repos_text,
             memory_context=memory_context,
-            tool_descriptions=_TOOL_DESCRIPTIONS,
-            daily_work_principles=_DAILY_WORK_PRINCIPLES,
             report_template=_render_daily_template(),
         )
-
-    @staticmethod
-    def _tool_descriptions() -> str:
-        return _TOOL_DESCRIPTIONS
-
-    @staticmethod
-    def _daily_work_principles() -> str:
-        return _DAILY_WORK_PRINCIPLES
 
     @staticmethod
     def _daily_report_template() -> str:

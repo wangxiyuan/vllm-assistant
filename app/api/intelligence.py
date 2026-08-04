@@ -192,7 +192,7 @@ async def list_reports(db: Session = Depends(get_db)):
 
 @router.get("/reports/daily/latest")
 async def get_latest_daily_report(db: Session = Depends(get_db)):
-    """获取最新一份 vLLM 每日全景报告"""
+    """获取最新一份 vLLM 每日社区报告"""
     today_start = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d 00:00:00")
     report = db.query(IntelligenceReport).filter(
         IntelligenceReport.category == "daily",
@@ -233,7 +233,7 @@ async def delete_report(report_id: int, db: Session = Depends(get_db)):
 
 @router.post("/reports/daily/trigger")
 async def trigger_daily_report():
-    """手动触发每日全景报告生成"""
+    """手动触发每日社区报告生成"""
     from datetime import datetime, timezone
     from app.database import SessionLocal
     from app.models import IntelligenceReport
