@@ -57,7 +57,8 @@ class IntelligenceReportGenerator(BaseAgent):
             "search_web",
             "extract_web_content",
             "search_docs",
-            "search_memory",
+"search_memory",
+            "search_by_tags",
             "search_code",
             "read_local_code",
         ])
@@ -337,6 +338,8 @@ class IntelligenceReportGenerator(BaseAgent):
                     parts.append(
                         "同时调用 search_web 搜索行业新闻。"
                         "搜索关键词用英文效果更好，如 `vLLM latest news`、`LLM inference framework`。"
+                        "**注意：只保留近 7 天内发布的内容，过时的新闻直接忽略，不要引用。**"
+                        "**每引用一条新闻，必须同时提供 search_web 返回的真实来源 URL。没有 URL 来源的新闻不要写。**"
                         "如果搜索结果中有感兴趣的文章，可以进一步调用 extract_web_content 提取正文。"
                     )
                     parts.append(
@@ -344,8 +347,8 @@ class IntelligenceReportGenerator(BaseAgent):
                     )
                 if "slack" in effective_sources:
                     parts.append(
-                        "同时调用 search_memory 搜索 Slack 社群讨论。"
-                        "用关键词如 `vLLM Slack 讨论 问题`，指定 tags 参数为 `slack` 来筛选 Slack 内容。"
+                        "同时调用 search_by_tags 搜索 Slack 社群讨论。"
+                        "指定 tags 参数为 `slack` 来获取所有 Slack 内容。"
                     )
                 return "\n".join(parts)
             return ""
@@ -424,8 +427,11 @@ class IntelligenceReportGenerator(BaseAgent):
                             url = r.get("url", "")
                             title = r.get("title", "")
                             snippet = r.get("content", "")[:200]
+                            published = r.get("published_date", r.get("date", ""))
                             if url and title:
                                 news_lines.append(f"- [{title}]({url})")
+                                if published:
+                                    news_lines.append(f"  发布时间: {published}")
                                 if snippet:
                                     news_lines.append(f"  {snippet}")
                     else:
@@ -447,10 +453,9 @@ class IntelligenceReportGenerator(BaseAgent):
                             news_lines.append(f"  {r.get('body', '')[:200]}")
                     sections.append("\n".join(news_lines))
                 elif source == "slack":
-                    slack_result = self.execute_tool_sync("search_memory", {
-                        "query": "vLLM Slack 讨论 问题",
-                        "top_k": 10,
+                    slack_result = self.execute_tool_sync("search_by_tags", {
                         "tags": "slack",
+                        "top_k": 15,
                     })
                     if slack_result.get("results"):
                         lines = ["Slack 社群讨论:"]
@@ -478,7 +483,8 @@ class IntelligenceReportGenerator(BaseAgent):
 
 请生成一份完整的 Markdown 格式洞察报告，包含摘要、各来源动态、AI 建议等章节。
 要求：使用中文，内容要有实质价值，直接输出 Markdown，不要包裹在代码块中。
-不要编造版本号或论文标题，只使用上面提供的真实数据。"""
+不要编造版本号或论文标题，只使用上面提供的真实数据。
+**重要：不要编造任何新闻、事件、会议或演讲信息。所有新闻必须有上面数据中提供的 URL 来源。没有 URL 来源的信息一律不写。**"""
 
         return self.llm.chat_sync(prompt, max_tokens=Config.LLM_MAX_TOKENS, temperature=0.7)
 

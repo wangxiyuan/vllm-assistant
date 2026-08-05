@@ -395,7 +395,7 @@ async def create_memory(request: MemoryCreateRequest):
 
 @router.delete("/memories/by-source")
 async def delete_memories_by_source(request: Request):
-    """按 source_ref 前缀删除知识条目（标记为 stale）
+    """按 source_ref 前缀物理删除知识条目
 
     用于删除文章/报告/会话时同步清理关联的知识库内容。
     使用 :: 代替 # 传递（URL 中 # 会被当做 fragment 截断）。
@@ -408,17 +408,17 @@ async def delete_memories_by_source(request: Request):
     from app.services.memory_service import MemoryService
 
     mem = MemoryService()
-    count = mem.forget_by_source_ref_prefix(prefix)
+    count = mem.forget_by_source_ref_prefix(prefix, hard_delete=True)
     return {"status": "deleted", "count": count}
 
 
 @router.delete("/memories/{memory_id}")
 async def delete_memory(memory_id: int):
-    """删除知识条目（标记为 stale，不物理删除）"""
+    """物理删除知识条目"""
     from app.services.memory_service import MemoryService
 
     mem = MemoryService()
-    success = mem.forget(memory_id, hard_delete=False)
+    success = mem.forget(memory_id, hard_delete=True)
     if not success:
         raise HTTPException(status_code=404, detail="Memory not found")
     return {"status": "deleted"}

@@ -218,31 +218,36 @@ class MemoryService:
         finally:
             db.close()
 
-    def forget_by_source_ref_prefix(self, source_ref_prefix: str) -> int:
-        """按 source_ref 前缀批量标记知识条目为 stale。
+    def forget_by_source_ref_prefix(self, source_ref_prefix: str, hard_delete: bool = False) -> int:
+        """按 source_ref 前缀批量删除或标记知识条目。
 
         Args:
             source_ref_prefix: source_ref 前缀，如 "article123" 或 "conv/session-id/"
+            hard_delete: True 则物理删除，False 则标记为 stale
 
         Returns:
-            标记为 stale 的条目数
+            处理的条目数
         """
         db = SessionLocal()
         try:
-            count = (
-                db.query(AIMemory)
-                .filter(
-                    AIMemory.source_ref.like(f"{source_ref_prefix}%"),
-                    AIMemory.is_stale == False,
-                )
-                .update(
+            base_query = db.query(AIMemory).filter(
+                AIMemory.source_ref.like(f"{source_ref_prefix}%"),
+            )
+            if not hard_delete:
+                base_query = base_query.filter(AIMemory.is_stale == False)
+
+            if hard_delete:
+                count = base_query.delete(synchronize_session=False)
+                action = "Deleted"
+            else:
+                count = base_query.update(
                     {"is_stale": True, "updated_at": datetime.now(timezone.utc).replace(tzinfo=None)},
                     synchronize_session=False,
                 )
-            )
+                action = "Marked as stale"
             db.commit()
             if count > 0:
-                logger.info(f"Marked {count} memories as stale by source_ref prefix: {source_ref_prefix}")
+                logger.info(f"{action} {count} memories by source_ref prefix: {source_ref_prefix}")
             return count
         except Exception:
             logger.exception("Failed to forget knowledge by source_ref prefix")
@@ -414,6 +419,64 @@ class MemoryService:
         logger.info(f"Knowledge build complete: {stats}")
         return stats
 
+    def _is_doc_file_useful(self, file_path: str) -> bool:
+        """判断文档文件是否对知识库有价值，跳过测试 fixture、配置文件等垃圾内容"""
+        path_lower = file_path.lower()
+        # 跳过测试 fixture 和 test output 文件
+        if '/fixtures/' in path_lower or '/fixture/' in path_lower:
+            return False
+        if 'test_output_' in path_lower:
+            return False
+        # 跳过 requirements 和 CMakeLists 等构建配置文件
+        if path_lower.endswith('requirements.txt') or path_lower.endswith('cmakelists.txt'):
+            return False
+        if path_lower.endswith('requirements-dev.txt') or path_lower.endswith('requirements-lint.txt'):
+            return False
+        # 跳过纯文本的配置文件列表（只有文件名列表，无实际内容）
+        if path_lower.endswith(('models-small.txt', 'models-large.txt', 'models.txt')):
+            return False
+        if path_lower.endswith(('models-small-rocm.txt', 'models-large-rocm.txt', 'models-large-hopper.txt')):
+            return False
+        if path_lower.endswith(('models-mm-large-h100.txt', 'models-mm-small.txt')):
+            return False
+        if path_lower.endswith(('models-b200.txt', 'models-gfx942.txt', 'models-gfx950.txt', 'models-h100.txt')):
+            return False
+        if path_lower.endswith(('models-spark.txt', 'models-blackwell.txt', 'models-blackwell-ep.txt')):
+            return False
+        if path_lower.endswith(('models-h200.txt', 'models-mi3xx.txt', 'models-mi3xx-fp8-and-mixed.txt')):
+            return False
+        if path_lower.endswith(('models-pcp.txt', 'models-qwen35-blackwell.txt', 'models-qwen35-mi355.txt')):
+            return False
+        if path_lower.endswith(('models-small-tp.txt', 'models-turboquant.txt')):
+            return False
+        if path_lower.endswith(('config-b200.txt', 'config-h100.txt', 'config-test.txt')):
+            return False
+        if path_lower.endswith(('config-act-fp8.txt', 'config-act-int8.txt', 'config-int5wc-hadamard.txt')):
+            return False
+        # 跳过测试用的纯文本（诗歌、示例 prompt 等）
+        if path_lower.endswith('sonnet.txt') or path_lower.endswith('long_prompt.txt'):
+            return False
+        if path_lower.endswith('example.txt') or path_lower.endswith('prompts.txt'):
+            return False
+        if path_lower.endswith('dataset.txt') or path_lower.endswith('rules-env.txt'):
+            return False
+        if path_lower.endswith('prompt.txt') or path_lower.endswith('sonnet3.5_nov2024.txt'):
+            return False
+        if path_lower.endswith('packages.txt'):
+            return False
+        # 跳过 AGENTS.md / CLAUDE.md 等 agent 配置文件
+        if path_lower.endswith('agents.md') or path_lower.endswith('claude.md'):
+            return False
+        # 跳过 benchmark 数据集文件
+        if '/benchmarks/' in path_lower and path_lower.endswith('.txt'):
+            return False
+        if '/benchmark/' in path_lower and path_lower.endswith('.txt'):
+            return False
+        # 跳过 docker 相关文本文件
+        if '/docker/' in path_lower and path_lower.endswith('.txt'):
+            return False
+        return True
+
     def _build_from_local_code(self) -> Dict[str, int]:
         """从 LocalCodeCache 构建代码结构和文档知识"""
         from app.database import SessionLocal
@@ -443,12 +506,19 @@ class MemoryService:
                 stats["code_structure"] += 1
 
             # 处理每个文件
+            seen_checksums = set()  # 用于 checksum 去重
             for f in files:
                 if not f.content or not f.checksum:
                     continue
 
                 # 文档文件：按扩展名判断
                 if f.file_path.endswith((".md", ".rst", ".txt")):
+                    if not self._is_doc_file_useful(f.file_path):
+                        continue
+                    # 跳过内容完全重复的文件
+                    if f.checksum in seen_checksums:
+                        continue
+                    seen_checksums.add(f.checksum)
                     knowledge = self._extract_doc_structure(f.file_path, f.content)
                     if knowledge:
                         existing = self.find_by_source_ref(f.file_path)
@@ -508,7 +578,20 @@ class MemoryService:
                     continue
 
                 labels = json.loads(item.labels) if item.labels else []
-                area = item.area or "unknown"
+                area = item.area
+                if not area:
+                    # 从 labels 中推断 area：取第一个非通用标签名作为 area
+                    generic_labels = {"bug", "feature request", "RFC", "stale", "ready", "needs-rebase",
+                                      "good first issue", "help wanted", "documentation", "performance",
+                                      "unstale", "keep-open", "ci-failure", "installation", "ci/build",
+                                      "frontend", "rocm", "nvidia", "intel-gpu", "cpu", "quantization",
+                                      "speculative-decoding", "deepseek", "kimi", "k3", "v1", "v1_core",
+                                      "multi-modality", "rust", "tests", "moe", "attention", "distributed",
+                                      "kv-connector", "model", "config", "kernels", "entrypoints",
+                                      "sampling", "lora", "mamba", "compilation", "model_loader",
+                                      "gpu_hardware", "docs"}
+                    meaningful_labels = [l for l in labels if l not in generic_labels]
+                    area = meaningful_labels[0] if meaningful_labels else "general"
                 tags = [item.type, area, item.repo] + (labels[:5] if labels else [])
 
                 title = item.title or ""

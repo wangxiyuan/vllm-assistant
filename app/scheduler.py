@@ -19,7 +19,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import Config
 from app.database import SessionLocal
-from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask, RepoCache, SlackConfig
+from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask, RepoCache, SlackConfig, LocalCodeCache
 from app.services.github_client import GitHubClient, DEFAULT_PER_PAGE
 from app.services.area_mapper import AreaMapper
 
@@ -1390,7 +1390,8 @@ def _build_daily_report_memory_context(db) -> str:
 
 
 def cleanup_old_data():
-    from app.models import FileChangeHistory, AICache, IntelligenceReport
+    from app.models import FileChangeHistory, AICache, IntelligenceReport, AIMemory, SlackConfig
+    from app.services.memory_service import MemoryService
     from sqlalchemy import text
 
     db = SessionLocal()
@@ -1449,13 +1450,62 @@ def cleanup_old_data():
                 IntelligenceReport.category.is_(None),
             ),
             IntelligenceReport.created_at < manual_cutoff,
+
         ).delete(synchronize_session=False)
         if deleted_manual:
             logger.info(f"Cleaned {deleted_manual} manual intelligence_reports older than {retention_days}d")
 
+        # 5. 清理 ai_memory 知识库：物理删除过期条目
+        #    - 删除已关闭且超过 retention_days 的 issue/PR
+        #    - 删除超过 retention_days 未访问的条目（last_accessed_at 不为空且超期）
+        #    - 删除超过 30 天的 Slack 消息（由 SlackCollector 的 _cleanup_old 负责，但冗余清理）
+        #    - 删除已从文件系统移除的 code_structure 和 docs 条目
+        deleted_memory = 0
+
+        # 5a. 删除 items 表中已不存在的 issue/PR 记录（items 表清理后，对应的 ai_memory 也要清理）
+        deleted_memory += db.query(AIMemory).filter(
+            AIMemory.source_type.in_(["issue", "pr"]),
+            ~AIMemory.source_ref.in_(
+                db.query(
+                    db.literal_column("repo || '#' || number").label("ref")
+                ).select_from(Item).filter(
+                    Item.state.in_(["open", "merged"])
+                )
+            ),
+        ).delete(synchronize_session=False)
+
+        # 5b. 删除 items 表中已不存在的 issue/PR 记录（items 表清理后，对应的 ai_memory 也要清理）
+        #     注意：items 表只保留 open/merged 的条目，closed 的条目会被清理
+        deleted_memory += db.query(AIMemory).filter(
+            AIMemory.source_type.in_(["issue", "pr"]),
+            ~AIMemory.source_ref.in_(
+                db.query(
+                    db.literal_column("repo || '#' || number").label("ref")
+                ).select_from(Item).filter(
+                    Item.state.in_(["open", "merged"])
+                )
+            ),
+        ).delete(synchronize_session=False)
+
+        # 5c. 删除从 local_code_cache 中移除的文件对应的 code_structure/docs 条目
+        #     当 git 仓库中删除了某个文件，它在 LocalCodeCache 中的记录会被移除，
+        #     对应的知识库条目也应该被清理
+        deleted_memory += db.query(AIMemory).filter(
+            AIMemory.source_type.in_(["code_structure", "docs"]),
+            AIMemory.source_ref.notin_(
+                db.query(LocalCodeCache.file_path).select_from(LocalCodeCache)
+            ),
+            AIMemory.source_ref.notlike("operator#%"),
+            AIMemory.source_ref.notlike("model_anatomy#%"),
+            AIMemory.source_ref.notlike("%/"),
+        ).delete(synchronize_session=False)
+
         db.commit()
 
-        # 5. 每周执行一次 VACUUM（每天清理一次，7 天一次 VACUUM）
+        if deleted_memory:
+            logger.info(f"Cleaned {deleted_memory} old/stale ai_memory entries")
+
+        # 6. 每周执行一次 VACUUM（每天清理一次，7 天一次 VACUUM）
         _vacuum_counter = getattr(cleanup_old_data, "_vacuum_counter", 0)
         cleanup_old_data._vacuum_counter = _vacuum_counter + 1
         if cleanup_old_data._vacuum_counter >= 7:
@@ -1465,7 +1515,8 @@ def cleanup_old_data():
             logger.info("VACUUM completed")
 
         logger.info(f"Cleanup completed: {deleted_items} items, {deleted_fch} file_changes, "
-                     f"{deleted_cache} ai_cache, {deleted_failed} failed_reports, {deleted_manual} manual_reports")
+                     f"{deleted_cache} ai_cache, {deleted_failed} failed_reports, {deleted_manual} manual_reports, "
+                     f"{deleted_memory} ai_memory")
     except Exception:
         logger.exception("Error during data cleanup")
         db.rollback()

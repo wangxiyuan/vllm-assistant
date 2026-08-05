@@ -193,10 +193,14 @@ async def update_article(article_id: int, req: ArticleUpdate, db: Session = Depe
 
 @router.delete("/{article_id}")
 async def delete_article(article_id: int, db: Session = Depends(get_db)):
-    """删除文章（级联删除 CodeReference）"""
+    """删除文章（级联删除 CodeReference 和知识库内容）"""
     article = db.query(Article).filter(Article.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
+
+    from app.services.memory_service import MemoryService
+    mem = MemoryService()
+    mem.forget_by_source_ref_prefix(f"article#{article_id}", hard_delete=True)
 
     db.delete(article)
     db.commit()

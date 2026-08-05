@@ -226,6 +226,19 @@ class SlackCollector:
                 return user.get("real_name") or user.get("name") or user_id
         return user_id
 
+    @staticmethod
+    def _clean_slack_text(text: str) -> str:
+        """清洗 Slack 消息文本：将 <@U12345> 格式转为 @username，去除多余的格式标签"""
+        # 将 <@U12345> 或 <@U12345|username> 转为 @username 或 @user
+        text = re.sub(r'<@([A-Z0-9]+)(?:\|[^>]+)?>', r'@\1', text)
+        # 将 <#C12345|channel-name> 转为 #channel-name
+        text = re.sub(r'<#[A-Z0-9]+\|([^>]+)>', r'#\1', text)
+        # 将 <http://...|text> 转为 text (url)
+        text = re.sub(r'<https?://[^|>]+\|([^>]+)>', r'\1', text)
+        # 去除孤立的 URL 尖括号 <https://...>
+        text = re.sub(r'<(https?://[^>]+)>', r'\1', text)
+        return text
+
     def _store_message(self, db, channel: str, msg: dict) -> bool:
         """将单条消息存入 AIMemory（去重）"""
         ts = msg.get("ts", "")
@@ -239,7 +252,7 @@ class SlackCollector:
 
         user_id = msg.get("user", "") or msg.get("bot_id", "unknown")
         user = self._resolve_user_name(user_id)
-        text = msg.get("text", "")
+        text = self._clean_slack_text(msg.get("text", ""))
         thread_ts = msg.get("thread_ts", "")
 
         content = f"[{channel}] {user}: {text}"
