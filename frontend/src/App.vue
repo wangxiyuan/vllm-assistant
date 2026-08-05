@@ -77,7 +77,7 @@ function onSlackSearchBlur() {
 
 function copyText(text: string) {
   navigator.clipboard.writeText(text).then(() => {
-    useAppStore().showToast('已复制', '', 'success')
+    appStore.showToast('已复制', '', 'success')
   }).catch(() => {
     const ta = document.createElement('textarea')
     ta.value = text
@@ -85,7 +85,7 @@ function copyText(text: string) {
     ta.select()
     document.execCommand('copy')
     document.body.removeChild(ta)
-    useAppStore().showToast('已复制', '', 'success')
+    appStore.showToast('已复制', '', 'success')
   })
 }
 
@@ -573,60 +573,6 @@ watch(() => authStore.authenticated, async (val) => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.slack-cred-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-.slack-cred-label {
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.slack-cred-desc {
-  color: var(--text-tertiary);
-}
-.slack-cred-desc code {
-  font-size: 11px;
-  padding: 1px 4px;
-  background: var(--bg-primary);
-  border-radius: 3px;
-}
-.slack-cred-code {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  background: var(--bg-primary);
-  border-radius: 4px;
-  border: 1px solid var(--border-faint);
-}
-.slack-cred-code code {
-  font-size: 11px;
-  color: var(--text-primary);
-  word-break: break-all;
-  line-height: 1.5;
-  flex: 1;
-}
-.slack-copy-btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.15s;
-}
-.slack-copy-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
 }
 @keyframes spin {
   to { transform: rotate(360deg); }

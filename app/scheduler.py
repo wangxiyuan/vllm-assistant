@@ -1463,18 +1463,6 @@ def cleanup_old_data():
         deleted_memory = 0
 
         # 5a. 删除 items 表中已不存在的 issue/PR 记录（items 表清理后，对应的 ai_memory 也要清理）
-        deleted_memory += db.query(AIMemory).filter(
-            AIMemory.source_type.in_(["issue", "pr"]),
-            ~AIMemory.source_ref.in_(
-                db.query(
-                    db.literal_column("repo || '#' || number").label("ref")
-                ).select_from(Item).filter(
-                    Item.state.in_(["open", "merged"])
-                )
-            ),
-        ).delete(synchronize_session=False)
-
-        # 5b. 删除 items 表中已不存在的 issue/PR 记录（items 表清理后，对应的 ai_memory 也要清理）
         #     注意：items 表只保留 open/merged 的条目，closed 的条目会被清理
         deleted_memory += db.query(AIMemory).filter(
             AIMemory.source_type.in_(["issue", "pr"]),
@@ -1487,7 +1475,7 @@ def cleanup_old_data():
             ),
         ).delete(synchronize_session=False)
 
-        # 5c. 删除从 local_code_cache 中移除的文件对应的 code_structure/docs 条目
+        # 5b. 删除从 local_code_cache 中移除的文件对应的 code_structure/docs 条目
         #     当 git 仓库中删除了某个文件，它在 LocalCodeCache 中的记录会被移除，
         #     对应的知识库条目也应该被清理
         deleted_memory += db.query(AIMemory).filter(

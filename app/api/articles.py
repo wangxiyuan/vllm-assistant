@@ -269,12 +269,3 @@ async def validate_article(article_id: int, req: ValidateRequest, db: Session = 
     result = validator.validate_article(article_id, deep_check=req.deep_check)
 
     return result
-
-
-@router.post("/batch-validate")
-async def batch_validate_articles(req: ValidateRequest, db: Session = Depends(get_db)):
-    """批量验证所有文章中的代码引用"""
-    cache_service = LocalCodeSyncService(db)
-    validator = ArticleValidator(cache_service, db)
-    result = validator.batch_validate(deep_check=req.deep_check)
-    return result

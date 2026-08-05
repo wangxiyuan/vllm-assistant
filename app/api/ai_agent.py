@@ -5,7 +5,6 @@ AI Agent API 路由
 """
 import json
 import logging
-import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -13,16 +12,13 @@ from pydantic import BaseModel
 
 from app.config import Config
 from app.database import SessionLocal
-from app.models import AIMemory, AIChatSession, AIChatMessage, QuickPrompt
+from app.models import AIChatSession, AIChatMessage, QuickPrompt
 from app.schemas import QuickPromptCreate, QuickPromptUpdate, QuickPromptResponse
 from app.services.agent_runner import AgentRunner
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# 用于存储异步任务状态（Phase 2 会改为 DB 持久化）
-_task_store: dict = {}
 
 
 def _require_api_key():
@@ -47,12 +43,6 @@ class ChatRequest(BaseModel):
 class ChatMessage(BaseModel):
     role: str
     content: str
-
-
-class TaskSubmitRequest(BaseModel):
-    """任务提交请求"""
-    task_type: str
-    params: dict = {}
 
 
 class MemoryCreateRequest(BaseModel):
@@ -240,43 +230,6 @@ def _save_assistant_message(session_id: str, content: str):
 
 
 # ======================================================================
-# 异步任务 API
-# ======================================================================
-
-
-@router.post("/tasks")
-async def submit_task(request: TaskSubmitRequest):
-    """提交异步任务"""
-    task_id = str(uuid.uuid4())
-    _task_store[task_id] = {"status": "pending", "result": None}
-
-    runner = AgentRunner()
-
-    # 异步执行
-    import asyncio
-    async def _run():
-        try:
-            _task_store[task_id]["status"] = "running"
-            result = await runner.run_task(request.task_type, request.params)
-            _task_store[task_id] = {"status": "done", "result": result}
-        except Exception as e:
-            _task_store[task_id] = {"status": "failed", "error": str(e)}
-
-    asyncio.create_task(_run())
-
-    return {"task_id": task_id, "status": "pending"}
-
-
-@router.get("/tasks/{task_id}")
-async def get_task_status(task_id: str):
-    """查询任务状态"""
-    task = _task_store.get(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return task
-
-
-# ======================================================================
 # 知识库管理 API
 # ======================================================================
 
@@ -424,32 +377,6 @@ async def delete_memory(memory_id: int):
     return {"status": "deleted"}
 
 
-@router.post("/memories/build")
-async def build_memories():
-    """触发种子数据构建
-
-    从 Item/Article/Operator/ModelAnatomy/LocalCodeCache 批量构建知识。
-    异步执行，返回 task_id。
-    """
-    from app.services.memory_service import MemoryService
-
-    task_id = str(uuid.uuid4())
-    _task_store[task_id] = {"status": "running"}
-
-    import asyncio
-
-    async def _build():
-        try:
-            mem = MemoryService()
-            stats = mem.build_code_knowledge()
-            _task_store[task_id] = {"status": "done", "stats": stats}
-        except Exception as e:
-            _task_store[task_id] = {"status": "failed", "error": str(e)}
-
-    asyncio.create_task(_build())
-    return {"task_id": task_id, "status": "running"}
-
-
 @router.get("/memories/stats")
 async def memory_stats():
     """获取知识库统计"""
@@ -457,34 +384,6 @@ async def memory_stats():
 
     mem = MemoryService()
     return mem.get_stats()
-
-
-# ======================================================================
-# 工具管理 API
-# ======================================================================
-
-
-@router.get("/tools")
-async def list_tools():
-    """列出所有已注册工具 + 工具类别"""
-    from app.services.tools import registry as tool_registry
-
-    tools = tool_registry.list_tools()
-    categories = tool_registry.list_categories()
-    return {"tools": tools, "categories": categories, "total": len(tools)}
-
-
-# ======================================================================
-# 洞察报告 API（已迁至 /api/intelligence/reports/generate，此处保留重定向）
-# ======================================================================
-
-
-@router.post("/reports/generate")
-async def generate_report_redirect(request: Request):
-    """重定向到 /api/intelligence/reports/generate"""
-    from fastapi.responses import JSONResponse
-    from app.api.intelligence import generate_report as target_handler
-    return await target_handler(request)
 
 
 # ======================================================================

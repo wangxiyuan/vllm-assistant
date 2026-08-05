@@ -111,20 +111,19 @@ class IntelligenceReportGenerator(BaseAgent):
             "description": "行业新闻、版本发布信息",
         }
 
-        has_slack_creds = bool(Config.SLACK_TOKEN and Config.SLACK_COOKIE)
-        if not has_slack_creds:
+        has_slack_creds = False
+        try:
+            from app.database import SessionLocal
+            from app.models import SlackConfig
+            db_s = SessionLocal()
             try:
-                from app.database import SessionLocal
-                from app.models import SlackConfig
-                db_s = SessionLocal()
-                try:
-                    sc = db_s.query(SlackConfig).first()
-                    if sc and sc.token and sc.cookie:
-                        has_slack_creds = True
-                finally:
-                    db_s.close()
-            except Exception:
-                pass
+                sc = db_s.query(SlackConfig).first()
+                if sc and sc.token and sc.cookie:
+                    has_slack_creds = True
+            finally:
+                db_s.close()
+        except Exception:
+            pass
 
         if has_slack_creds:
             config["slack"] = {
@@ -642,10 +641,6 @@ class IntelligenceReportGenerator(BaseAgent):
             memory_context=memory_context,
             report_template=_render_daily_template(),
         )
-
-    @staticmethod
-    def _daily_report_template() -> str:
-        return _render_daily_template()
 
     # ======================================================================
     # 降级报告

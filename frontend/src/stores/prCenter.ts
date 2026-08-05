@@ -37,13 +37,8 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   const aiReview = ref<any>(null)
   const aiReviewLoading = ref(false)
   const aiReviewElapsed = ref(0)
-  const aiReviewTimer = ref<ReturnType<typeof setInterval> | null>(null)
   const aiSummary = ref<any>(null)
   const aiSummaryLoading = ref(false)
-  const aiSummaryCollapsed = ref(false)
-  const aiReviewCollapsed = ref(false)
-  const pendingReviews = ref<Record<number, boolean>>({})
-  const pendingSummaries = ref<Record<string, boolean>>({})
 
   // Issue drawer
   const selectedIssue = ref<any>(null)
@@ -61,8 +56,6 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   // Diff
   const expandedDiffFile = ref<string | null>(null)
   const fileDiffs = ref<Record<string, string>>({})
-  const prDiffData = ref<string | null>(null)
-  const prDiffLoading = ref(false)
 
   // Computed
   const trackedRepos = computed(() => {
@@ -120,19 +113,6 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     return list
   })
 
-  const myIssueTypeCounts = computed(() => {
-    const counts: Record<string, number> = { all: myIssues.value.length }
-    for (const i of myIssues.value) {
-      const t = issueType(i)
-      counts[t] = (counts[t] || 0) + 1
-    }
-    return counts
-  })
-
-  const openPRCount = computed(() => myPrs.value.filter(p => p.state === 'open').length)
-  const mergedPRCount = computed(() => myPrs.value.filter(p => p.state === 'merged').length)
-  const closedPRCount = computed(() => myPrs.value.filter(p => p.state === 'closed').length)
-  const allPRCount = computed(() => myPrs.value.length)
   const openIssueCount = computed(() => myIssues.value.filter(i => i.state === 'open').length)
   const closedIssueCount = computed(() => myIssues.value.filter(i => i.state === 'closed').length)
   const allIssueCount = computed(() => myIssues.value.length)
@@ -508,17 +488,14 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     selectedContributor, selectedContributorGithubId,
     contributionRepo, trackedRepos,
     selectedPR, prDetails, prLoadError, loadingDetails,
-    aiReview, aiReviewLoading, aiReviewElapsed, aiReviewTimer,
-    aiSummary, aiSummaryLoading, aiSummaryCollapsed, aiReviewCollapsed,
-    pendingReviews, pendingSummaries,
+    aiReview, aiReviewLoading, aiReviewElapsed,
+    aiSummary, aiSummaryLoading,
     selectedIssue, issueDetails, issueLoadError, loadingIssue,
     translateLoading, prTranslatedBody, issueTranslatedBody,
     prShowChinese, issueShowChinese,
     prDetailTab, issueDetailTab,
-    expandedDiffFile, fileDiffs, prDiffData, prDiffLoading,
-    filteredMyPRs, filteredMyIssues, myIssueTypeCounts,
-    openPRCount, mergedPRCount, closedPRCount, allPRCount,
-    openIssueCount, closedIssueCount, allIssueCount,
+    expandedDiffFile, fileDiffs,
+    filteredMyPRs, filteredMyIssues, openIssueCount, closedIssueCount, allIssueCount,
     switchPRState, switchContributionTab, switchMyIssuesState, switchMyIssuesType,
     switchContributionRepo,
     loadMyPRs, loadMyIssues, loadAllContribData,

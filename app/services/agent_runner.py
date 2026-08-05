@@ -191,21 +191,6 @@ class AgentRunner(BaseAgent):
 
         yield {"type": EVENT_DONE, "data": None}
 
-    async def run_task(self, task_type: str, params: dict) -> dict:
-        """异步任务——查 tasks/registry -> 执行，返回结果"""
-        from app.services.tasks import registry as task_registry
-
-        handler = task_registry.get_task(task_type)
-        if not handler:
-            return {"error": f"Task type '{task_type}' not found"}
-
-        try:
-            result = await handler(params)
-            return result if isinstance(result, dict) else {"result": result}
-        except Exception as e:
-            logger.exception(f"Task '{task_type}' failed")
-            return {"error": str(e)}
-
     # ======================================================================
     # 内部方法
     # ======================================================================

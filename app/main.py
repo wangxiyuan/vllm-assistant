@@ -194,10 +194,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if auth.startswith("Bearer ") and auth[7:] == Config.API_KEY:
             return await call_next(request)
 
-        auth = request.headers.get("Authorization", "")
-        if auth.startswith("Bearer ") and auth[7:] == Config.API_KEY:
-            return await call_next(request)
-
         return JSONResponse(
             status_code=HTTP_401_UNAUTHORIZED,
             content={"detail": "Unauthorized"},

@@ -188,11 +188,6 @@ export interface PRDetails {
   [key: string]: any
 }
 
-export interface IssueDetails {
-  body: string
-  [key: string]: any
-}
-
 export interface RepoConfig {
   id: number
   repo: string

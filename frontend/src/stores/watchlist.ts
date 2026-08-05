@@ -20,22 +20,11 @@ export const useWatchlistStore = defineStore('watchlist', () => {
 
   // Add modal
   const showAddModal = ref(false)
-  const manualAddRepo = ref('')  // 选中的仓库名称，空字符串表示默认仓库
-  const manualAddType = ref('issue')
+  const manualAddRepo = ref('')
   const manualAddNumber = ref('')
   const manualAddLoading = ref(false)
   const manualAddNote = ref('')
   const manualAddAssigneeId = ref<number | null>(null)
-  const manualAddLinkTaskMode = ref<'none' | 'existing' | 'new'>('none')
-  const manualAddTaskSearchQuery = ref('')
-  const manualAddTaskSearchResults = ref<any[]>([])
-  const manualAddTaskSearchLoading = ref(false)
-  const manualAddTaskOpen = ref(false)
-  const manualAddNewTaskTitle = ref('')
-  const manualAddNewTaskPriority = ref('P2')
-  const manualAddNewTaskSource = ref('self')
-  const manualAddSelectedTaskId = ref<number | null>(null)
-  const manualAddSelectedTaskTitle = ref('')
 
   // Edit modal
   const showEditModal = ref(false)
@@ -43,13 +32,6 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const watchlistEditNote = ref('')
   const watchlistEditAssigneeId = ref<number | null>(null)
   const watchlistEditSaving = ref(false)
-  const watchlistEditTaskList = ref<any[]>([])
-  const watchlistEditLinkTaskId = ref('')
-  const watchlistEditSelectedTasks = ref<any[]>([])
-  const watchlistEditShowCreate = ref(false)
-  const watchlistEditNewTaskTitle = ref('')
-  const watchlistEditNewTaskSource = ref('self')
-  const watchlistEditNewTaskPriority = ref('P2')
 
   const watchlistAssigneeFilter = ref<number | null>(null)
 
@@ -145,10 +127,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       return
     }
     if (manualAddLoading.value) return
-    // 去重检查：同一仓库下同号 pr/issue 不能重复
-    // 但 add-by-number 不知道是 pr 还是 issue，所以两种都查
     const repoShort = manualAddRepo.value
-    // 从 reposStore 查找该短名对应的完整 owner/repo
     const reposStore = useReposStore()
     const repoConfig = reposStore.repos.find(r => r.repo === repoShort)
     const fullRepo = repoConfig ? repoFullNameFromCloneUrl(repoConfig.clone_url) : ''
@@ -171,45 +150,12 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       const key = _watchKey(item.number, item.item_type, item.repo)
       watchlistSet.value.add(key)
       watchlist.value.unshift(item)
-
-      if (manualAddLinkTaskMode.value === 'existing' && manualAddSelectedTaskId.value) {
-        await api('/api/personal-todo/link-to-watchlist', {
-          method: 'POST',
-          body: JSON.stringify({
-            watchlist_item_type: item.item_type,
-            watchlist_number: item.number,
-            watchlist_title: item.title || '',
-            repo: item.repo,
-            task_id: manualAddSelectedTaskId.value,
-          }),
-        })
-      } else if (manualAddLinkTaskMode.value === 'new' && manualAddNewTaskTitle.value.trim()) {
-        await api('/api/personal-todo/link-to-watchlist', {
-          method: 'POST',
-          body: JSON.stringify({
-            watchlist_item_type: item.item_type,
-            watchlist_number: item.number,
-            watchlist_title: item.title || '',
-            repo: item.repo,
-            new_task_title: manualAddNewTaskTitle.value.trim(),
-            new_task_source: manualAddNewTaskSource.value || 'self',
-          }),
-        })
-      }
       await loadWatchlist()
       useAppStore().showToast('已加入关注', `#${num} 已加入特别关注`, 'success')
       manualAddRepo.value = ''
       manualAddNumber.value = ''
       manualAddNote.value = ''
       manualAddAssigneeId.value = null
-      manualAddLinkTaskMode.value = 'none'
-      manualAddTaskSearchQuery.value = ''
-      manualAddTaskSearchResults.value = []
-      manualAddSelectedTaskId.value = null
-      manualAddNewTaskTitle.value = ''
-      manualAddNewTaskPriority.value = 'P2'
-      manualAddNewTaskSource.value = 'self'
-      manualAddSelectedTaskTitle.value = ''
       watchlistTab.value = item.item_type
     } catch (e: any) {
       useAppStore().showToast('添加失败', e.message, 'error')
@@ -222,7 +168,6 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   function openAddModal() {
     manualAddRepo.value = ''
     showAddModal.value = true
-    loadManualAddTaskList()
   }
 
   function closeAddModal() {
@@ -230,38 +175,12 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     manualAddRepo.value = ''
   }
 
-  async function loadManualAddTaskList() {
-    manualAddTaskSearchLoading.value = true
-    try {
-      const data: any = await api('/api/personal-todo/tasks?per_page=50&status=all')
-      manualAddTaskSearchResults.value = data.tasks || []
-    } catch (e: any) {
-      useAppStore().showToast('加载任务列表失败', e.message, 'error')
-    } finally {
-      manualAddTaskSearchLoading.value = false
-    }
-  }
-
-  function selectManualAddTask(task: any) {
-    manualAddSelectedTaskId.value = task.id
-    manualAddSelectedTaskTitle.value = task.title
-    manualAddTaskSearchQuery.value = ''
-    manualAddTaskSearchResults.value = []
-  }
-
   // Edit modal
   function openEditModal(w: WatchlistItem) {
     editingWatchlistItem.value = w
     watchlistEditNote.value = w.note || ''
     watchlistEditAssigneeId.value = w.assignee_id || null
-    watchlistEditLinkTaskId.value = ''
-    watchlistEditSelectedTasks.value = []
-    watchlistEditShowCreate.value = false
-    watchlistEditNewTaskTitle.value = ''
-    watchlistEditNewTaskSource.value = 'self'
-    watchlistEditNewTaskPriority.value = 'P2'
     showEditModal.value = true
-    _loadWatchlistEditTaskList()
   }
 
   function closeEditModal() {
@@ -269,36 +188,6 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     editingWatchlistItem.value = null
     watchlistEditNote.value = ''
     watchlistEditAssigneeId.value = null
-    watchlistEditTaskList.value = []
-    watchlistEditLinkTaskId.value = ''
-    watchlistEditSelectedTasks.value = []
-    watchlistEditShowCreate.value = false
-    watchlistEditNewTaskTitle.value = ''
-  }
-
-  function watchlistEditAddTask() {
-    const id = watchlistEditLinkTaskId.value
-    if (!id) return
-    if (id === '__new__') {
-      watchlistEditShowCreate.value = true
-      watchlistEditLinkTaskId.value = ''
-      return
-    }
-    if (watchlistEditSelectedTasks.value.some(t => t.id === parseInt(id, 10))) return
-    const task = watchlistEditTaskList.value.find(t => t.id === parseInt(id, 10))
-    if (task) watchlistEditSelectedTasks.value.push(task)
-    watchlistEditLinkTaskId.value = ''
-  }
-
-  function watchlistEditRemoveTask(taskId: number) {
-    watchlistEditSelectedTasks.value = watchlistEditSelectedTasks.value.filter(t => t.id !== taskId)
-  }
-
-  async function _loadWatchlistEditTaskList() {
-    try {
-      const data: any = await api('/api/personal-todo/tasks?per_page=50&status=all')
-      watchlistEditTaskList.value = data.tasks || []
-    } catch (_) {}
   }
 
   async function saveWatchlistItem() {
@@ -321,18 +210,6 @@ export const useWatchlistStore = defineStore('watchlist', () => {
         watchlist.value[idx].note = updated.note
         watchlist.value[idx].assignee_id = updated.assignee_id
       }
-      for (const t of watchlistEditSelectedTasks.value) {
-        await api('/api/personal-todo/link-to-watchlist', {
-          method: 'POST',
-          body: JSON.stringify({
-            watchlist_item_type: w.item_type,
-            watchlist_number: w.number,
-            watchlist_title: w.title || '',
-            repo: w.repo,
-            task_id: t.id,
-          }),
-        })
-      }
       await loadWatchlist()
       useAppStore().showToast('关注信息已保存', '', 'success')
       closeEditModal()
@@ -343,58 +220,15 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     }
   }
 
-  async function saveWatchlistItemAndCreateTask() {
-    if (!editingWatchlistItem.value || !watchlistEditNewTaskTitle.value.trim() || watchlistEditSaving.value) return
-    const w = editingWatchlistItem.value
-    const note = watchlistEditNote.value.trim()
-    const assignee_id = watchlistEditAssigneeId.value
-    watchlistEditSaving.value = true
-    try {
-      const noteParam = w.repo ? `?repo=${encodeURIComponent(w.repo)}` : ''
-      await api(`/api/watchlist/${w.item_type}/${w.number}/note${noteParam}`, {
-        method: 'PUT',
-        body: JSON.stringify({ note, assignee_id }),
-      })
-      await api('/api/personal-todo/link-to-watchlist', {
-        method: 'POST',
-        body: JSON.stringify({
-          watchlist_item_type: w.item_type,
-          watchlist_number: w.number,
-          watchlist_title: w.title || '',
-          repo: w.repo,
-          new_task_title: watchlistEditNewTaskTitle.value.trim(),
-          new_task_source: watchlistEditNewTaskSource.value,
-        }),
-      })
-      await loadWatchlist()
-      useAppStore().showToast('已保存并创建任务', '', 'success')
-      closeEditModal()
-    } catch (e: any) {
-      useAppStore().showToast('操作失败', e.message, 'error')
-    } finally {
-      watchlistEditSaving.value = false
-    }
-  }
-
-  function openWatchlistPR(w: WatchlistItem) {
-    // This is used from community view - will be wired up via the PRCenter store
-  }
-
   return {
     watchlist, watchlistSet, watchlistTab, watchlistAssigneeFilter, filteredWatchlist,
-    showAddModal, manualAddRepo, manualAddType, manualAddNumber, manualAddLoading,
-    manualAddNote, manualAddAssigneeId, manualAddLinkTaskMode,
-    manualAddTaskSearchQuery, manualAddTaskSearchResults, manualAddTaskSearchLoading,
-    manualAddTaskOpen, manualAddNewTaskTitle, manualAddNewTaskPriority,
-    manualAddNewTaskSource, manualAddSelectedTaskId, manualAddSelectedTaskTitle,
+    showAddModal, manualAddRepo, manualAddNumber, manualAddLoading,
+    manualAddNote, manualAddAssigneeId,
     showEditModal, editingWatchlistItem, watchlistEditNote, watchlistEditAssigneeId,
-    watchlistEditSaving, watchlistEditTaskList, watchlistEditLinkTaskId,
-    watchlistEditSelectedTasks, watchlistEditShowCreate, watchlistEditNewTaskTitle,
-    watchlistEditNewTaskSource, watchlistEditNewTaskPriority,
+    watchlistEditSaving,
     isWatched, findWatchlistItem, loadWatchlist, toggleWatch,
-    addWatchlistByNumber, openAddModal, closeAddModal, loadManualAddTaskList,
-    selectManualAddTask,
-    openEditModal, closeEditModal, watchlistEditAddTask, watchlistEditRemoveTask,
-    saveWatchlistItem, saveWatchlistItemAndCreateTask, openWatchlistPR,
+    addWatchlistByNumber, openAddModal, closeAddModal,
+    openEditModal, closeEditModal,
+    saveWatchlistItem,
   }
 })

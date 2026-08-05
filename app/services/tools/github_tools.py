@@ -8,7 +8,6 @@ GitHub 工具集
 - search_arxiv: 搜索 arXiv 论文（已迁移到 academic_tools.py）
 - get_github_releases: 获取仓库 release 列表
 """
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional

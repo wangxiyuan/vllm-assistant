@@ -17,12 +17,9 @@ function repoFullNameFromCloneUrl(cloneUrl: string): string {
 export const useCommunityStore = defineStore('community', () => {
   const issues = ref<Issue[]>([])
   const prs = ref<PR[]>([])
-  const stats = ref({ totalIssues: 0, totalPRs: 0 })
   const sortBy = ref('created')
   const communityTab = ref<'issues' | 'prs'>('prs')
   const communityPage = ref(1)
-  const pageSize = ref(25)
-  const communityLoadingMore = ref(false)
   const communityIssueType = ref('all')
   const communityIssueArea = ref('')
   const communityPRArea = ref('')
@@ -82,13 +79,13 @@ export const useCommunityStore = defineStore('community', () => {
 
   const pagedFilteredIssues = computed(() => {
     if (communityTab.value === 'prs') return []
-    const limit = communityPage.value * pageSize.value
+    const limit = communityPage.value * 25
     return filteredIssues.value.slice(0, limit)
   })
 
   const pagedFilteredPRs = computed(() => {
     if (communityTab.value === 'issues') return []
-    const limit = communityPage.value * pageSize.value
+    const limit = communityPage.value * 25
     return filteredPRs.value.slice(0, limit)
   })
 
@@ -98,14 +95,6 @@ export const useCommunityStore = defineStore('community', () => {
     return shown < total
   })
 
-  const filteredListEmpty = computed(() => {
-    if (communityTab.value === 'prs') return filteredPRs.value.length === 0
-    return filteredIssues.value.length === 0
-  })
-
-  const newIssuesCount = computed(() => issues.value.filter(i => i.is_new).length)
-  const newPRsCount = computed(() => prs.value.filter(p => p.is_new).length)
-
   async function loadAreas() {
     try {
       await useAppStore().loadAreas()
@@ -114,7 +103,6 @@ export const useCommunityStore = defineStore('community', () => {
 
   async function loadCommunityData() {
     communityPage.value = 1
-    communityLoadingMore.value = false
     // 没有选中仓库时，默认选中第一个 tracked repo
     if (!communityRepo.value) {
       const repos = trackedRepos.value
@@ -132,10 +120,6 @@ export const useCommunityStore = defineStore('community', () => {
       const items = data.items || data
       issues.value = items.filter((x: any) => x.type === 'issue')
       prs.value = items.filter((x: any) => x.type === 'pr')
-      stats.value = {
-        totalIssues: issues.value.length,
-        totalPRs: prs.value.length,
-      }
     } catch (e: any) {
       useAppStore().showToast('加载社区动态失败', e.message, 'error')
     }
@@ -152,11 +136,11 @@ export const useCommunityStore = defineStore('community', () => {
   }
 
   return {
-    issues, prs, stats, sortBy, communityTab, communityPage, pageSize,
-    communityLoadingMore, communityIssueType, communityIssueArea, communityPRArea,
+    issues, prs, sortBy, communityTab, communityPage,
+    communityIssueType, communityIssueArea, communityPRArea,
     communityRepo, trackedRepos,
     filteredIssues, filteredPRs, pagedFilteredIssues, pagedFilteredPRs,
-    hasMoreCommunity, filteredListEmpty, newIssuesCount, newPRsCount,
+    hasMoreCommunity,
     loadAreas, loadCommunityData, forceRefresh,
   }
 })

@@ -2,7 +2,7 @@
 Shared utilities for API clients and common patterns.
 """
 import logging
-from typing import Optional, Dict, List, Tuple
+from typing import Dict
 
 from app.services.github_client import GitHubClient
 

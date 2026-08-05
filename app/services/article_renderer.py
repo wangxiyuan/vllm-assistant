@@ -5,10 +5,10 @@
 渲染文章，将代码引用替换为实际代码片段
 """
 from html.parser import HTMLParser
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import re
 
-from markdown import markdown, Markdown
+from markdown import Markdown
 
 from app.models import Article, CodeReference
 from app.services.code_ref_parser import CodeRefParser

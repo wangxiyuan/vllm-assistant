@@ -370,12 +370,6 @@ class AreaMapper:
         else:
             return file_path == pattern
 
-    def get_area_info(self, area_id: str) -> Optional[Dict]:
-        """获取领域信息"""
-        if area_id in self.AREA_DEFINITIONS:
-            return self.AREA_DEFINITIONS[area_id].copy()
-        return None
-
     def get_all_areas(self) -> List[Dict]:
         """获取所有领域信息"""
         areas = []

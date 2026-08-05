@@ -173,44 +173,6 @@ class CodeRefParser:
         diff = difflib.unified_diff(old_lines, new_lines, n=2)
         return "\n".join(diff)
 
-    def get_snippet_html(self, repo: str, file_path: str, start_line: int, end_line: int,
-                         cache_service, show_line_numbers: bool = True,
-                         is_outdated: bool = False) -> str:
-        """生成代码片段的 HTML"""
-        lines = cache_service.get_file_lines(repo, file_path)
-        if lines is None:
-            return '<div class="code-embed-error">文件未缓存</div>'
-
-        total_lines = len(lines)
-        if start_line > total_lines or end_line > total_lines:
-            return f'<div class="code-embed-error">行号超出范围（文件共 {total_lines} 行）</div>'
-
-        snippet_lines = lines[start_line - 1:end_line]
-        css_class = "embedded-code outdated" if is_outdated else "embedded-code"
-        html_parts = [
-            f'<div class="code-embed" data-repo="{repo}" data-file="{file_path}">',
-        ]
-
-        if is_outdated:
-            html_parts.append(
-                '<div class="outdated-banner">'
-                '⚠️ 此代码引用可能已过时'
-                '<button class="diff-toggle" onclick="toggleDiff(this)">查看变更</button>'
-                '</div>'
-            )
-
-        html_parts.append(f'<pre><code class="{css_class}">')
-
-        for i, line in enumerate(snippet_lines, start_line):
-            if show_line_numbers:
-                html_parts.append(f'<span class="line-number">{i:>4}</span> ')
-            escaped = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            html_parts.append(f'<span class="code-content">{escaped}</span>\n')
-
-        html_parts.append('</code></pre>')
-        html_parts.append('</div>')
-        return ''.join(html_parts)
-
     def save_article_refs(self, article_id: int, content: str, db) -> Dict:
         """
         保存文章时，解析所有代码引用并写入 CodeReference 表。

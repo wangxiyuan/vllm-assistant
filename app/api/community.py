@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Item, Area
 from app.scheduler import trigger_refresh
-from app.services.area_mapper import AreaMapper
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

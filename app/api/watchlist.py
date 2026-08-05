@@ -30,7 +30,7 @@ class WatchlistAddRequest(BaseModel):
     state: str = ""  # 'open' / 'closed' / 'merged'
     note: str = ""  # 用户备注
     assignee_id: Optional[int] = None  # 责任人
-    repo: str = ""  # 完整 owner/repo，空则用 Config 默认仓库
+    repo: str = ""  # 完整 owner/repo，必填
 
     @field_validator("item_type")
     @classmethod
@@ -176,7 +176,7 @@ def add_by_number(req: AddByNumberRequest, db: Session = Depends(get_db)):
 
     自动填充 title/url/state/area/issue_type 等元信息。
     item_type 可选：不传则自动从 GitHub 推断是 issue 还是 PR。
-    repo 可选：不传则使用 Config 中的默认仓库。
+    repo 必填，从 RepoCache 解析完整 owner/repo。
     用 def（非 async）避免同步 GitHub API 调用阻塞事件循环。
     """
     if req.number <= 0:

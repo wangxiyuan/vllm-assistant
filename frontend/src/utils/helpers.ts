@@ -80,10 +80,6 @@ export function ciBadgeClass(status: string): string {
   }[status] || 'badge-ci-unknown'
 }
 
-export function severityLabel(sev: string): string {
-  return { critical: '严重', important: '重要', minor: '次要', high: '高', medium: '中', low: '低' }[sev.toLowerCase()] || sev
-}
-
 export function sourceLabel(source: string): string {
   const map: Record<string, string> = { self: '主动规划', team: '产品反馈', community: '社区反馈' }
   return map[source] || source
@@ -108,14 +104,6 @@ export function ghUrl(repo: string | undefined, number: number, type: 'pr' | 'is
   const seg = type === 'pr' ? 'pull' : 'issues'
   return `https://github.com/${full}/${seg}/${number}`
 }
-
-export const priorities = ['P0', 'P1', 'P2', 'P3']
-
-export const sources = [
-  { value: 'self', label: '主动规划' },
-  { value: 'team', label: '产品反馈' },
-  { value: 'community', label: '社区反馈' },
-]
 
 const _categoryColorPalette = [
   'var(--signal-blue)', 'var(--signal-green)', 'var(--signal-purple)',

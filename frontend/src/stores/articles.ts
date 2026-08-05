@@ -8,7 +8,6 @@ import type { Article } from '@/utils/types'
 export const useArticlesStore = defineStore('articles', () => {
   const articles = ref<Article[]>([])
   const loading = ref(false)
-  const articlesTotal = ref(0)
   const filterArea = ref('')
   const filterStatus = ref('all')
   const sortBy = ref('updated')
@@ -32,16 +31,13 @@ export const useArticlesStore = defineStore('articles', () => {
 
   // Preview
   const previewHtml = ref('')
-  const previewRefs = ref<any[]>([])
 
   // Article detail
   const articleViewOpen = ref(false)
   const selectedArticle = ref<Article | null>(null)
   const articleDetailLoading = ref(false)
   const articleRenderedHtml = ref('')
-  const articleEmbeddedCodes = ref<any[]>([])
   const articleToc = ref<any[]>([])
-  const articleTocOpen = ref(false)
 
   // Validation
   const validating = ref(false)
@@ -104,7 +100,6 @@ export const useArticlesStore = defineStore('articles', () => {
       const qs = params.toString()
       const data: any = await api(`/api/articles${qs ? '?' + qs : ''}`)
       articles.value = data.articles || []
-      articlesTotal.value = data.total || 0
     } catch (e: any) {
       useAppStore().showToast('加载文章失败', e.message, 'error')
     } finally {
@@ -122,7 +117,6 @@ export const useArticlesStore = defineStore('articles', () => {
     editorOpen.value = true
     editorSubView.value = 'editor'
     previewHtml.value = ''
-    previewRefs.value = []
     _takeFormSnapshot()
   }
 
@@ -144,7 +138,6 @@ export const useArticlesStore = defineStore('articles', () => {
     editorOpen.value = true
     editorSubView.value = 'editor'
     previewHtml.value = ''
-    previewRefs.value = []
     _takeFormSnapshot()
   }
 
@@ -254,7 +247,6 @@ export const useArticlesStore = defineStore('articles', () => {
         body: JSON.stringify({ content }),
       })
       previewHtml.value = data.html || ''
-      previewRefs.value = data.refs || []
       articleToc.value = data.toc || []
       editorSubView.value = 'preview'
     } catch (e: any) {
@@ -280,13 +272,10 @@ export const useArticlesStore = defineStore('articles', () => {
     selectedArticle.value = article
     articleDetailLoading.value = true
     articleRenderedHtml.value = ''
-    articleEmbeddedCodes.value = []
     articleToc.value = []
-    articleTocOpen.value = false
     try {
       const data: any = await api(`/api/articles/${article.id}/rendered?sync_code=false`)
       articleRenderedHtml.value = data.html || ''
-      articleEmbeddedCodes.value = data.embedded_codes || []
       articleToc.value = data.toc || []
     } catch (e: any) {
       articleRenderedHtml.value = `<div class="code-embed-error">加载失败: ${e.message}</div>`
@@ -299,16 +288,13 @@ export const useArticlesStore = defineStore('articles', () => {
     articleViewOpen.value = false
     selectedArticle.value = null
     articleRenderedHtml.value = ''
-    articleEmbeddedCodes.value = []
     articleToc.value = []
-    articleTocOpen.value = false
   }
 
   function scrollToHeading(id: string) {
     const el = document.getElementById(id)
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      articleTocOpen.value = false
     }
   }
 
@@ -396,11 +382,11 @@ export const useArticlesStore = defineStore('articles', () => {
   }
 
   return {
-    articles, loading, articlesTotal, filterArea, filterStatus, sortBy, sortOrder,
+    articles, loading, filterArea, filterStatus, sortBy, sortOrder,
     editorOpen, editorSubView, editorMode, form, formSnapshot, editorTagInput,
-    previewHtml, previewRefs,
+    previewHtml,
     articleViewOpen, selectedArticle, articleDetailLoading,
-    articleRenderedHtml, articleEmbeddedCodes, articleToc, articleTocOpen,
+    articleRenderedHtml, articleToc,
     validating, validationResult, deletingArticle,
     showInsertRef, insertRef, insertRefPreview, cacheFiles,
     articleStatsText, formDirty, repoOptions,

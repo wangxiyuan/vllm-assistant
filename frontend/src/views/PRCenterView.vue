@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
 import { usePRCenterStore } from '@/stores/prCenter'
 import { useUsersStore } from '@/stores/users'
-import { useAppStore } from '@/stores/app'
 import { timeAgo } from '@/utils/helpers'
 import { useWatchlistStore } from '@/stores/watchlist'
-import { useRouter } from 'vue-router'
 import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
 import { ciLabel, ciBadgeClass, prStateLabel, issueStateLabel, issueType, issueTypeLabel, ghUrl } from '@/utils/helpers'
 import Icon from '@/components/common/Icon.vue'
@@ -13,12 +10,7 @@ import FilterRow from '@/components/common/FilterRow.vue'
 
 const prStore = usePRCenterStore()
 const usersStore = useUsersStore()
-const appStore = useAppStore()
 const watchlistStore = useWatchlistStore()
-const router = useRouter()
-
-onMounted(() => {
-})
 
 // When contributor changes
 function onContributorChange() {

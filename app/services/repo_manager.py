@@ -18,27 +18,6 @@ from app.config import Config
 logger = logging.getLogger(__name__)
 
 
-def get_active_repos() -> Dict[str, dict]:
-    """从 DB 查询所有活跃仓库，返回 {repo_name: {clone_url, branch, ...}}"""
-    from app.database import SessionLocal
-    from app.models import RepoCache
-
-    db = SessionLocal()
-    try:
-        records = db.query(RepoCache).filter(RepoCache.status == "active").all()
-        return {
-            r.repo: {
-                "clone_url": r.clone_url,
-                "branch": r.branch or "main",
-                "local_path": r.local_path,
-                "id": r.id,
-            }
-            for r in records
-        }
-    finally:
-        db.close()
-
-
 class RepoManager:
     """多仓库管理：clone、pull、同步到缓存"""
 

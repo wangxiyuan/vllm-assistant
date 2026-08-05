@@ -383,7 +383,7 @@ def resolve_ref(req: ResolveRefRequest, db: Session = Depends(get_db)):
     # 映射到 GitHub 仓库路径
     repo_path = resolve_repo_short_to_full(repo)
 
-    # 用 GitHub REST API 直接查询（GitHubClient 只支持默认仓库）
+    # 用 GitHub REST API 直接查询
     import requests
     headers = Config.get_github_headers()
     base_api_url = f"https://api.github.com/repos/{repo_path}"
@@ -431,7 +431,7 @@ class LinkToWatchlistRequest(BaseModel):
     watchlist_item_type: str  # 'issue' or 'pr'
     watchlist_number: int
     watchlist_title: str = ""
-    repo: Optional[str] = None  # 完整 owner/repo，None 时用 Config 默认仓库
+    repo: Optional[str] = None  # 完整 owner/repo，None 时从 RepoCache 解析
     task_id: Optional[int] = None  # 关联已有任务
     new_task_title: Optional[str] = None  # 或创建新任务
     new_task_description: str = ""

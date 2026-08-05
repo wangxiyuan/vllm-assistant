@@ -2,7 +2,6 @@
 import { onMounted } from 'vue'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { usePRCenterStore } from '@/stores/prCenter'
-import { useAppStore } from '@/stores/app'
 import { useUsersStore } from '@/stores/users'
 import { useTodoStore } from '@/stores/todo'
 import { useReposStore } from '@/stores/repos'
@@ -12,7 +11,6 @@ import Icon from '@/components/common/Icon.vue'
 
 const watchlistStore = useWatchlistStore()
 const prStore = usePRCenterStore()
-const appStore = useAppStore()
 const usersStore = useUsersStore()
 const todoStore = useTodoStore()
 const reposStore = useReposStore()

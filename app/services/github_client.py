@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 # 默认单页大小
 DEFAULT_PER_PAGE = 30
 # 硬上限，避免循环失控
-MAX_PAGES = 20
 
 # 可重试的 HTTP 状态码：429（频率限制）/ 403（含 rate-limit）/ 5xx（服务端抖动）
 # 401（PAT 失效）、404（无数据）不重试
@@ -321,10 +320,9 @@ class GitHubClient:
 
     def get_pull_diff(self, number: int, repo: Optional[str] = None) -> Optional[str]:
         """获取PR的diff文本"""
-        if repo:
-            url = f"https://api.github.com/repos/{repo}/pulls/{number}"
-        else:
-            url = f"{self.base_url}/pulls/{number}"
+        if not repo:
+            return None
+        url = f"https://api.github.com/repos/{repo}/pulls/{number}"
         headers = {"Accept": "application/vnd.github.v3.diff"}
         try:
             response = self.session.get(url, headers=headers)

@@ -460,7 +460,15 @@ def _cleanup_obsolete_schema():
         try:
             cols = {c["name"] for c in inspect(conn).get_columns("personal_tasks")}
             if "dedup_check_result" in cols:
+                # 清理可能残留的旧迁移临时表（上次迁移中途失败留下）
+                try:
+                    conn.execute(DDL("DROP TABLE IF EXISTS personal_tasks_new"))
+                    conn.commit()
+                except Exception:
+                    pass
                 # SQLite 不支持 DROP COLUMN，用重建方式
+                # 临时禁用外键检查以允许 DROP TABLE personal_tasks
+                conn.execute(text("PRAGMA foreign_keys=OFF"))
                 conn.execute(DDL("""
                     CREATE TABLE personal_tasks_new (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
