@@ -12,6 +12,8 @@ from app.services.tools.registry import register_tool
 
 logger = logging.getLogger(__name__)
 
+ARXIV_TIMEOUT = 30
+
 
 # ======================================================================
 # Tool: search_arxiv
@@ -40,23 +42,15 @@ SEARCH_ARXIV = {
 }
 
 
-async def handle_search_arxiv(args: dict) -> dict:
-    """搜索 arXiv 论文"""
-    query = args.get("query", "").strip()
-    if not query:
-        return {"error": "query is required"}
+def _arxiv_fetch(url: str, timeout: int = ARXIV_TIMEOUT) -> str:
+    """请求 arXiv API，返回 XML 文本"""
+    req = urllib.request.Request(url, headers={"User-Agent": "vllm-assistant/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8")
 
-    max_results = min(args.get("max_results", 5), 10)
-    encoded = urllib.parse.quote(query)
-    url = f"https://export.arxiv.org/api/query?search_query=all:{encoded}&max_results={max_results}&sortBy=relevance"
 
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "vllm-assistant/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            xml_data = resp.read().decode("utf-8")
-    except Exception as e:
-        return {"error": f"arxiv search failed: {e}"}
-
+def _parse_arxiv_response(xml_data: str, max_results: int) -> list:
+    """解析 arXiv API 返回的 XML，提取论文列表"""
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     root = ET.fromstring(xml_data)
     entries = root.findall("atom:entry", ns)
@@ -81,8 +75,56 @@ async def handle_search_arxiv(args: dict) -> dict:
             "published": published,
             "url": arxiv_url,
         })
+    return results
 
-    return {"results": results, "query": query}
+
+async def handle_search_arxiv(args: dict) -> dict:
+    """搜索 arXiv 论文
+
+    搜索策略（按优先级）：
+    1. 先按标题搜索 (ti:)，速度快，结果精准
+    2. 标题搜索无结果时，按摘要搜索 (abs:)
+    3. 都失败时，用单个核心词按全文搜索 (all:) 再试一次
+    """
+    query = args.get("query", "").strip()
+    if not query:
+        return {"error": "query is required"}
+
+    max_results = min(args.get("max_results", 5), 10)
+    encoded = urllib.parse.quote(query)
+
+    # 提取核心词（取第一个有意义的词作为备选）
+    core_terms = [w for w in query.split() if len(w) > 2 and w.lower() not in ("the", "for", "and", "with", "from")]
+    core_word = core_terms[0] if core_terms else query.split()[0]
+
+    # 策略 1: 标题搜索
+    for search_field in ["ti", "abs"]:
+        url = (
+            f"https://export.arxiv.org/api/query?"
+            f"search_query={search_field}:{encoded}&max_results={max_results}&sortBy=relevance"
+        )
+        try:
+            xml_data = _arxiv_fetch(url, timeout=ARXIV_TIMEOUT)
+            results = _parse_arxiv_response(xml_data, max_results)
+            if results:
+                return {"results": results, "query": query}
+        except Exception:
+            logger.warning(f"arXiv {search_field} search failed for: {query}")
+
+    # 策略 2: 全文搜索核心词（备选）
+    try:
+        url = (
+            f"https://export.arxiv.org/api/query?"
+            f"search_query=all:{urllib.parse.quote(core_word)}&max_results={max_results}&sortBy=relevance"
+        )
+        xml_data = _arxiv_fetch(url, timeout=ARXIV_TIMEOUT)
+        results = _parse_arxiv_response(xml_data, max_results)
+        if results:
+            return {"results": results, "query": core_word}
+    except Exception:
+        logger.warning(f"arXiv fallback search failed for: {core_word}")
+
+    return {"results": [], "query": query, "note": "arXiv search timed out or returned no results"}
 
 
 # ======================================================================

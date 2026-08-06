@@ -300,7 +300,16 @@ class MemoryService:
             if exclude_stale:
                 query_obj = query_obj.filter(AIMemory.is_stale == False)
 
-            entries = query_obj.order_by(AIMemory.access_count.desc()).limit(top_k * 3).all()
+            # 先按 source_type 过滤（source_type 是 slack 的直接匹配）
+            slack_entries = query_obj.filter(AIMemory.source_type == "slack").order_by(
+                AIMemory.created_at.desc()
+            ).limit(top_k).all()
+
+            if slack_entries:
+                return [self._entry_to_dict(e) for e in slack_entries]
+
+            # 没有精确匹配的 source_type，再用 tags 模糊匹配
+            entries = query_obj.order_by(AIMemory.access_count.desc()).all()
 
             results = []
             for entry in entries:
