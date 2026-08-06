@@ -200,3 +200,15 @@ export interface RepoConfig {
   created_at: string
   updated_at: string
 }
+
+export interface Comment {
+  id: number
+  target_type: 'article' | 'report'
+  target_id: number
+  user_id: number | null
+  user_name: string | null
+  content: string
+  rendered_html: string
+  created_at: string
+  updated_at: string
+}

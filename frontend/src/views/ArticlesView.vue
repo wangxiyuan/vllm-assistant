@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/app'
 import { useUsersStore } from '@/stores/users'
 import { timeAgo } from '@/utils/helpers'
 import Icon from '@/components/common/Icon.vue'
+import CommentSection from '@/components/common/CommentSection.vue'
 
 const articlesStore = useArticlesStore()
 const appStore = useAppStore()
@@ -314,6 +315,7 @@ watch(
         </aside>
         <div class="article-content-body" v-html="articlesStore.articleRenderedHtml"></div>
         </div>
+        <CommentSection v-if="articlesStore.selectedArticle" target-type="article" :target-id="articlesStore.selectedArticle.id" />
       </div>
     </template>
   </div>

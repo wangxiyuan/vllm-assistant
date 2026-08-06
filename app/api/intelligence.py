@@ -222,14 +222,20 @@ async def get_report(report_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/reports/{report_id}")
 async def delete_report(report_id: int, db: Session = Depends(get_db)):
-    """删除洞察报告（同步清理知识库）"""
+    """删除洞察报告（同步清理知识库和评论）"""
     report = db.query(IntelligenceReport).filter(IntelligenceReport.id == report_id).first()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
     from app.services.memory_service import MemoryService
+    from app.models import Comment
     mem = MemoryService()
     mem.forget_by_source_ref_prefix(f"intelligence_report#{report_id}", hard_delete=True)
+
+    db.query(Comment).filter(
+        Comment.target_type == "report",
+        Comment.target_id == report_id,
+    ).delete()
 
     db.delete(report)
     db.commit()

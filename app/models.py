@@ -734,6 +734,47 @@ class QuickPrompt(Base):
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
+class Comment(Base):
+    """评论（多态关联，支持 article / report 等目标类型）"""
+    __tablename__ = "comments"
+    __table_args__ = (
+        Index("idx_comments_target", "target_type", "target_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    target_type = Column(String(20), nullable=False)   # 'article' | 'report'
+    target_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    content = Column(Text, nullable=False)
+    rendered_html = Column(Text)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        user_name = None
+        if self.user_id is not None:
+            try:
+                from app.database import SessionLocal
+                db = SessionLocal()
+                user = db.query(User).filter(User.id == self.user_id).first()
+                if user:
+                    user_name = user.name
+                db.close()
+            except Exception:
+                pass
+        return {
+            "id": self.id,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
+            "user_id": self.user_id,
+            "user_name": user_name,
+            "content": self.content,
+            "rendered_html": self.rendered_html or "",
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }
+
+
 class SlackConfig(Base):
     """Slack 采集配置"""
     __tablename__ = "slack_configs"

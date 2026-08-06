@@ -6,6 +6,7 @@ import { useReposStore } from '@/stores/repos'
 import { renderMarkdown } from '@/composables/useMarkdown'
 import { api } from '@/api/client'
 import DailyReportRenderer from '@/components/common/DailyReportRenderer.vue'
+import CommentSection from '@/components/common/CommentSection.vue'
 
 const route = useRoute()
 const intelStore = useIntelStore()
@@ -206,6 +207,7 @@ function isDailyReport(report: any): boolean {
               :content="intelStore.reportDetails.content || ''"
             />
             <div v-else class="pr-body" v-html="renderMarkdown(intelStore.reportDetails.content || '(无内容)')"></div>
+            <CommentSection target-type="report" :target-id="intelStore.selectedReport.id" />
           </div>
           <div v-else class="modal-body report-content">
             <div class="pr-body" v-html="renderMarkdown('(无内容)')"></div>
