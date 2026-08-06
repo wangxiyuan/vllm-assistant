@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useCommentsStore } from '@/stores/comments'
 import { useUsersStore } from '@/stores/users'
+import { useCommentUser } from '@/composables/useCommentUser'
 import { timeAgo } from '@/utils/helpers'
 
 const props = defineProps<{
@@ -11,17 +12,15 @@ const props = defineProps<{
 
 const commentsStore = useCommentsStore()
 const usersStore = useUsersStore()
+const { selectedUserId, pickUser, setUser, resetUser } = useCommentUser()
 
 const newComment = ref('')
-const selectedUserId = ref<number | null>(null)
 const editingId = ref<number | null>(null)
 const editingContent = ref('')
 
 onMounted(() => {
   commentsStore.loadComments(props.targetType, props.targetId)
-  usersStore.loadUsers()
-  const saved = localStorage.getItem('comment_user_id')
-  if (saved) selectedUserId.value = parseInt(saved, 10)
+  pickUser()
 })
 
 onUnmounted(() => {
@@ -59,12 +58,12 @@ function saveEdit(comment: any) {
 }
 
 function changeUser() {
-  selectedUserId.value = null
+  resetUser()
 }
 
 function onUserSelected() {
   if (selectedUserId.value !== null) {
-    localStorage.setItem('comment_user_id', String(selectedUserId.value))
+    setUser(selectedUserId.value)
   }
 }
 </script>

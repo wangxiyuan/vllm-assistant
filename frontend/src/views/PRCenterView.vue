@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { watch, onMounted } from 'vue'
 import { usePRCenterStore } from '@/stores/prCenter'
 import { useUsersStore } from '@/stores/users'
 import { timeAgo } from '@/utils/helpers'
@@ -7,22 +8,52 @@ import { renderMarkdown, renderDiff } from '@/composables/useMarkdown'
 import { ciLabel, ciBadgeClass, prStateLabel, issueStateLabel, issueType, issueTypeLabel, ghUrl } from '@/utils/helpers'
 import Icon from '@/components/common/Icon.vue'
 import FilterRow from '@/components/common/FilterRow.vue'
+import { useCommentUser } from '@/composables/useCommentUser'
 
 const prStore = usePRCenterStore()
 const usersStore = useUsersStore()
 const watchlistStore = useWatchlistStore()
+const { selectedUserId, setUser } = useCommentUser()
 
 // When contributor changes
 function onContributorChange() {
   const val = prStore.selectedContributorGithubId
   if (val) {
     const user = usersStore.users.find(u => u.github_id === val)
-    if (user) prStore.selectedContributor = user as any
+    if (user) {
+      prStore.selectedContributor = user as any
+      setUser(user.id)
+    }
   } else {
     prStore.selectedContributor = null
   }
   prStore.loadAllContribData()
 }
+
+// Auto-select contributor from localStorage on mount
+onMounted(() => {
+  if (selectedUserId.value !== null) {
+    const user = usersStore.users.find(u => u.id === selectedUserId.value)
+    if (user && user.github_id) {
+      prStore.selectedContributorGithubId = user.github_id
+      onContributorChange()
+    }
+  }
+})
+
+// Sync from other pages: when selectedUserId changes, update PR Center
+watch(selectedUserId, (id) => {
+  if (id === null) {
+    prStore.selectedContributorGithubId = ''
+    onContributorChange()
+    return
+  }
+  const user = usersStore.users.find(u => u.id === id)
+  if (user && user.github_id && user.github_id !== prStore.selectedContributorGithubId) {
+    prStore.selectedContributorGithubId = user.github_id
+    onContributorChange()
+  }
+})
 
 function repoFullName(cloneUrl: string): string {
   let url = cloneUrl.endsWith('.git') ? cloneUrl.slice(0, -4) : cloneUrl
