@@ -8,7 +8,7 @@
 
 > 昨日核心动态一句话总结（不超过 100 字），数据覆盖近 24 小时，监控仓库列表。
 
-## 昨日新增 Issue 明细
+### 昨日新增 Issue 明细
 
 | 编号 | 标题 | 标签 | 状态 | 简要分析 |
 |------|------|------|------|----------|
@@ -16,95 +16,120 @@
 
 按热度排序，每个 issue 一行，`backtick` 内写标签如 `bug` `feature` `performance`。表格后跟一行简要分析。
 
-## 昨日新增 PR 明细
+### 昨日新增 PR 明细
 
 | 编号 | 标题 | 状态 | 技术要点 |
 |------|------|------|----------|
 | #{{ number }} | {{ title }} | merged / WIP | 关键变更摘要 |
 
-## 版本发布
+### 版本发布
 
 - **{{ repo }} v{{ version }}**（{{ today }}）：{{ summary }}
 - 优先引用 get_github_releases 获取的真实数据，不要编造版本号
 
 ## 质量与架构
 
-### [高] {{ change_title }}
-- **#{{ number }}** {{ change_desc }} — 影响文件数: N，新增行: N，删除行: N
-- 风险点：{{ risk_desc }}
-- 涉及模块: {{ modules }}
+> 今日共分析 N 个合并 PR，涉及模块：{{ modules }}。重点关注：{{ focus_summary }}
 
-### [中] {{ change_title }}
-- **#{{ number }}** {{ change_desc }} — 影响文件数: N，新增行: N，删除行: N
-- 风险点：{{ risk_desc }}
-- 涉及模块: {{ modules }}
+### {{ change_title }} `高`
+- **PR**: #{{ number }}
+- **影响范围**: {{ files_count }} 个文件，+{{ added }}/-{{ deleted }} 行
+- **风险点**: {{ risk_desc }}
+- **分析**: {{ analysis }}
 
-### [低] {{ change_title }}
-- **#{{ number }}** {{ change_desc }} — 影响文件数: N，新增行: N，删除行: N
-- 纯新增/不影响现有逻辑
+### {{ change_title }} `中`
+- **PR**: #{{ number }}
+- **影响范围**: {{ files_count }} 个文件，+{{ added }}/-{{ deleted }} 行
+- **风险点**: {{ risk_desc }}
+- **分析**: {{ analysis }}
+
+### {{ change_title }} `低`
+- **PR**: #{{ number }}
+- **影响范围**: {{ files_count }} 个文件，+{{ added }}/-{{ deleted }} 行
+- **分析**: {{ analysis }}
+
+### 技术债务与趋势
+- {{ trend_item }}
+
+### 测试与质量关注
+- {{ quality_item }}
 
 ## 竞品动态与对比
 
-| 维度 | vLLM | SGLang | 备注 |
-|------|------|--------|------|
-| {{ feature }} | 已支持 | 已支持 | — |
-| {{ feature }} | 未支持 | 已支持 | [建议优先级: 高] 对应 vLLM issue #{{ number }} |
+### SGLang 昨日动态
+- **PR**: #{{ number }} {{ title }} — {{ summary }}
+- **Release**: {{ release_info }}
 
-核心差异分析：{{ diff_analysis }}
+### 功能对比矩阵
+
+| 维度 | vLLM | SGLang | 趋势方向 | 备注 |
+|------|------|--------|---------|------|
+| {{ feature }} | 已支持 | 已支持 | → 持平 | — |
+| {{ feature }} | 未支持 | 已支持 | ↑ 追赶中 | [建议优先级: 高] 对应 vLLM issue #{{ number }} |
+| {{ feature }} | 已支持 | 未支持 | ↓ 领先 | 差异化优势 |
+
+### 差异分析
+- **{{ feature }}**：vLLM 未实现，SGLang 已发布。原因：{{ reason }}。建议：{{ suggestion }}
+
+### 总结
+{{ summary }}
 
 ## 学术动态
 
-- **{{ paper_title }}** ({{ institution }}) [相关性: 高/中/低]
+### 高相关度
+- **{{ paper_title }}** [相关性: 高]
   - {{ abstract }}
   - 链接: {{ arxiv_url }}
   - 建议：{{ suggestion }}
 
-（每篇论文一条，用 search_arxiv 搜索英文关键词获取，标注相关性）
+### 一般相关
+- **{{ paper_title }}** [相关性: 中/低]
+  - 链接: {{ arxiv_url }}
+
+（用 search_arxiv 搜索英文关键词获取，每篇标注相关性。搜索超时或无结果时直接写"搜索超时"或"暂无数据"。）
 
 ## 新闻动态
 
 - **{{ news_title }}** — {{ news_summary }}
   - 来源: [{{ source }}]({{ url }}) | 与 vLLM 关联: {{ relevance }}
 
-（每条新闻必须标注来源 URL，无来源 URL 的新闻不要写。如果没有找到相关新闻，填"暂无数据"。）
+（用 search_web 搜索行业新闻和技术动态，每条标注来源 URL。注意：**不要在此章节重复版本发布信息**，版本发布已在[昨日数据] tab 中单独列出。如果没有找到相关新闻，填"暂无数据"。）
 
 ## Slack 信息
 
-- **#{{ channel }}** 讨论: {{ topic }}
-  - 参与人数: N | 消息数: N
-  - {{ discussion }}
+### 话题总结
+{{ summary }}
 
-（用 search_by_tags 搜索 tags=slack 获取，标注参与人数、消息数）
+### 讨论明细
+- **#{{ channel }}**
+  - {{ topic_1 }}（参与: N | 消息: N）
+  - {{ topic_2 }}（参与: N | 消息: N）
+
+（用 search_by_tags 搜索 tags=slack 获取。**相同频道的话题合并到同一个频道名下，不要重复展示频道名。**）
 
 ## 贡献机会
 
-### [初级] 适合入门贡献者
-- **#{{ number }}** {{ title }} `{{ task_type }}` [预估: {{ estimate }}小时]
-  - 标签: `good first issue`
+### 初级 · 适合入门贡献者
+- **#{{ number }}** {{ title }} `{{ task_type }}` [预估: {{ estimate }}]
+  - 来源: {{ source }}
   - {{ description }}
 
-### [专业] 需深入理解架构
-- **{{ direction }}** [预估: {{ estimate }}天]
+### 专业 · 需深入理解架构
+- **#{{ number }}** {{ title }} `{{ task_type }}` [预估: {{ estimate }}]
+  - 来源: {{ source }}
   - {{ description }}
   - 涉及模块: {{ modules }}
-  - 对应 issue: #{{ number }}
 
-### [研究型] 需原型验证
-- **{{ direction }}** [预估: {{ estimate }}周]
+### 研究型 · 需原型验证
+- **#{{ number }}** {{ title }} `{{ task_type }}` [预估: {{ estimate }}]
+  - 来源: {{ source }}
   - {{ description }}
-  - {{ ref_info }}
+  - 参考: {{ ref_info }}
+
+（无新贡献机会时填"暂无数据"）
 
 ## 其他
 
 - {{ other_item }}
 
-（此章节存放不属于以上各 tab 的补充信息，如社区公告、基础设施变更、团队变动、值得关注的长期趋势等。**所有信息必须有可验证的来源（GitHub issue/PR 编号、search_web 返回的 URL 等），无法验证的信息不要写。** 非必要，无内容时留空。）
-
-## 要求
-- 使用中文
-- 每个结论必须引用具体 issue/PR 编号，使用 #{{ number }} 格式
-- 直接输出 Markdown，不要包裹在代码块中
-- 搜索时优先搜索近 24-48 小时的内容
-- 对于未覆盖的内容，保留章节标题并填写"暂无数据，搜索关键词建议：{{ keywords }}"
-- 贡献机会要分三级：初级（good first issue）、专业（架构改进）、研究型（新算法原型）
-- 每个 ## 章节将作为独立 tab 展示，内容需完整可独立阅读
+（此章节存放其他章节未覆盖的补充信息，如社区公告、基础设施变更、团队变动等。**如果某条信息已在其他 tab 中出现，不要在此重复。** 非必要，无内容时留空。）

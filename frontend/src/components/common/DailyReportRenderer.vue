@@ -87,9 +87,10 @@ const renderedHtml = computed(() => {
     case 'quality': {
       const html = renderMarkdown(raw)
       return makeLinksClickable(html)
-        .replace(/\[高\]/g, '<span class="rlvl rlvl-high">高</span>')
-        .replace(/\[中\]/g, '<span class="rlvl rlvl-mid">中</span>')
-        .replace(/\[低\]/g, '<span class="rlvl rlvl-low">低</span>')
+        .replace(/<code>高<\/code>/g, '<span class="rlvl rlvl-high">高</span>')
+        .replace(/<code>中<\/code>/g, '<span class="rlvl rlvl-mid">中</span>')
+        .replace(/<code>低<\/code>/g, '<span class="rlvl rlvl-low">低</span>')
+        .replace(/<blockquote>/g, '<blockquote class="qa-summary">')
     }
     case 'competitive': {
       const html = renderMarkdown(raw)
@@ -97,6 +98,9 @@ const renderedHtml = computed(() => {
         .replace(/<table>/g, '<table class="daily-sglang-table">')
         .replace(/\b已支持\b/g, '<span class="cmp cmp-yes">已支持</span>')
         .replace(/\b未支持\b/g, '<span class="cmp cmp-no">未支持</span>')
+        .replace(/→\s*持平/g, '<span class="trend trend-flat">→ 持平</span>')
+        .replace(/↑\s*追赶中/g, '<span class="trend trend-up">↑ 追赶中</span>')
+        .replace(/↓\s*领先/g, '<span class="trend trend-down">↓ 领先</span>')
         .replace(/\[建议优先级:\s*([^\]]+)\]/g, '<span class="cmp-prio cmp-prio-$1">建议优先级: $1</span>')
     }
     case 'academic': {
@@ -117,10 +121,9 @@ const renderedHtml = computed(() => {
         .replace(/<code>bug<\/code>/g, '<span class="tag tag-bug">bug</span>')
         .replace(/<code>feature<\/code>/g, '<span class="tag tag-feature">feature</span>')
         .replace(/<code>docs<\/code>/g, '<span class="tag tag-docs">docs</span>')
-        .replace(/\[初级\]/g, '<span class="ctag ctag-beginner">[初级]</span>')
-        .replace(/\[专业\]/g, '<span class="ctag ctag-pro">[专业]</span>')
-        .replace(/\[研究型\]/g, '<span class="ctag ctag-research">[研究型]</span>')
-        .replace(/\[预估:\s*(\d+[^\]]*)\]/g, '<span class="est est-$1">[预估: $1]</span>')
+        .replace(/<code>performance<\/code>/g, '<span class="tag tag-performance">performance</span>')
+        .replace(/来源:\s*([^\n]+)/g, '<span class="source-tag">来源: $1</span>')
+        .replace(/\[预估:\s*([^\]]+)\]/g, '<span class="est">[预估: $1]</span>')
     }
     default: {
       const html = renderMarkdown(raw)
@@ -389,14 +392,43 @@ function copyCurrentTab() {
 /* ── Risk level ── */
 .rlvl {
   display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 5px;
   border-radius: 3px;
+  vertical-align: middle;
+  line-height: 1.6;
 }
 .rlvl-high { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
 .rlvl-mid { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
 .rlvl-low { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+
+/* ── Quality & Architecture ── */
+.daily-tab-body :deep(.qa-summary) {
+  border-left: 3px solid var(--daily-accent);
+  margin: 8px 0 16px;
+  padding: 10px 14px;
+  background: var(--daily-accent-light);
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  color: var(--daily-text);
+  line-height: 1.6;
+}
+.daily-tab-body :deep(h3) {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0 8px;
+  color: var(--daily-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.daily-tab-body :deep(h3 + ul) {
+  margin-top: 0;
+}
+.daily-tab-body :deep(.qa-summary + h3) {
+  margin-top: 0;
+}
 
 /* ── Comparison table ── */
 .daily-sglang-table {
@@ -439,6 +471,18 @@ function copyCurrentTab() {
 .cmp-prio-中 { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
 .cmp-prio-低 { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
 
+/* ── Trend direction ── */
+.trend {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.trend-flat { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+.trend-up { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
+.trend-down { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+
 /* ── Academic relevance ── */
 .rel {
   display: inline-block;
@@ -465,17 +509,17 @@ function copyCurrentTab() {
 }
 
 /* ── Contribution tags ── */
-.ctag {
+.source-tag {
   display: inline-block;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   padding: 1px 6px;
   border-radius: 3px;
-  margin-right: 4px;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  font-family: var(--font-mono, monospace);
 }
-.ctag-beginner { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
-.ctag-pro { background: #f5f3ff; color: #7c3aed; border: 1px solid #e9d5ff; }
-.ctag-research { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
 
 .est {
   display: inline-block;
@@ -483,8 +527,8 @@ function copyCurrentTab() {
   font-weight: 500;
   padding: 1px 5px;
   border-radius: 3px;
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #cbd5e1;
+  background: #fefce8;
+  color: #ca8a04;
+  border: 1px solid #fef08a;
 }
 </style>
