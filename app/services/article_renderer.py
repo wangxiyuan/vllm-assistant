@@ -273,7 +273,8 @@ class ArticleRenderer:
         if is_outdated:
             html_parts.append(
                 '<div class="outdated-banner">'
-                '⚠️ 此代码引用可能已过时'
+                '<span class="warning-icon"></span>'
+                '此代码引用可能已过时'
                 '<button class="diff-toggle" onclick="toggleDiff(this)">查看变更</button>'
                 '</div>'
             )
@@ -292,4 +293,4 @@ class ArticleRenderer:
     def _generate_error_html(self, validation: Dict) -> str:
         """生成错误提示的 HTML"""
         msg = validation.get("message", "引用无效")
-        return f'<div class="code-embed-error">⚠️ {msg}</div>'
+        return f'<div class="code-embed-error"><span class="warning-icon"></span>{msg}</div>'

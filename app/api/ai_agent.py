@@ -5,6 +5,7 @@ AI Agent API 路由
 """
 import json
 import logging
+import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request

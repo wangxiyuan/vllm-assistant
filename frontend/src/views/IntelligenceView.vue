@@ -7,6 +7,7 @@ import { renderMarkdown } from '@/composables/useMarkdown'
 import { api } from '@/api/client'
 import DailyReportRenderer from '@/components/common/DailyReportRenderer.vue'
 import CommentSection from '@/components/common/CommentSection.vue'
+import Icon from '@/components/common/Icon.vue'
 
 const route = useRoute()
 const intelStore = useIntelStore()
@@ -105,8 +106,8 @@ function isDailyReport(report: any): boolean {
         </div>
         <div class="report-meta">
           <span v-if="report.task_title && !isDailyReport(report)" class="meta-item" @click.stop="intelStore.viewReport(report)" title="触发任务">触发任务: <strong>{{ report.task_title }}</strong></span>
-          <span v-if="isDailyReport(report)" class="meta-item">📅 {{ new Date(report.created_at).toLocaleDateString('zh-CN') }}</span>
-          <span v-for="s in report.sources" :key="s" class="badge badge-source" :class="intelStore.intelSourceClass(s)">{{ intelStore.intelSourceLabel(s) }}</span>
+          <span v-if="isDailyReport(report)" class="meta-item"><Icon name="calendar" :size="11" /> {{ new Date(report.created_at).toLocaleDateString('zh-CN') }}</span>
+          <span v-for="s in report.sources" :key="s" class="badge badge-source" :class="intelStore.intelSourceClass(s)" :style="intelStore.intelSourceStyle(s)">{{ intelStore.intelSourceLabel(s) }}</span>
           <span>{{ report.word_count }} 字</span>
           <span>{{ new Date(report.created_at).toLocaleDateString('zh-CN') }}</span>
         </div>

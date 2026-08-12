@@ -37,8 +37,13 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   const aiReview = ref<any>(null)
   const aiReviewLoading = ref(false)
   const aiReviewElapsed = ref(0)
+  const aiReviewCollapsed = ref(false)
   const aiSummary = ref<any>(null)
   const aiSummaryLoading = ref(false)
+  const aiSummaryCollapsed = ref(false)
+  const pendingSummaries = ref<Record<string, boolean>>({})
+  const pendingReviews = ref<Record<number, boolean>>({})
+  const aiReviewTimer = ref<number | null>(null)
 
   // Issue drawer
   const selectedIssue = ref<any>(null)
@@ -56,6 +61,8 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   // Diff
   const expandedDiffFile = ref<string | null>(null)
   const fileDiffs = ref<Record<string, string>>({})
+  const prDiffData = ref<string | null>(null)
+  const prDiffLoading = ref(false)
 
   // Computed
   const trackedRepos = computed(() => {
@@ -116,6 +123,11 @@ export const usePRCenterStore = defineStore('prCenter', () => {
   const openIssueCount = computed(() => myIssues.value.filter(i => i.state === 'open').length)
   const closedIssueCount = computed(() => myIssues.value.filter(i => i.state === 'closed').length)
   const allIssueCount = computed(() => myIssues.value.length)
+
+  const openPRCount = computed(() => myPrs.value.filter(p => p.state === 'open').length)
+  const mergedPRCount = computed(() => myPrs.value.filter(p => p.state === 'merged').length)
+  const closedPRCount = computed(() => myPrs.value.filter(p => p.state === 'closed').length)
+  const allPRCount = computed(() => myPrs.value.length)
 
   // Actions
   function switchPRState(state: string) {
@@ -496,6 +508,7 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     prDetailTab, issueDetailTab,
     expandedDiffFile, fileDiffs,
     filteredMyPRs, filteredMyIssues, openIssueCount, closedIssueCount, allIssueCount,
+    openPRCount, mergedPRCount, closedPRCount, allPRCount,
     switchPRState, switchContributionTab, switchMyIssuesState, switchMyIssuesType,
     switchContributionRepo,
     loadMyPRs, loadMyIssues, loadAllContribData,

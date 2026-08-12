@@ -186,15 +186,13 @@ function copyCurrentTab() {
 
 <style scoped>
 .daily-report-render {
-  --daily-border: var(--border-faint, #e2e8f0);
-  --daily-accent: var(--amber, #3b82f6);
-  --daily-accent-light: var(--amber-glow-soft, #dbeafe);
-  --daily-text: var(--text-primary, #1e293b);
-  --daily-text-secondary: var(--text-secondary, #64748b);
-  --daily-tab-bg: var(--bg-elev-1, #f8fafc);
-  --daily-tab-active-bg: var(--bg-elev-2, #ffffff);
-  --daily-bug: #ef4444;
-  --daily-feature: #8b5cf6;
+  --daily-border: var(--border-faint, #2e3848);
+  --daily-accent: var(--amber, #e8964a);
+  --daily-accent-light: var(--amber-glow-soft, rgba(255, 180, 84, 0.15));
+  --daily-text: var(--text-primary, #e6edf3);
+  --daily-text-secondary: var(--text-secondary, #9aa4b6);
+  --daily-tab-bg: var(--bg-elev-1, #0f141d);
+  --daily-tab-active-bg: var(--bg-elev-2, #161d28);
 }
 
 /* ── Header ── */
@@ -248,7 +246,7 @@ function copyCurrentTab() {
 }
 .daily-copy-toast {
   font-size: 11px;
-  color: #16a34a;
+  color: var(--signal-green);
   animation: fade-out 2s forwards;
 }
 @keyframes fade-out {
@@ -371,12 +369,12 @@ function copyCurrentTab() {
   font-weight: 500;
   font-family: inherit;
 }
-.tag-bug { background: #fef2f2; color: var(--daily-bug); border: 1px solid #fecaca; }
-.tag-feature, .tag-enhancement { background: #f5f3ff; color: var(--daily-feature); border: 1px solid #e9d5ff; }
-.tag-performance { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
-.tag-good-first-issue { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
-.tag-help-wanted { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
-.tag-docs { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.tag-bug { background: var(--signal-red-glow); color: var(--signal-red); border: 1px solid rgba(255, 142, 133, 0.35); }
+.tag-feature, .tag-enhancement { background: var(--signal-purple-glow); color: var(--signal-purple); border: 1px solid rgba(218, 178, 255, 0.35); }
+.tag-performance { background: var(--signal-yellow-glow); color: var(--signal-yellow); border: 1px solid rgba(242, 204, 96, 0.35); }
+.tag-good-first-issue { background: var(--signal-green-glow); color: var(--signal-green); border: 1px solid rgba(142, 236, 151, 0.35); }
+.tag-help-wanted { background: var(--signal-cyan-glow); color: var(--signal-cyan); border: 1px solid rgba(106, 216, 223, 0.35); }
+.tag-docs { background: var(--signal-blue-glow); color: var(--signal-blue); border: 1px solid rgba(132, 203, 255, 0.35); }
 
 /* ── PR status ── */
 .pr-status {
@@ -386,8 +384,8 @@ function copyCurrentTab() {
   padding: 1px 6px;
   border-radius: 3px;
 }
-.pr-merged { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
-.pr-wip { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
+.pr-merged { background: var(--signal-green-glow); color: var(--signal-green); border: 1px solid rgba(142, 236, 151, 0.35); }
+.pr-wip { background: var(--signal-yellow-glow); color: var(--signal-yellow); border: 1px solid rgba(242, 204, 96, 0.35); }
 
 /* ── Risk level ── */
 .rlvl {
@@ -399,9 +397,9 @@ function copyCurrentTab() {
   vertical-align: middle;
   line-height: 1.6;
 }
-.rlvl-high { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-.rlvl-mid { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
-.rlvl-low { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.rlvl-high { background: var(--signal-red-glow); color: var(--signal-red); border: 1px solid rgba(255, 142, 133, 0.35); }
+.rlvl-mid { background: var(--signal-yellow-glow); color: var(--signal-yellow); border: 1px solid rgba(242, 204, 96, 0.35); }
+.rlvl-low { background: var(--signal-green-glow); color: var(--signal-green); border: 1px solid rgba(142, 236, 151, 0.35); }
 
 /* ── Quality & Architecture ── */
 .daily-tab-body :deep(.qa-summary) {
@@ -457,8 +455,8 @@ function copyCurrentTab() {
   padding: 1px 6px;
   border-radius: 3px;
 }
-.cmp-yes { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
-.cmp-no { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.cmp-yes { background: var(--signal-green-glow); color: var(--signal-green); border: 1px solid rgba(142, 236, 151, 0.35); }
+.cmp-no { background: var(--signal-red-glow); color: var(--signal-red); border: 1px solid rgba(255, 142, 133, 0.35); }
 
 .cmp-prio {
   display: inline-block;
@@ -467,9 +465,9 @@ function copyCurrentTab() {
   padding: 1px 5px;
   border-radius: 3px;
 }
-.cmp-prio-高 { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-.cmp-prio-中 { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
-.cmp-prio-低 { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.cmp-prio-高 { background: var(--signal-red-glow); color: var(--signal-red); border: 1px solid rgba(255, 142, 133, 0.35); }
+.cmp-prio-中 { background: var(--signal-yellow-glow); color: var(--signal-yellow); border: 1px solid rgba(242, 204, 96, 0.35); }
+.cmp-prio-低 { background: var(--signal-green-glow); color: var(--signal-green); border: 1px solid rgba(142, 236, 151, 0.35); }
 
 /* ── Trend direction ── */
 .trend {
@@ -479,9 +477,9 @@ function copyCurrentTab() {
   padding: 1px 6px;
   border-radius: 3px;
 }
-.trend-flat { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
-.trend-up { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
-.trend-down { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.trend-flat { background: var(--bg-elev-3); color: var(--text-secondary); border: 1px solid var(--border); }
+.trend-up { background: var(--signal-yellow-glow); color: var(--signal-yellow); border: 1px solid rgba(242, 204, 96, 0.35); }
+.trend-down { background: var(--signal-green-glow); color: var(--signal-green); border: 1px solid rgba(142, 236, 151, 0.35); }
 
 /* ── Academic relevance ── */
 .rel {
@@ -491,9 +489,9 @@ function copyCurrentTab() {
   padding: 1px 5px;
   border-radius: 3px;
 }
-.rel-高 { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-.rel-中 { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
-.rel-低 { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.rel-高 { background: var(--signal-red-glow); color: var(--signal-red); border: 1px solid rgba(255, 142, 133, 0.35); }
+.rel-中 { background: var(--signal-yellow-glow); color: var(--signal-yellow); border: 1px solid rgba(242, 204, 96, 0.35); }
+.rel-低 { background: var(--signal-green-glow); color: var(--signal-green); border: 1px solid rgba(142, 236, 151, 0.35); }
 
 /* ── Slack channel tag ── */
 .slack-channel {
@@ -502,9 +500,9 @@ function copyCurrentTab() {
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 3px;
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #cbd5e1;
+  background: var(--bg-elev-3);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
   font-family: var(--font-mono, monospace);
 }
 
@@ -515,9 +513,9 @@ function copyCurrentTab() {
   font-weight: 500;
   padding: 1px 6px;
   border-radius: 3px;
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #cbd5e1;
+  background: var(--bg-elev-3);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
   font-family: var(--font-mono, monospace);
 }
 
@@ -527,8 +525,8 @@ function copyCurrentTab() {
   font-weight: 500;
   padding: 1px 5px;
   border-radius: 3px;
-  background: #fefce8;
-  color: #ca8a04;
-  border: 1px solid #fef08a;
+  background: var(--signal-yellow-glow);
+  color: var(--signal-yellow);
+  border: 1px solid rgba(242, 204, 96, 0.35);
 }
 </style>

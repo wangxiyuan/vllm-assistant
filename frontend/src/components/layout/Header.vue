@@ -19,14 +19,14 @@ const viewTitles: Record<string, string> = {
 const viewPlaceholders: Record<string, string> = {
   'community': '搜索 Issues 和 PRs…',
   'watchlist': '搜索关注项…',
-  'personal-todo': '搜索任务…',
-  'intelligence': '搜索报告…',
   'pr-center': '搜索你的 PR 和 Issue…',
-  'anatomy': '搜索算子或模型…',
 }
+
+const searchSupportedRoutes = new Set(['community', 'watchlist', 'pr-center'])
 
 const currentTitle = viewTitles[route.name as string] || ''
 const searchPlaceholder = viewPlaceholders[route.name as string] || '搜索…'
+const showSearch = searchSupportedRoutes.has(route.name as string)
 </script>
 
 <template>
@@ -39,7 +39,7 @@ const searchPlaceholder = viewPlaceholders[route.name as string] || '搜索…'
       </button>
       <h1 class="header-title">{{ currentTitle }}</h1>
     </div>
-    <div class="header-center">
+    <div v-if="showSearch" class="header-center">
       <div class="search-bar">
         <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />

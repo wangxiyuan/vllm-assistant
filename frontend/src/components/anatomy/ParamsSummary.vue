@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, provide, inject, watch, type Ref } from 'vue'
+import Icon from '@/components/common/Icon.vue'
 
 const props = defineProps<{
   data: Record<string, any>

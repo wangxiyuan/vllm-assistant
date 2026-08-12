@@ -151,8 +151,6 @@ function isGroupActive(group: NavGroup): boolean {
         <span>Slack 配置</span>
       </button>
     </nav>
-
-    
   </aside>
 </template>
 

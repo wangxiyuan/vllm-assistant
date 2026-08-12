@@ -38,6 +38,11 @@ export const useCommunityStore = defineStore('community', () => {
     }
   }, { immediate: true })
 
+  // Reset pagination depth when switching between PR / Issue tabs
+  watch(communityTab, () => {
+    communityPage.value = 1
+  })
+
   const filteredIssues = computed(() => {
     const appStore = useAppStore()
     const q = (appStore.searchQuery || '').toLowerCase().trim()
@@ -90,9 +95,10 @@ export const useCommunityStore = defineStore('community', () => {
   })
 
   const hasMoreCommunity = computed(() => {
-    const shown = pagedFilteredIssues.value.length + pagedFilteredPRs.value.length
-    const total = filteredIssues.value.length + filteredPRs.value.length
-    return shown < total
+    if (communityTab.value === 'prs') {
+      return pagedFilteredPRs.value.length < filteredPRs.value.length
+    }
+    return pagedFilteredIssues.value.length < filteredIssues.value.length
   })
 
   async function loadAreas() {

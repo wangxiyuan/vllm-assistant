@@ -125,6 +125,25 @@
     --t-base: 0.18s;
     --t-slow: 0.32s;
 
+    /* ── Legacy aliases (kept for backward compat) ──
+       Older components referenced these names before the token
+       consolidation. They map to the current design tokens so any
+       stragglers render correctly. */
+    --accent: var(--amber);
+    --accent-blue: var(--signal-blue);
+    --bg-primary: var(--bg-elev-1);
+    --bg-secondary: var(--bg-elev-2);
+    --bg-tertiary: var(--bg-elev-3);
+    --hover-bg: var(--bg-elev-2);
+    --primary: var(--amber-bright);
+    --primary-glow: var(--amber-glow);
+    --border-color: var(--border);
+    --text: var(--text-primary);
+    --text-quaternary: var(--text-disabled);
+    --surface-faint: var(--bg-elev-1);
+    --font-sm: var(--text-sm);
+    --font-xs: var(--text-xs);
+
     /* ── Z-index scale ── */
     --z-base: 0;
     --z-sticky: 10;

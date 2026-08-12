@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/api/client'
 import { useAppStore } from './app'
+import { CURATED_SOURCES, sourceBadgeVars, type SourceBadgeVars } from '@/utils/helpers'
 import type { IntelReport } from '@/utils/types'
 
 export const useIntelStore = defineStore('intel', () => {
@@ -323,7 +324,12 @@ export const useIntelStore = defineStore('intel', () => {
   }
 
   function intelSourceClass(source: string): string {
-    return 'source-' + source
+    return CURATED_SOURCES.has(source) ? 'source-' + source : 'source-dynamic'
+  }
+
+  function intelSourceStyle(source: string): Record<string, string> {
+    if (CURATED_SOURCES.has(source)) return {}
+    return sourceBadgeVars(source) as unknown as Record<string, string>
   }
 
   return {
@@ -333,6 +339,6 @@ export const useIntelStore = defineStore('intel', () => {
     generateReport, pollReportStatus, viewReport, closeReport,
     deleteReport, regenerateReport, copyReportMarkdown, triggerDailyReport,
     dailyGenLoading,
-    intelSourceLabel, intelSourceClass,
+    intelSourceLabel, intelSourceClass, intelSourceStyle,
   }
 })

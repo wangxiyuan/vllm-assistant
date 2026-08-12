@@ -61,7 +61,7 @@ function closeBanner() {
       </svg>
     </span>
     <span class="banner-text" @click="goToReport">
-      {{ report.title }} — 点击查看今日贡献指南
+      {{ report.title }} · 点击查看今日贡献指南
     </span>
     <button class="banner-close" @click="closeBanner" title="关闭">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -78,7 +78,7 @@ function closeBanner() {
   gap: 10px;
   padding: 10px 16px;
   margin-bottom: 16px;
-  background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
+  background: linear-gradient(135deg, #9a5b12 0%, #7a440b 100%);
   border-radius: 8px;
   color: #fff;
   font-size: 14px;

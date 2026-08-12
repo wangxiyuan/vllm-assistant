@@ -1375,6 +1375,7 @@ const groupedSessions = computed(() => {
 .kb-source-manual { background: var(--amber-glow); color: var(--amber); border-color: rgba(255,180,84,0.3); }
 .kb-source-conversation { background: var(--bg-elev-3); color: var(--text-secondary); border-color: var(--border); }
 .kb-source-report { background: var(--signal-red-glow); color: var(--signal-red); border-color: rgba(255,107,107,0.3); }
+.kb-source-slack { background: var(--signal-cyan-glow); color: var(--signal-cyan); border-color: rgba(106,216,223,0.3); }
 
 .chat-input-bar {
   display: flex;
@@ -1473,7 +1474,7 @@ const groupedSessions = computed(() => {
 .quick-prompt-card:hover {
   border-color: var(--accent);
   background: var(--bg-elev-3);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  box-shadow: var(--shadow-sm);
 }
 .quick-prompt-card.editing {
   cursor: default;

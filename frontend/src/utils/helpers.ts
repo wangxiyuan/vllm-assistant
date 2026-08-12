@@ -119,6 +119,81 @@ export function categoryColor(name: string): string {
   return _categoryColorPalette[hash % _categoryColorPalette.length]
 }
 
+/* ── Dynamic source badge colors ──
+   Report sources come from a dynamically growing repo list (vllm, sglang,
+   vllm-omni, ...). Instead of a hardcoded CSS class per repo, unknown sources
+   get a deterministic hue derived from the repo name.
+
+   Curated sources keep fixed CSS classes (vllm = blue, sglang = green, ...).
+   Dynamic repos use a continuous hue so two repos practically never get the
+   exact same color; saturation/lightness stay inside the theme's signal range
+   to keep the badges visually consistent. If the hashed hue would land inside
+   a curated source's hue family, it is rotated away so a new repo can never
+   render with nearly the same color as an existing curated source. */
+export const CURATED_SOURCES = new Set(['vllm', 'vllm-ascend', 'sglang', 'academic', 'news'])
+
+export interface SourceBadgeVars {
+  '--src-color': string
+  '--src-glow': string
+  '--src-border': string
+}
+
+/* Approximate hue of each curated source's fixed CSS color. */
+const CURATED_HUES = [205, 126, 270, 47, 185]
+const CURATED_HUE_MARGIN = 26
+const GOLDEN_ANGLE = 137.508
+
+function _sourceHash(name: string): number {
+  // MurmurHash3-style mixer so repo names sharing prefixes (vllm-*, qwen-*)
+  // spread out instead of clustering onto adjacent values.
+  let h = (name.length ^ 0xdeadbeef) >>> 0
+  const c1 = 0xcc9e2d51
+  const c2 = 0x1b873593
+  for (let i = 0; i < name.length; i++) {
+    let k = name.charCodeAt(i)
+    k = Math.imul(k, c1) >>> 0
+    k = (k << 15) | (k >>> 17)
+    k = Math.imul(k, c2) >>> 0
+    h ^= k
+    h = ((h << 13) | (h >>> 19)) >>> 0
+    h = (Math.imul(h, 5) + 0xe6546b64) >>> 0
+  }
+  h ^= name.length
+  h ^= h >>> 16
+  h = Math.imul(h, 0x85ebca6b) >>> 0
+  h ^= h >>> 13
+  h = Math.imul(h, 0xc2b2ae35) >>> 0
+  h ^= h >>> 16
+  return h >>> 0
+}
+
+function _hueDistance(a: number, b: number): number {
+  const d = Math.abs(a - b)
+  return Math.min(d, 360 - d)
+}
+
+export function sourceBadgeVars(source: string): SourceBadgeVars {
+  const base = _sourceHash(source) % 360
+  const seed = _sourceHash(source + ':escape')
+  let hue = base
+  let attempts = 0
+  while (attempts < 8) {
+    const nearCurated = CURATED_HUES.some(r => _hueDistance(hue, r) < CURATED_HUE_MARGIN)
+    if (!nearCurated) break
+    // Rotate by golden angle with a per-source step so escapes spread out.
+    const step = 2 + ((seed >>> attempts) % 3)
+    hue = (hue + GOLDEN_ANGLE * step) % 360
+    attempts++
+  }
+  const s = 78
+  const l = 74
+  return {
+    '--src-color': `hsl(${hue}, ${s}%, ${l}%)`,
+    '--src-glow': `hsla(${hue}, ${s}%, ${l}%, 0.16)`,
+    '--src-border': `hsla(${hue}, ${s}%, ${l}%, 0.34)`,
+  }
+}
+
 export function modelCategoryLabel(value: string): string {
   const map: Record<string, string> = {
     dense: 'Dense', moe: 'MoE', hybrid: 'Hybrid',

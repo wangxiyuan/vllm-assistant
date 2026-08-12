@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { usePRCenterStore } from '@/stores/prCenter'
 import { useTodoStore } from '@/stores/todo'
 import { useIntelStore } from '@/stores/intel'
@@ -21,7 +22,37 @@ export function useKeyboard() {
     if (e.key === '/') {
       e.preventDefault()
       const searchInput = document.querySelector('.search-bar input') as HTMLInputElement
-      searchInput?.focus()
+      if (searchInput) {
+        searchInput.focus()
+      }
+      return
+    }
+
+    // Number keys 1-8: navigate to views (matches sidebar kbd badges)
+    const viewByKey: Record<string, string> = {
+      '1': 'community',
+      '2': 'watchlist',
+      '3': 'pr-center',
+      '4': 'personal-todo',
+      '5': 'intelligence',
+      '6': 'articles',
+      '7': 'anatomy',
+      '8': 'ai-agent',
+    }
+    const routeName = viewByKey[e.key]
+    if (routeName) {
+      e.preventDefault()
+      useRouter().push({ name: routeName })
+      return
+    }
+
+    // R key: manual refresh (matches header refresh button tooltip)
+    if (e.key.toLowerCase() === 'r') {
+      const appStore = useAppStore()
+      if (!appStore.loading) {
+        e.preventDefault()
+        appStore.refreshAll()
+      }
       return
     }
 

@@ -6,6 +6,7 @@ import { categoryColor, modelCategoryLabel } from '@/utils/helpers'
 import ArchitectureDiagram from '@/components/anatomy/ArchitectureDiagram.vue'
 import ParamsSummary from '@/components/anatomy/ParamsSummary.vue'
 import ParamsSummaryEditor from '@/components/anatomy/ParamsSummaryEditor.vue'
+import Icon from '@/components/common/Icon.vue'
 
 const anatomyStore = useAnatomyStore()
 const usersStore = useUsersStore()

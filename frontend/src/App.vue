@@ -360,7 +360,7 @@ watch(() => authStore.authenticated, async (val) => {
                 </div>
                 <div v-if="showCredGuide" style="padding:10px 12px;background:var(--bg-primary);border-radius:6px;border:1px solid var(--border-faint);">
                   <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:8px;line-height:1.6;">
-                    <div><b>Step 1</b> — 获取 xoxc token：</div>
+                    <div><b>Step 1</b> - 获取 xoxc token：</div>
                     <div style="margin-left:12px;">Slack 页面 → F12 → Console → 点击下方按钮 → 粘贴到 Console 回车执行</div>
                   </div>
                   <button class="btn" @click="copySubmitScript()" style="width:100%;margin-bottom:10px;">
@@ -368,11 +368,11 @@ watch(() => authStore.authenticated, async (val) => {
                     复制提取 token 脚本 → 粘贴到 Slack Console
                   </button>
                   <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:8px;line-height:1.6;">
-                    <div><b>Step 2</b> — 获取 xoxd cookie：</div>
+                    <div><b>Step 2</b> - 获取 xoxd cookie：</div>
                     <div style="margin-left:12px;">F12 → Application → Cookies → slack.com → 复制 <code style="font-size:11px;padding:1px 4px;background:var(--bg-secondary);border-radius:3px;">d</code> 的 Value</div>
                   </div>
                   <div style="font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:8px;line-height:1.6;">
-                    <div><b>Step 3</b> — 粘贴到上方输入框，点击"测试凭证"验证</div>
+                    <div><b>Step 3</b> - 粘贴到上方输入框，点击"测试凭证"验证</div>
                   </div>
                 </div>
               </div>

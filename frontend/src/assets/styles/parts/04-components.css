@@ -795,9 +795,9 @@ a.item-title:hover { color: var(--amber-bright); }
 }
 
 .badge-daily {
-    background: linear-gradient(135deg, #1a73e8, #1557b0);
+    background: linear-gradient(135deg, #9a5b12, #7a440b);
     color: #fff;
-    border-color: #1557b0;
+    border-color: #7a440b;
     font-weight: 600;
 }
 
@@ -1100,6 +1100,31 @@ a.item-title:hover { color: var(--amber-bright); }
     border-color: var(--border);
 }
 
+/* Article status badges (article cards) */
+.badge-draft {
+    background: var(--signal-yellow-glow);
+    border-color: rgba(242, 204, 96, 0.35);
+    color: var(--signal-yellow);
+}
+.badge-published {
+    background: var(--signal-green-glow);
+    border-color: rgba(142, 236, 151, 0.35);
+    color: var(--signal-green);
+}
+.badge-archived {
+    background: var(--bg-elev-3);
+    color: var(--text-tertiary);
+    border-color: var(--border);
+}
+
+/* New-item marker in community lists */
+.badge-new {
+    background: var(--amber-glow);
+    border-color: var(--amber-dim);
+    color: var(--amber-bright);
+    font-weight: 600;
+}
+
 .badge-source {
     font-size: var(--text-xs);
     padding: 2px 7px;
@@ -1111,6 +1136,13 @@ a.item-title:hover { color: var(--amber-bright); }
 .source-sglang { background: var(--signal-green-glow); color: var(--signal-green); border-color: rgba(142, 236, 151, 0.3); }
 .source-academic { background: var(--signal-yellow-glow); color: var(--signal-yellow); border-color: rgba(242, 204, 96, 0.3); }
 .source-news { background: var(--signal-cyan-glow); color: var(--signal-cyan); border-color: rgba(106, 216, 223, 0.3); }
+/* Dynamically added sources (repos): color is hashed onto the signal
+   palette and injected via --src-* custom properties. */
+.source-dynamic {
+    background: var(--src-glow);
+    color: var(--src-color);
+    border-color: var(--src-border);
+}
 /* Task sources (personal todo) */
 .source-self { background: var(--signal-blue-glow); color: var(--signal-blue); border-color: rgba(132, 203, 255, 0.3); }
 .source-team { background: var(--signal-purple-glow); color: var(--signal-purple); border-color: rgba(218, 178, 255, 0.3); }
