@@ -11,13 +11,22 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 
 from app.config import Config
-from app.services.base_agent import BaseAgent
+from app.services.llm import LLMClient
 from app.services.prompt_utils import render_prompt
 
 logger = logging.getLogger(__name__)
 
 # Agent 各阶段轮次预算
 MAX_TOOL_ROUNDS = 30
+
+
+def _execute_tool_sync(tool_name: str, tool_args: dict) -> dict:
+    """同步执行单个工具（用于 single-shot 兜底，无 agent 循环）。"""
+    from app.services.agent_sdk.tools import _filter_tool_args
+    from app.services.tools import registry as tool_registry
+    import asyncio, json
+    args = _filter_tool_args(tool_name, tool_args)
+    return asyncio.run(tool_registry.execute_tool(tool_name, args))
 
 # ======================================================================
 # 模版渲染
@@ -33,35 +42,24 @@ def _render_daily_template() -> str:
 
 
 
-class IntelligenceReportGenerator(BaseAgent):
-    """洞察报告生成器（Agent 模式）"""
+class IntelligenceReportGenerator:
+    """洞察报告生成器（Agent 模式，基于 OpenAI Agents SDK 三阶段流水线）"""
 
     def __init__(self, db=None):
-        super().__init__()
         self.db = db
+        self.llm = LLMClient()
         self._cached_source_config: Optional[dict] = None
 
-    # ======================================================================
-    # 工具白名单
-    # ======================================================================
-
-    @property
-    def TOOLS(self):
-        from app.services.tools import registry as tool_registry
-        return tool_registry.get_tool_schemas([
-            "search_issues",
-            "get_issue_detail",
-            "get_pr_diff",
-            "search_arxiv",
-            "get_github_releases",
-            "search_web",
-            "extract_web_content",
-            "search_docs",
-"search_memory",
-            "search_by_tags",
-            "search_code",
-            "read_local_code",
-        ])
+    def single_shot_report_for_sdk(
+        self, task_title: str, task_description: str,
+        effective_sources: List[str], extra_prompt: str,
+        github_repos: List[str], source_config: dict,
+    ) -> str:
+        """给 agent_sdk.report 使用的单次回退入口（复用 _single_shot_report）。"""
+        return self._single_shot_report(
+            task_title, task_description, effective_sources, extra_prompt,
+            github_repos, source_config,
+        )
 
     # ======================================================================
     # 来源配置
@@ -160,230 +158,21 @@ class IntelligenceReportGenerator(BaseAgent):
         excluded_sources: Optional[List[str]] = None,
         extra_prompt: str = "",
         is_daily: bool = False,
+        report_id: Optional[int] = None,
     ) -> Dict:
-        """生成洞察报告（Agent 模式）"""
-        source_config = self._get_source_config(self.db)
-        effective_sources = self._resolve_sources(sources, excluded_sources, source_config)
-
-        github_repos = []
-        for s in effective_sources:
-            cfg = source_config.get(s)
-            if not cfg:
-                continue
-            if cfg.get("type") == "github":
-                github_repos.extend(cfg.get("repos", []))
-
-        system_prompt = self._build_system_prompt(
-            task_title, task_description, effective_sources, extra_prompt, github_repos, source_config, is_daily=is_daily,
+        """生成洞察报告（Agent 模式，三阶段流水线，委托给 agent_sdk.report）"""
+        from app.services.agent_sdk.report import generate_report_sync
+        return generate_report_sync(
+            task_title=task_title,
+            task_description=task_description,
+            sources=sources,
+            excluded_sources=excluded_sources,
+            extra_prompt=extra_prompt,
+            is_daily=is_daily,
+            db=self.db,
+            report_id=report_id,
+            gen=self,
         )
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"请开始调研并生成关于「{task_title}」的洞察报告。"},
-        ]
-
-        report_content = ""
-        try:
-            report_content = self._agent_loop(messages, github_repos, effective_sources)
-        except Exception as e:
-            err_str = str(e).lower()
-            tools_unsupported = any(kw in err_str for kw in ("tool", "function_call", "not support", "unrecognized"))
-            if tools_unsupported:
-                logger.warning(f"Agent mode failed (likely tools unsupported), falling back to single-shot: {e}")
-                report_content = self._single_shot_report(task_title, task_description, effective_sources, extra_prompt, github_repos, source_config)
-            else:
-                raise
-
-        return {
-            "content": report_content,
-            "sources": effective_sources,
-        }
-
-    # ======================================================================
-    # Agent 循环
-    # ======================================================================
-
-    def _agent_loop(self, messages: List[dict], github_repos: List[str], effective_sources: List[str]) -> str:
-        """Agent 循环：分阶段引导 AI 搜索和阅读"""
-        search_budget = max(len(github_repos), 3)
-        detail_budget = MAX_TOOL_ROUNDS - search_budget - 1
-
-        search_count = 0
-        detail_count = 0
-
-        for round_num in range(MAX_TOOL_ROUNDS):
-            guidance = self._phase_guidance(
-                round_num, search_count, detail_count,
-                search_budget, detail_budget, github_repos, effective_sources
-            )
-            if guidance:
-                messages.append({"role": "user", "content": guidance})
-
-            try:
-                import asyncio
-                assistant_message, text_content = asyncio.run(self.llm.chat_async(
-                    messages=messages,
-                    tools=self.TOOLS,
-                    max_tokens=Config.LLM_MAX_TOKENS,
-                    temperature=0.3,
-                ))
-            except Exception as e:
-                err_str = str(e).lower()
-                if any(kw in err_str for kw in ("rate limit", "429", "too many requests")):
-                    logger.warning(f"AI chat rate limited at round {round_num}, will retry: {e}")
-                elif any(kw in err_str for kw in ("timeout", "timed out", "read timed out")):
-                    logger.warning(f"AI chat timed out at round {round_num}, will retry: {e}")
-                elif any(kw in err_str for kw in ("context length", "maximum context", "token limit", "max_tokens")):
-                    logger.warning(f"AI chat context exceeded at round {round_num}, truncating history: {e}")
-                    if len(messages) > 10:
-                        system = messages[0]
-                        messages = [system] + messages[-8:]
-                        continue
-                else:
-                    logger.exception(f"AI chat failed at round {round_num}: {e}")
-                raise
-
-            msg = assistant_message
-            tool_calls = msg.get("tool_calls")
-
-            if not tool_calls:
-                return text_content or ""
-
-            has_search = any(tc["function"]["name"] == "search_issues" for tc in tool_calls)
-            has_detail = any(tc["function"]["name"] in ("get_issue_detail", "get_pr_diff") for tc in tool_calls)
-            if has_search:
-                search_count += 1
-            if has_detail:
-                detail_count += 1
-
-            messages.append({
-                "role": "assistant",
-                "content": msg.get("content"),
-                "tool_calls": [
-                    {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"],
-                        },
-                    }
-                    for tc in tool_calls
-                ],
-            })
-
-            # 并行执行 tool calls
-            from concurrent.futures import ThreadPoolExecutor
-
-            def _exec_one(tc):
-                tool_name = tc["function"]["name"]
-                try:
-                    tool_args = json.loads(tc["function"]["arguments"])
-                except (json.JSONDecodeError, TypeError):
-                    tool_args = {}
-                logger.info(f"Agent round {round_num} (search={search_count}, detail={detail_count}): {tool_name}({tool_args})")
-                result = self.execute_tool_sync(tool_name, tool_args)
-                return tc["id"], json.dumps(result, ensure_ascii=False)
-
-            with ThreadPoolExecutor(max_workers=min(len(tool_calls), 5)) as pool:
-                futures = [pool.submit(_exec_one, tc) for tc in tool_calls]
-                for f in futures:
-                    tool_call_id, content = f.result()
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": content,
-                    })
-
-        # 循环用完，让 AI 基于已有信息生成最终报告
-        messages.append({
-            "role": "user",
-            "content": "已达到搜索上限。请基于已收集的信息，直接生成完整的 Markdown 洞察报告，不要调用工具。",
-        })
-        try:
-            import asyncio
-            _, final_text = asyncio.run(self.llm.chat_async(
-                messages=messages,
-                max_tokens=Config.LLM_MAX_TOKENS,
-                temperature=0.5,
-            ))
-            return final_text or ""
-        except Exception:
-            logger.exception("Final report generation failed")
-            return self._build_fallback_report(messages)
-
-    def _phase_guidance(
-        self, round_num: int, search_count: int, detail_count: int,
-        search_budget: int, detail_budget: int, github_repos: List[str],
-        effective_sources: List[str]
-    ) -> str:
-        """根据当前阶段返回引导消息"""
-        if search_count < search_budget:
-            if search_count == 0:
-                repos_str = "、".join(github_repos)
-                parts = [
-                    f"现在进入搜索阶段。请对以下每个仓库分别搜索：{repos_str}",
-                    "每个仓库用 1 组关键词搜索即可，本轮可并行调用多个 search_issues。",
-                    "关键词应从任务标题中提取核心概念，不要用太长的短语。",
-                ]
-                if "academic" in effective_sources:
-                    parts.append(
-                        "同时调用 search_arxiv 搜索相关论文。"
-                        "**注意：arXiv 搜索必须用英文关键词。**"
-                        "如果任务标题包含中文，请先将其翻译成英文核心关键词再搜索。"
-                        "例如「vLLM 推理性能优化」→ 搜索 `vLLM inference performance optimization`。"
-                    )
-                if "news" in effective_sources:
-                    parts.append(
-                        "同时调用 search_web 搜索行业新闻。"
-                        "搜索关键词用英文效果更好，如 `vLLM latest news`、`LLM inference framework`。"
-                        "**注意：只保留近 7 天内发布的内容，过时的新闻直接忽略，不要引用。**"
-                        "**每引用一条新闻，必须同时提供 search_web 返回的真实来源 URL。没有 URL 来源的新闻不要写。**"
-                        "如果搜索结果中有感兴趣的文章，可以进一步调用 extract_web_content 提取正文。"
-                    )
-                    parts.append(
-                        f"同时调用 get_github_releases 获取 {github_repos[0] if github_repos else '已配置仓库'} 的最近 release。"
-                    )
-                if "slack" in effective_sources:
-                    parts.append(
-                        "同时调用 search_by_tags 搜索 Slack 社群讨论。"
-                        "指定 tags 参数为 `slack` 来获取所有 Slack 内容。"
-                    )
-                return "\n".join(parts)
-            return ""
-
-        if detail_count == 0:
-            return (
-                "搜索阶段已完成。现在进入深入阶段。\n"
-                "请从搜索结果中选出 5-8 个最相关的 issue/PR，调用 get_issue_detail 读取正文和评论。\n"
-                "优先选择：1) RFC 类 issue（了解设计方向）2) 有较多评论的 issue（了解讨论热点）3) 与任务直接相关的 PR。\n"
-                "本轮可并行调用多个 get_issue_detail。"
-            )
-
-        if detail_count == 1:
-            return (
-                "继续深入。如果搜索结果中有重要的 PR，可以调用 get_pr_diff 查看 1-2 个核心 PR 的代码变更。\n"
-                "**做 SGLang 对比分析时，用 search_code 搜索本地代码验证 vLLM 是否已实现对应功能，搜到后调 read_local_code 读关键文件确认。**"
-            )
-
-        if detail_count == 5:
-            return (
-                "深入阶段已过半。请确认是否已覆盖以下关键任务：\n"
-                "1) 所有核心 issue/PR 的正文和评论已阅读\n"
-                "2) SGLang 对比分析中每个功能的 search_code 验证已完成\n"
-                "3) 贡献机会已识别\n"
-                "如果还有遗漏，请尽快补充。完成后即可生成报告。"
-            )
-
-        remaining = MAX_TOOL_ROUNDS - round_num
-        if remaining <= 2:
-            return "调研时间已不多。请基于已收集的信息直接生成完整的 Markdown 洞察报告，不要再调用工具。"
-
-        return ""
-
-    # ======================================================================
-    # 单次回退模式
-    # ======================================================================
 
     def _single_shot_report(
         self, task_title: str, task_description: str,
@@ -400,7 +189,7 @@ class IntelligenceReportGenerator(BaseAgent):
                     sections.append(self._format_github_section(source, items, source_config))
                 elif source == "academic":
                     en_keywords = self._translate_keywords_to_en(task_title + " " + task_description)
-                    arxiv_result = self.execute_tool_sync("search_arxiv", {
+                    arxiv_result = execute_tool_sync("search_arxiv", {
                         "query": en_keywords,
                         "max_results": 5,
                     })
@@ -416,7 +205,7 @@ class IntelligenceReportGenerator(BaseAgent):
                         sections.append("学术动态: 未找到相关论文")
                 elif source == "news":
                     web_keywords = self._translate_keywords_to_en(task_title)
-                    web_result = self.execute_tool_sync("search_web", {
+                    web_result = execute_tool_sync("search_web", {
                         "query": web_keywords,
                         "max_results": 5,
                     })
@@ -441,7 +230,7 @@ class IntelligenceReportGenerator(BaseAgent):
                     for s, cfg in source_config.items():
                         if cfg.get("type") == "github":
                             for repo in cfg.get("repos", []):
-                                releases = self.execute_tool_sync("get_github_releases", {"repo": repo, "per_page": 3})
+                                releases = execute_tool_sync("get_github_releases", {"repo": repo, "per_page": 3})
                                 if releases.get("results"):
                                     all_releases.extend(releases["results"])
                     if all_releases:
@@ -452,7 +241,7 @@ class IntelligenceReportGenerator(BaseAgent):
                             news_lines.append(f"  {r.get('body', '')[:200]}")
                     sections.append("\n".join(news_lines))
                 elif source == "slack":
-                    slack_result = self.execute_tool_sync("search_by_tags", {
+                    slack_result = execute_tool_sync("search_by_tags", {
                         "tags": "slack",
                         "top_k": 15,
                     })
@@ -471,17 +260,21 @@ class IntelligenceReportGenerator(BaseAgent):
         sections_text = "\n\n".join(sections)
         extra_section = f"\n\n## 用户补充信息\n{extra_prompt}" if extra_prompt else ""
 
-        prompt = f"""基于以下数据，生成一份结构化的洞察报告。
+        prompt = f"""基于以下数据，围绕给定主题生成一份有洞察的分析报告。
 
-任务标题：{task_title}
-任务描述：{task_description}
+报告主题：{task_title}
+主题说明/背景：{task_description}
 
-各来源数据：
+调研得到的数据：
 {sections_text}
 {extra_section}
 
-请生成一份完整的 Markdown 格式洞察报告，包含摘要、各来源动态、AI 建议等章节。
-要求：使用中文，内容要有实质价值，直接输出 Markdown，不要包裹在代码块中。
+【核心】报告的结构与逻辑必须由主题主导，而不是套固定的社区扫描模板。
+动笔前先想清楚：这个主题要回答什么问题、面向谁、期望的产出形态（解析、规划梳理、优劣势对比、决策建议等），
+据此设计最贴切的章节结构。除摘要外不强制固定章节。
+请围绕主题组织内容，聚焦主题，不要泛泛罗列无关内容。
+
+要求：使用中文，直接输出 Markdown，不要包裹在代码块中；内容要有实质价值。
 不要编造版本号或论文标题，只使用上面提供的真实数据。
 **重要：不要编造任何新闻、事件、会议或演讲信息。所有新闻必须有上面数据中提供的 URL 来源。没有 URL 来源的信息一律不写。**"""
 
@@ -579,6 +372,11 @@ class IntelligenceReportGenerator(BaseAgent):
     # ======================================================================
     # System Prompt 构建
     # ======================================================================
+
+    def _build_memory_context(self, query: str, top_k: int = 5) -> str:
+        """从知识库召回相关记忆，返回格式化文本。"""
+        from app.services.agent_prompt import build_memory_context
+        return build_memory_context(query, top_k=top_k)
 
     def _build_system_prompt(
         self,

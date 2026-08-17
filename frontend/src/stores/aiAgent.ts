@@ -7,6 +7,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   created_at?: string
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number } | null
+  duration_s?: number | null
 }
 
 export interface Session {
@@ -81,6 +83,12 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
   // 拆分：过程步骤 vs 最终回答文本
   const streamingSteps = ref<AgentStep[]>([])
   const streamingFinal = ref('')
+  // 实时流式分片：thinking（思考过程）与 answer（最终回答打字机）
+  const liveThinking = ref('')
+  const liveAnswer = ref('')
+  // 本次回答的用量 / 耗时（done 事件携带）
+  const lastUsage = ref<{ input_tokens: number; output_tokens: number; total_tokens: number } | null>(null)
+  const lastDuration = ref<number | null>(null)
   let _stepSeq = 0
   const error = ref('')
 
@@ -227,6 +235,10 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
     activeStreamingSessionId.value = sessionId
     streamingSteps.value = []
     streamingFinal.value = ''
+    liveThinking.value = ''
+    liveAnswer.value = ''
+    lastUsage.value = null
+    lastDuration.value = null
     _stepSeq = 0
 
     const controller = new AbortController()
@@ -285,8 +297,19 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
             continue
           }
           switch (event.type) {
+            case 'delta': {
+              const kind = event.data?.kind
+              const txt = event.data?.data || ''
+              if (kind === 'answer') {
+                liveAnswer.value += txt
+              } else {
+                liveThinking.value += txt
+              }
+              break
+            }
             case 'thinking': {
               const t = (event.data || '').trim()
+              liveThinking.value = ''
               if (!t) break
               streamingSteps.value = streamingSteps.value.filter(
                 s => s.type !== 'thinking'
@@ -294,7 +317,12 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
               streamingSteps.value.push({ type: 'thinking', thinking: t, round: event.round, _key: ++_stepSeq })
               break
             }
-            case 'tool_call':
+            case 'tool_call': {
+              // 提交当前思考实时文本为一个 thinking 步骤
+              if (liveThinking.value.trim()) {
+                streamingSteps.value.push({ type: 'thinking', thinking: liveThinking.value.trim(), round: event.round, _key: ++_stepSeq })
+                liveThinking.value = ''
+              }
               streamingSteps.value.push({
                 type: 'tool_call',
                 tool: { name: event.data.name, args: event.data.args },
@@ -302,6 +330,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
                 _key: ++_stepSeq,
               })
               break
+            }
             case 'tool_result': {
               const steps = streamingSteps.value
               for (const s of steps) {
@@ -316,6 +345,11 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
             case 'token':
               streamingFinal.value += event.data
               break
+            case 'done': {
+              if (event.data?.usage) lastUsage.value = event.data.usage
+              if (event.data?.duration_s != null) lastDuration.value = event.data.duration_s
+              break
+            }
             case 'error':
               throw new Error(event.data || 'AI 响应异常')
           }
@@ -341,12 +375,19 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
       if (currentSessionId.value === sessionId && !error.value) {
         const finalText = streamingFinal.value.trim()
         if (finalText) {
-          messages.value.push({ role: 'assistant', content: finalText })
+          messages.value.push({
+            role: 'assistant',
+            content: finalText,
+            usage: lastUsage.value,
+            duration_s: lastDuration.value,
+          })
         }
       }
       userStopped.value = false
       streamingFinal.value = ''
       streamingSteps.value = []
+      liveThinking.value = ''
+      liveAnswer.value = ''
       streaming.value = false
       await loadSessions()
       // 前端自己维护当前 session 的消息数，不依赖后端 count
@@ -455,6 +496,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
 
   return {
     messages, sessions, currentSessionId, loading, streaming, activeStreamingSessionId, streamingSteps, streamingFinal, error, userStopped,
+    liveThinking, liveAnswer, lastUsage, lastDuration,
     loadSessions, createSession, switchSession, deleteSession, sendMessage, retriggerFrom, editUserMessage, stopGenerating,
 
     // Knowledge base

@@ -1394,6 +1394,62 @@
     flex-wrap: wrap;
     margin-top: var(--space-2);
 }
+.report-progress {
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+.report-progress-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin-bottom: var(--space-2);
+}
+.report-progress-stage {
+    display: inline-flex;
+    align-items: center;
+    color: var(--accent, #7aa2f7);
+}
+.report-progress-pct {
+    font-family: var(--font-mono);
+    color: var(--text-tertiary);
+}
+.report-progress-bar {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    overflow: hidden;
+}
+.report-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #7aa2f7, #9ece6a);
+    transition: width 0.4s ease;
+}
+.report-progress-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}
+.report-progress-tool {
+    display: inline-flex;
+    padding: 1px 7px;
+    border-radius: var(--radius-xs);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    background: var(--bg-elev-2);
+    color: var(--text-tertiary);
+}
+.report-detail-progress {
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+    border: 1px solid var(--border, rgba(255,255,255,0.08));
+    border-radius: var(--radius-md);
+    background: var(--bg-elev-1);
+}
 .source-tag {
     display: inline-flex;
     padding: 1px 7px;

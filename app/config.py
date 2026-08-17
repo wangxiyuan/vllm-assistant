@@ -21,6 +21,10 @@ class Config:
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1048576"))
 
+    # ===== Agent (OpenAI Agents SDK) 配置 =====
+    AGENT_MAX_TURNS: int = int(os.getenv("AGENT_MAX_TURNS", "30"))
+    AGENT_TOOL_OUTPUT_LIMIT: int = int(os.getenv("AGENT_TOOL_OUTPUT_LIMIT", "30000"))
+
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))

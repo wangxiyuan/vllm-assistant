@@ -186,6 +186,25 @@ function formatArgPair(k: string, v: any): string {
   return `${k}=${s}`
 }
 
+function formatTokens(n: number | undefined): string {
+  if (n == null) return ''
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return `${n}`
+}
+
+function formatDuration(s: number | null | undefined): string {
+  if (s == null) return ''
+  if (s < 60) return `${s.toFixed(1)}s`
+  const m = Math.floor(s / 60)
+  const sec = Math.round(s % 60)
+  return `${m}m${sec}s`
+}
+
+// 实时最终回答：末尾加光标，避免整段闪烁
+function renderMarkdownPlusCursor(t: string): string {
+  return renderMarkdown(t)
+}
+
 // Add knowledge modal
 const showAddModal = ref(false)
 const addForm = ref({ content: '', source_ref: '', tags: '' })
@@ -655,6 +674,11 @@ const groupedSessions = computed(() => {
                 </div>
               </div>
               <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
+              <div v-if="msg.role === 'assistant' && (msg.usage || msg.duration_s != null)" class="msg-usage">
+                <Icon name="zap" :size="11" />
+                <span v-if="msg.usage">≈{{ formatTokens(msg.usage.output_tokens) }} tokens</span>
+                <span v-if="msg.duration_s != null">· {{ formatDuration(msg.duration_s) }}</span>
+              </div>
               <div class="msg-footer">
                 <span v-if="msg.created_at" class="msg-time">{{ formatTimeShort(msg.created_at) }}</span>
                 <div v-if="msg.role === 'user'" class="msg-actions">
@@ -674,7 +698,7 @@ const groupedSessions = computed(() => {
           <div v-if="isStreamingHere" class="chat-message msg-assistant msg-streaming">
             <div class="msg-avatar">AI</div>
             <div class="msg-content">
-              <div v-if="agentStore.streamingSteps.length" class="agent-process" open>
+              <div v-if="agentStore.streamingSteps.length || agentStore.liveThinking" class="agent-process" open>
                 <div class="agent-process-summary">
                   <span class="agent-process-icon"><Icon name="gear" :size="12" /></span>
                   <span>处理过程 ({{ stepCountSummary }})</span>
@@ -691,9 +715,14 @@ const groupedSessions = computed(() => {
                         调用工具 <code>{{ step.tool?.name }}</code>
                         <span v-if="step.tool?.args && hasArgs(step.tool.args)" class="step-tool-args">({{ formatArgs(step.tool.args) }})</span>
                         <span v-if="step.tool && step.tool.result !== undefined" class="step-tool-done"><Icon name="check" :size="11" /></span>
-                        <span v-else-if="agentStore.streaming" class="step-tool-pending"><Icon name="hourglass" :size="11" /></span>
+                        <span v-else-if="agentStore.streaming" class="step-tool-pending"><span class="tool-spinner"></span></span>
                       </span>
                     </div>
+                  </div>
+                  <!-- 实时思考打字（未提交为步骤前） -->
+                  <div v-if="agentStore.liveThinking" class="agent-step step-thinking step-thinking-live">
+                    <span class="step-icon"><Icon name="brain" :size="12" /></span>
+                    <span class="step-text" v-html="renderMarkdown(agentStore.liveThinking)"></span><span class="cursor-blink">▊</span>
                   </div>
                   <div v-if="hiddenStepCount > 0" class="agent-step step-hidden">
                     <span class="step-text step-hidden-hint">
@@ -705,10 +734,20 @@ const groupedSessions = computed(() => {
 
               <div class="agent-final">
                 <div v-if="agentStore.streamingFinal" class="agent-final-text" v-html="renderMarkdown(agentStore.streamingFinal)"></div>
-                <span v-if="agentStore.streamingFinal" class="cursor-blink">▊</span>
-                <div v-else class="agent-thinking-indicator">
+                <!-- 实时最终回答打字（未提交为最终前） -->
+                <div v-else-if="agentStore.liveAnswer" class="agent-final-text" v-html="renderMarkdownPlusCursor(agentStore.liveAnswer)"></div>
+                <span v-if="agentStore.streamingFinal || agentStore.liveAnswer" class="cursor-blink">▊</span>
+                <div v-if="!agentStore.streamingFinal && !agentStore.liveAnswer" class="agent-thinking-indicator">
                   <span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
                   <span>AI 思考中</span>
+                </div>
+                <!-- 用量/耗时脚注 -->
+                <div v-if="agentStore.lastUsage || agentStore.lastDuration != null" class="agent-usage">
+                  <Icon name="zap" :size="11" />
+                  <span v-if="agentStore.lastUsage">
+                    ≈{{ formatTokens(agentStore.lastUsage.output_tokens) }} tokens
+                  </span>
+                  <span v-if="agentStore.lastDuration != null">· {{ formatDuration(agentStore.lastDuration) }}</span>
                 </div>
               </div>
             </div>
@@ -1341,6 +1380,32 @@ const groupedSessions = computed(() => {
 }
 .step-tool-done { color: var(--signal-green); }
 .step-tool-pending { color: var(--text-tertiary); }
+.tool-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--text-tertiary);
+  border-top-color: transparent;
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: tool-spin 0.8s linear infinite;
+}
+@keyframes tool-spin {
+  to { transform: rotate(360deg); }
+}
+.step-thinking-live {
+  opacity: 0.75;
+}
+.agent-usage,
+.msg-usage {
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  opacity: 0.85;
+}
 .step-hidden-hint {
   color: var(--text-tertiary);
   font-size: var(--text-xs);

@@ -63,6 +63,29 @@ onMounted(async () => {
 function isDailyReport(report: any): boolean {
   return (report.category || 'manual') === 'daily'
 }
+
+function reportProgressOf(report: any): any {
+  return intelStore.reportProgress[report.id]
+}
+
+function isGeneratingNow(report: any): boolean {
+  return report?.status === 'generating'
+}
+
+function reportStageLabel(report: any): string {
+  const p = reportProgressOf(report)
+  if (!p) return ''
+  if (p.stage_label) return p.stage_label
+  const idx = p.stage_index
+  if (Array.isArray(p.stages) && idx != null && p.stages[idx]) return p.stages[idx]
+  return p.stage || ''
+}
+
+function progressPercent(report: any): number {
+  const p = reportProgressOf(report)
+  if (!p || typeof p.progress !== 'number') return 0
+  return Math.min(Math.round(p.progress * 100), 99)
+}
 </script>
 
 <template>
@@ -111,6 +134,22 @@ function isDailyReport(report: any): boolean {
           <span>{{ report.word_count }} 字</span>
           <span>{{ new Date(report.created_at).toLocaleDateString('zh-CN') }}</span>
         </div>
+        <!-- 生成进度 -->
+        <div v-if="report.status === 'generating' && reportProgressOf(report)" class="report-progress">
+          <div class="report-progress-row">
+            <span class="report-progress-stage">
+              <span class="spin" style="display:inline-block;width:10px;height:10px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;vertical-align:-1px;margin-right:6px;"></span>
+              {{ reportProgressOf(report).stage_label || '' }}{{ reportProgressOf(report).stages?.[reportProgressOf(report).stage_index] || '' }}
+            </span>
+            <span class="report-progress-pct">{{ progressPercent(report) }}%</span>
+          </div>
+          <div class="report-progress-bar"><div class="report-progress-fill" :style="{ width: progressPercent(report) + '%' }"></div></div>
+          <div v-if="reportProgressOf(report).tools && reportProgressOf(report).tools.length" class="report-progress-tools">
+            <template v-for="tn in reportProgressOf(report).tools" :key="tn">
+              <span class="report-progress-tool">{{ tn }}</span>
+            </template>
+          </div>
+        </div>
         <div class="card-action-row report-actions">
           <button class="card-action-btn is-primary" @click.stop="intelStore.viewReport(report)" title="查看报告">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -146,7 +185,7 @@ function isDailyReport(report: any): boolean {
           </div>
           <div class="modal-body">
             <div class="form-group">
-              <label class="form-label">关联任务</label>
+              <label class="form-label">关联任务（可选）</label>
               <select class="select" v-model.number="intelStore.intelForm.task_id">
                 <option value="">选择任务…</option>
                 <option v-for="t in intelStore.intelTasks" :key="t.id" :value="t.id">{{ t.title }}</option>
@@ -203,6 +242,22 @@ function isDailyReport(report: any): boolean {
             加载中…
           </div>
           <div v-else-if="intelStore.reportDetails" class="modal-body report-content">
+            <!-- 生成中进度（详情弹窗内） -->
+            <div v-if="isGeneratingNow(intelStore.selectedReport) && reportProgressOf(intelStore.selectedReport)" class="report-detail-progress">
+              <div class="report-progress-row">
+                <span class="report-progress-stage">
+                  <span class="spin" style="display:inline-block;width:10px;height:10px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;vertical-align:-1px;margin-right:6px;"></span>
+                  {{ reportStageLabel(intelStore.selectedReport) }}
+                </span>
+                <span class="report-progress-pct">{{ progressPercent(intelStore.selectedReport) }}%</span>
+              </div>
+              <div class="report-progress-bar"><div class="report-progress-fill" :style="{ width: progressPercent(intelStore.selectedReport) + '%' }"></div></div>
+              <div v-if="reportProgressOf(intelStore.selectedReport).tools && reportProgressOf(intelStore.selectedReport).tools.length" class="report-progress-tools">
+                <template v-for="tn in reportProgressOf(intelStore.selectedReport).tools" :key="tn">
+                  <span class="report-progress-tool">{{ tn }}</span>
+                </template>
+              </div>
+            </div>
             <DailyReportRenderer
               v-if="isDailyReport(intelStore.selectedReport)"
               :content="intelStore.reportDetails.content || ''"

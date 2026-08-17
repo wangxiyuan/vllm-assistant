@@ -42,11 +42,17 @@ async def generate_report(request: Request):
 
     db = SessionLocal()
     try:
-        task = db.query(PersonalTask).filter(PersonalTask.id == req.task_id).first()
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found")
+        task = None
+        task_title = ""
+        task_description = ""
+        if req.task_id:
+            task = db.query(PersonalTask).filter(PersonalTask.id == req.task_id).first()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+            task_title = task.title
+            task_description = task.description or ""
 
-        title = req.title or f"{task.title} 相关动态洞察"
+        title = req.title or (f"{task_title} 相关动态洞察" if req.task_id else "洞察报告")
 
         if req.report_id:
             report = db.query(IntelligenceReport).filter(IntelligenceReport.id == req.report_id).first()
@@ -81,7 +87,7 @@ async def generate_report(request: Request):
         import threading
         thread = threading.Thread(
             target=_generate_report_background,
-            args=(report.id, task.title, task.description or "", req.sources, req.excluded_sources, req.extra_prompt),
+            args=(report.id, task_title, task_description, req.sources, req.excluded_sources, req.extra_prompt),
             daemon=True,
         )
         thread.start()
@@ -124,6 +130,7 @@ def _generate_report_background(
             sources=sources,
             excluded_sources=excluded_sources if excluded_sources else None,
             extra_prompt=extra_prompt or "",
+            report_id=report_id,
         )
 
         report = db.query(IntelligenceReport).filter(IntelligenceReport.id == report_id).first()
@@ -204,6 +211,34 @@ async def get_latest_daily_report(db: Session = Depends(get_db)):
     return {"report": report.to_dict(include_content=True)}
 
 
+@router.get("/reports/{report_id}/progress")
+async def get_report_progress(report_id: int):
+    """获取报告生成进度（阶段 / 工具列表 / 百分比）。"""
+    from app.services.report_progress import get_report_progress
+
+    rec = get_report_progress(report_id)
+    if not rec:
+        # 无内存进度：回退到 DB 里的粗粒度状态
+        db = SessionLocal()
+        try:
+            report = db.query(IntelligenceReport).filter(IntelligenceReport.id == report_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Report not found")
+            return {
+                "report_id": report_id,
+                "status": report.status,
+                "stage": None,
+                "tools": [],
+                "progress": 1.0 if report.status == "completed" else 0.0,
+                "stages": ["搜索情报", "深入分析", "撰写报告"],
+                "updated_at": None,
+            }
+        finally:
+            db.close()
+    rec["status_label"] = rec["status"]
+    return rec
+
+
 @router.get("/reports/{report_id}")
 async def get_report(report_id: int, db: Session = Depends(get_db)):
     """获取洞察报告详情（DESIGN-PERSONAL-TODO.md 3.3 GET 详情）"""
@@ -259,11 +294,11 @@ async def trigger_daily_report():
     try:
         existing = db.query(IntelligenceReport).filter(
             IntelligenceReport.category == "daily",
-            IntelligenceReport.status == "completed",
+            IntelligenceReport.status.in_(["completed", "generating"]),
             IntelligenceReport.created_at >= today_start,
         ).first()
         if existing:
-            return {"status": "skipped", "message": "今日每日报告已存在，如需重新生成请先删除旧报告"}
+            return {"status": "skipped", "message": "今日每日报告已存在或生成中，请稍候"}
     finally:
         db.close()
 

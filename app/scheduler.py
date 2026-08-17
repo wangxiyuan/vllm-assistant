@@ -807,15 +807,15 @@ def generate_daily_vllm_report():
         repo_sources = [r.repo for r in active_repos]
         sources = list(repo_sources)
 
-        # 检查今天是否已经生成过成功报告
+        # 检查今天是否已经生成过成功报告或正在生成
         today_start_dt = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d 00:00:00")
         existing = db.query(IntelligenceReport).filter(
             IntelligenceReport.category == "daily",
-            IntelligenceReport.status == "completed",
+            IntelligenceReport.status.in_(["completed", "generating"]),
             IntelligenceReport.created_at >= today_start_dt,
         ).first()
         if existing:
-            logger.info(f"Daily report already exists for {today_start}, skipping")
+            logger.info(f"Daily report already exists/generating for {today_start}, skipping")
             return
 
         title = f"[{today_start}][每日]vLLM 社区报告"
@@ -840,6 +840,24 @@ def generate_daily_vllm_report():
             for r in repo_sources
             if repo_clone_urls.get(r)
         }
+
+        # 先生成占位记录（拿到 report_id 用于上报进度），生成完成后回写
+        db = SessionLocal()
+        placeholder = IntelligenceReport(
+            title=title,
+            content="",
+            sources=json.dumps(sources),
+            status="generating",
+            category="daily",
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        db.add(placeholder)
+        db.commit()
+        db.refresh(placeholder)
+        daily_report_id = placeholder.id
+        db.close()
+        db = None
+
         REPORT_GENERATION_TIMEOUT = 600  # 10 分钟超时
         executor = ThreadPoolExecutor(max_workers=1)
         future = executor.submit(
@@ -849,26 +867,46 @@ def generate_daily_vllm_report():
             sources=sources,
             extra_prompt="",
             is_daily=True,
+            report_id=daily_report_id,
         )
         try:
             result = future.result(timeout=REPORT_GENERATION_TIMEOUT)
         except TimeoutError:
             future.cancel()
             logger.error("Daily report generation timed out after 10 minutes")
+            # 标记占位记录为失败
+            db = SessionLocal()
+            try:
+                rec = db.query(IntelligenceReport).filter(IntelligenceReport.id == daily_report_id).first()
+                if rec:
+                    rec.status = "failed"
+                    rec.error_message = "生成超时"
+                db.commit()
+            except Exception:
+                db.rollback()
+            finally:
+                db.close()
             raise
         finally:
             executor.shutdown(wait=False)
 
-        report = IntelligenceReport(
-            title=title,
-            content=result["content"],
-            sources=json.dumps(result["sources"]),
-            status="completed",
-            category="daily",
-            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-        )
         db = SessionLocal()
-        db.add(report)
+        rec = db.query(IntelligenceReport).filter(IntelligenceReport.id == daily_report_id).first()
+        if rec:
+            rec.content = result["content"]
+            rec.sources = json.dumps(result["sources"])
+            rec.status = "completed"
+            rec.error_message = None
+        else:
+            rec = IntelligenceReport(
+                title=title,
+                content=result["content"],
+                sources=json.dumps(result["sources"]),
+                status="completed",
+                category="daily",
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+            db.add(rec)
         db.commit()
         logger.info(f"Daily vLLM report generated: {title}")
     except Exception:
@@ -883,16 +921,25 @@ def generate_daily_vllm_report():
         try:
             db = SessionLocal()
             failed_sources = json.dumps(locals().get("sources", ["academic", "news"]))
-            failed_report = IntelligenceReport(
-                title=f"[{today_start}][每日]vLLM 社区报告（生成失败）",
-                content="",
-                sources=failed_sources,
-                status="failed",
-                category="daily",
-                error_message=traceback.format_exc(),
-                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-            )
-            db.add(failed_report)
+            rid = locals().get("daily_report_id")
+            if rid is not None:
+                rec = db.query(IntelligenceReport).filter(IntelligenceReport.id == rid).first()
+            else:
+                rec = None
+            if rec is not None:
+                rec.status = "failed"
+                rec.error_message = traceback.format_exc()
+            else:
+                rec = IntelligenceReport(
+                    title=f"[{today_start}][每日]vLLM 社区报告（生成失败）",
+                    content="",
+                    sources=failed_sources,
+                    status="failed",
+                    category="daily",
+                    error_message=traceback.format_exc(),
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+                db.add(rec)
             db.commit()
         except Exception:
             logger.exception("Failed to write failed daily report status")

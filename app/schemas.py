@@ -171,7 +171,7 @@ class PersonalTaskUpdate(BaseModel):
 
 class IntelligenceGenerateRequest(BaseModel):
     """生成洞察报告请求"""
-    task_id: int
+    task_id: Optional[int] = None  # 关联任务（可选）
     title: str = ""
     sources: List[str] = []  # 空表示用全部可用来源（由后端从 RepoCache 动态解析）
     excluded_sources: List[str] = []
@@ -182,7 +182,10 @@ class IntelligenceGenerateRequest(BaseModel):
     @field_validator("task_id")
     @classmethod
     def validate_task_id(cls, v):
-        if v <= 0:
+        # 0 / None 表示未选择任务（可选）
+        if v is None or v == 0:
+            return None
+        if v < 0:
             raise ValueError("task_id must be positive")
         return v
 

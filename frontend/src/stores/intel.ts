@@ -23,12 +23,20 @@ export const useIntelStore = defineStore('intel', () => {
   const reportModalLoading = ref(false)
   const pollingTimer = ref<ReturnType<typeof setTimeout> | null>(null)
   const dailyGenLoading = ref(false)
+  // 报告生成进度：report_id -> 进度对象
+  const reportProgress = ref<Record<number, any>>({})
 
   async function loadReports() {
     loading.value = true
     try {
       const data: any = await api('/api/intelligence/reports')
       reports.value = data.reports || []
+      // 自动接管仍在生成中的报告（含每日报告，其占位记录为 generating）
+      for (const r of reports.value) {
+        if (r.status === 'generating') {
+          pollReportStatus(r.id)
+        }
+      }
     } catch (e: any) {
       useAppStore().showToast('加载报告失败', e.message, 'error')
     } finally {
@@ -77,10 +85,6 @@ export const useIntelStore = defineStore('intel', () => {
   }
 
   async function generateReport() {
-    if (!intelForm.value.task_id) {
-      useAppStore().showToast('请选择任务', '关联任务是必填项', 'error')
-      return
-    }
     if (intelForm.value.sources.length === 0) {
       useAppStore().showToast('请选择来源', '至少选择一个来源', 'error')
       return
@@ -89,11 +93,12 @@ export const useIntelStore = defineStore('intel', () => {
     genLoading.value = true
     try {
       const payload: any = {
-        task_id: parseInt(intelForm.value.task_id, 10),
         sources: intelForm.value.sources,
         excluded_sources: intelForm.value.excluded_sources,
         extra_prompt: intelForm.value.extra_prompt,
       }
+      // 关联任务可选，仅在没有标题时用于默认标题
+      if (intelForm.value.task_id) payload.task_id = parseInt(intelForm.value.task_id, 10)
       if (intelForm.value.title.trim()) payload.title = intelForm.value.title.trim()
       const result: any = await api('/api/intelligence/reports/generate', {
         method: 'POST',
@@ -142,11 +147,15 @@ export const useIntelStore = defineStore('intel', () => {
             error_message: report.error_message,
           }
         }
+        // 并行拉取阶段进度（不阻塞状态更新）
+        fetchReportProgress(reportId)
         if (selectedReport.value?.id === reportId) {
           reportDetails.value = report
         }
         if (report.status === 'completed' || report.status === 'failed') {
           pollingTimer.value = null
+          // 清理进度
+          delete reportProgress.value[reportId]
           if (report.status === 'completed') {
             useAppStore().showToast('报告已生成', report.title, 'success')
           } else {
@@ -161,12 +170,28 @@ export const useIntelStore = defineStore('intel', () => {
     poll()
   }
 
+  async function fetchReportProgress(reportId: number) {
+    try {
+      const prog: any = await api(`/api/intelligence/reports/${reportId}/progress`, {}, { timeout: 15000 })
+      if (prog && prog.status === 'running') {
+        reportProgress.value[reportId] = prog
+      }
+    } catch (_) {
+      // 进度接口不可用/已结束则忽略
+    }
+  }
+
   async function viewReport(report: IntelReport) {
     selectedReport.value = report
     reportDetails.value = null
     reportModalLoading.value = true
     try {
       reportDetails.value = await api(`/api/intelligence/reports/${report.id}`)
+      // 查看的是生成中的报告 → 拉取并持续轮询进度
+      if (report.status === 'generating') {
+        await fetchReportProgress(report.id)
+        pollReportStatus(report.id)
+      }
     } catch (e: any) {
       useAppStore().showToast('加载报告失败', e.message, 'error')
     } finally {
@@ -334,9 +359,9 @@ export const useIntelStore = defineStore('intel', () => {
 
   return {
     reports, loading, showModal, intelForm, genLoading, intelTasks,
-    selectedReport, reportDetails, reportModalLoading, pollingTimer,
+    selectedReport, reportDetails, reportModalLoading, pollingTimer, reportProgress,
     loadReports, loadIntelTasks, openModal, toggleSource, isSourceSelected,
-    generateReport, pollReportStatus, viewReport, closeReport,
+    generateReport, pollReportStatus, fetchReportProgress, viewReport, closeReport,
     deleteReport, regenerateReport, copyReportMarkdown, triggerDailyReport,
     dailyGenLoading,
     intelSourceLabel, intelSourceClass, intelSourceStyle,
