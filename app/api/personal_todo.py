@@ -16,10 +16,14 @@ from sqlalchemy.orm import Session
 
 from app.config import Config
 from app.database import get_db
-from app.models import PersonalTask, IntelligenceReport, _iso_utc
+from app.models import PersonalTask, IntelligenceReport, User, _iso_utc
 from app.schemas import (
     PersonalTaskCreate,
     PersonalTaskUpdate,
+    BulkSubtaskCreate,
+    MarkdownParseRequest,
+    MarkdownParseResponse,
+    MarkdownParseRow,
 )
 from pydantic import BaseModel
 
@@ -366,11 +370,12 @@ def resolve_ref(req: ResolveRefRequest, db: Session = Depends(get_db)):
 
     # 解析仓库和编号：支持 repo#number 格式，repo 必须是已配置的仓库短名
     # 动态构建正则，匹配任意已配置仓库短名
+    # 注意括号层级：group(1)=外层全段, group(2)=仓库 alt, group(3)=编号
     pattern = r"^((" + "|".join(re.escape(n) for n in repo_names) + r"))\s*#\s*(\d+)$"
     m = re.match(pattern, text, re.I)
     if m:
         repo = m.group(1).lower()
-        number = int(m.group(2))
+        number = int(m.group(3))
     elif text.isdigit():
         repo = get_default_repo_short()
         number = int(text)
@@ -494,3 +499,110 @@ async def link_to_watchlist(req: LinkToWatchlistRequest, db: Session = Depends(g
         return task.to_dict()
     else:
         raise HTTPException(status_code=400, detail="Must provide task_id or new_task_title")
+
+@router.post("/parse-markdown")
+async def parse_markdown(req: MarkdownParseRequest, db: Session = Depends(get_db)):
+    """接收 Markdown 清单文本，返回可创建的批量子任务行预览。
+
+    支持的语法：
+    - 独立一行的分组标题（如 `一、判定优先级` 或 `1. 引擎`) → 后续行的 group
+    - `- ` / `* ` / `+ ` / `数字. ` 开头的列表项 → 一条目
+    - ` → `（或全角 `：` / `: `）拆两列：前为 title，后为 description
+    - 行尾属性：`@P0/P1/P2/P3`（优先级）、`@人名`（责任人，匹配 User.name）
+    """
+    if not (req.text or "").strip():
+        raise HTTPException(status_code=400, detail="缺少文本内容")
+
+    users = {u.name: u.id for u in db.query(User.id, User.name).all()}
+    current_group: Optional[str] = None
+    rows: list = []
+
+    for line in req.text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # 分组标题：`数字/中文序号 + 顿号/点` 且不含列表标记
+        group_match = re.match(r"^(?:[一二三四五六七八九十]+、|\d+[\.、])\s*(.*)$", stripped)
+        is_list = bool(re.match(r"^[-*+]\s+", stripped)) or bool(
+            re.match(r"^\d+[\.\)]\s+\S", stripped)
+        )
+        if group_match and not is_list:
+            current_group = group_match.group(1).strip()
+            continue
+        if not is_list:
+            continue
+
+        # 去掉列表标记
+        body = re.sub(r"^[-*+]\s+|\s*\d+[\.\)]\s+", "", stripped).strip()
+
+        # 先剥属性，避免污染 description
+        attributes = re.findall(r"(@P[0-3])|@([\u4e00-\u9fffA-Za-z0-9_]+)", body)
+        bare = body
+        for prio, name in attributes:
+            if prio:
+                bare = bare.replace(prio, " ")
+            elif name:
+                bare = bare.replace("@" + name, " ")
+        bare = re.sub(r"\s+", " ", bare).strip()
+
+        # 拆 title / description
+        title, description = bare, ""
+        for sep in (" → ", "：", ": "):
+            if sep in bare:
+                left, right = bare.split(sep, 1)
+                title = left.strip()
+                description = right.strip()
+                break
+
+        # 从属性补齐 priority / assignee
+        priority = "P2"
+        assignee_id: Optional[int] = None
+        for prio, name in attributes:
+            if prio:
+                priority = prio[1:]
+            elif name and name in users:
+                assignee_id = users[name]
+
+        rows.append(MarkdownParseRow(
+            title=title,
+            description=description,
+            priority=priority,
+            assignee_id=assignee_id,
+            group=current_group,
+        ))
+
+    return MarkdownParseResponse(rows=rows)
+
+
+@router.post("/tasks/{task_id}/bulk-subtasks")
+async def bulk_create_subtasks(task_id: int, req: BulkSubtaskCreate, db: Session = Depends(get_db)):
+    """批量创建子任务（DESIGN-PERSONAL-TODO.md 3.1，扩展）"""
+    parent = db.query(PersonalTask).filter(PersonalTask.id == task_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent task not found")
+
+    now = _utcnow()
+    created = []
+    for idx, row in enumerate(req.rows):
+        if not (row.title or "").strip():
+            continue
+        title = (row.group + " · " + row.title.strip()) if row.group else row.title.strip()
+        task = PersonalTask(
+            title=title,
+            description=row.description or "",
+            source="self",
+            priority=row.priority if row.priority else "P2",
+            status="todo",
+            assignee_id=row.assignee_id,
+            parent_id=task_id,
+            subtask_order=idx,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(task)
+        created.append(task)
+    db.commit()
+    for t in created:
+        db.refresh(t)
+    return {"created": len(created), "subtasks": [t.to_dict() for t in created]}

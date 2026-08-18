@@ -46,6 +46,32 @@ export const useTodoStore = defineStore('todo', () => {
   const editingSubtaskId = ref<number | null>(null)
   const editSubtaskForm = ref<any>({})
 
+  // 就地展开（看板卡片上展开该任务的子任务清单）
+  const expandedTaskId = ref<number | null>(null)
+  // 详情覆盖层 tab / 编辑视图
+  const taskDetailTab = ref<'details' | 'subtasks' | 'insight'>('details')
+  const editingView = ref(false)
+  // 批量导入弹窗
+  const bulkModal = ref<{
+    open: boolean
+    mode: 'create' | 'edit'
+    targetTaskId: number | null
+    targetParentId: number | null
+    text: string
+    rows: any[]
+    loading: boolean
+    creating: boolean
+  }>({
+    open: false,
+    mode: 'edit',
+    targetTaskId: null,
+    targetParentId: null,
+    text: '',
+    rows: [],
+    loading: false,
+    creating: false,
+  })
+
   // Computed
   const tasksByPriority = computed(() => {
     const groups: Record<string, TodoTask[]> = { P0: [], P1: [], P2: [], P3: [] }
@@ -136,6 +162,8 @@ export const useTodoStore = defineStore('todo', () => {
     selectedTaskDetails.value = null
     taskDrawerLoading.value = false
     editingTask.value = false
+    editingView.value = false
+    taskDetailTab.value = 'details'
     subtasks.value = []
     showSubtaskForm.value = false
     loadTaskDetails(task.id)
@@ -405,6 +433,136 @@ export const useTodoStore = defineStore('todo', () => {
     }
   }
 
+  // In-place expand / detail tab actions
+  async function toggleTaskExpand(task: TodoTask) {
+    if (expandedTaskId.value === task.id) {
+      expandedTaskId.value = null
+      return
+    }
+    expandedTaskId.value = task.id
+    if (subtasks.value.length === 0 || subtasks.value[0]?.parent_id !== task.id) {
+      await loadSubtasks(task.id)
+    }
+  }
+
+  function openTaskDetail(task: TodoTask) {
+    openTask(task)
+    taskDetailTab.value = 'details'
+    editingView.value = false
+  }
+
+  function switchDetailTab(tab: 'details' | 'subtasks' | 'insight') {
+    taskDetailTab.value = tab
+  }
+
+  function startEditTaskView() {
+    startEditTask()
+    editingView.value = true
+  }
+
+  function cancelEditTaskView() {
+    cancelEditTask()
+    editingView.value = false
+  }
+
+  async function saveEditTaskView() {
+    await saveTask()
+    editingView.value = false
+  }
+
+  // Bulk import modal
+  function openBulkModal(mode: 'create' | 'edit', targetTaskId: number | null = null) {
+    bulkModal.value = { open: true, mode, targetTaskId, targetParentId: null, text: '', rows: [], loading: false, creating: false }
+  }
+
+  function closeBulkModal() {
+    bulkModal.value.open = false
+    bulkModal.value.text = ''
+    bulkModal.value.rows = []
+  }
+
+  async function parseMarkdownText() {
+    const text = bulkModal.value.text
+    if (!text.trim()) {
+      useAppStore().showToast('请输入内容', '粘贴 Markdown 清单后再解析', 'error')
+      return
+    }
+    bulkModal.value.loading = true
+    try {
+      const data: any = await api('/api/personal-todo/parse-markdown', {
+        method: 'POST',
+        body: JSON.stringify({ text }),
+      }, { timeout: 30000 })
+      bulkModal.value.rows = data.rows || []
+      if (bulkModal.value.rows.length === 0) {
+        useAppStore().showToast('未解析到条目', '请检查文本是否为列表/表格格式', 'info')
+      }
+    } catch (e: any) {
+      useAppStore().showToast('解析失败', e.message, 'error')
+    } finally {
+      bulkModal.value.loading = false
+    }
+  }
+
+  function toggleBulkRow(idx: number) {
+    const row = bulkModal.value.rows[idx]
+    if (row) row.checked = !row.checked
+  }
+
+  async function confirmBulkCreate() {
+    const rows = bulkModal.value.rows.filter((r: any) => r.checked !== false)
+    if (bulkModal.value.creating || rows.length === 0) return
+    bulkModal.value.creating = true
+    try {
+      let targetId = bulkModal.value.targetTaskId
+      // create 模式：先用新建表单的标题创建一个父任务，再把解析行作为子任务
+      if (bulkModal.value.mode === 'create' || !targetId) {
+        if (!newTask.value.title.trim()) {
+          useAppStore().showToast('请先填写任务标题', '', 'error')
+          return
+        }
+        const parent: any = await api('/api/personal-todo/tasks', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: newTask.value.title.trim(),
+            description: newTask.value.description.trim(),
+            source: newTask.value.source,
+            priority: newTask.value.priority,
+            area: newTask.value.area || '',
+            assignee_id: newTask.value.assignee_id,
+            due_date: newTask.value.due_date || '',
+          }),
+        }, { timeout: 120000 })
+        targetId = parent.id
+        tasks.value.unshift(parent)
+      }
+      if (!targetId) {
+        useAppStore().showToast('请先选择目标任务', '', 'error')
+        return
+      }
+      const payloadRows = rows.map((r: any) => ({
+        title: r.title, description: r.description || '', priority: r.priority || 'P2', assignee_id: r.assignee_id || null,
+        group: r.group || null,
+      }))
+      await api(`/api/personal-todo/tasks/${targetId}/bulk-subtasks`, {
+        method: 'POST',
+        body: JSON.stringify({ rows: payloadRows }),
+      }, { timeout: 60000 })
+      useAppStore().showToast('已批量创建', `任务 + ${rows.length} 条子任务`, 'success')
+      const idx = tasks.value.findIndex(t => t.id === targetId)
+      if (idx >= 0) tasks.value[idx] = { ...tasks.value[idx], subtask_count: (tasks.value[idx].subtask_count || 0) + rows.length }
+      if (selectedTask.value?.id === targetId) await loadSubtasks(targetId)
+      await loadTasks()
+      newTask.value = { title: '', description: '', source: 'self', priority: 'P2', area: '', assignee_id: null, due_date: '', related_refs: [], refInput: '' }
+      showAddModal.value = false
+      closeBulkModal()
+    } catch (e: any) {
+      useAppStore().showToast('创建失败', e.message, 'error')
+    } finally {
+      bulkModal.value.creating = false
+    }
+  }
+
   // Resolve ref
   const resolveRefLoading = ref(false)
 
@@ -563,5 +721,10 @@ export const useTodoStore = defineStore('todo', () => {
     startEditSubtask, cancelEditSubtask, saveSubtask,
     resolveRefLoading, resolveRef, addRef, removeRef,
     switchStatusFilter, switchPriorityFilter,
+    // 就地展开 / 详情覆盖层 / 批量导入
+    expandedTaskId, taskDetailTab, editingView, bulkModal,
+    toggleTaskExpand, openTaskDetail, switchDetailTab,
+    startEditTaskView, cancelEditTaskView, saveEditTaskView,
+    openBulkModal, closeBulkModal, parseMarkdownText, toggleBulkRow, confirmBulkCreate,
   }
 })

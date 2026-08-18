@@ -260,11 +260,7 @@ export const useArticlesStore = defineStore('articles', () => {
 
   async function switchPreviewTab() {
     if (editorSubView.value === 'preview') return
-    if (!previewHtml.value) {
-      await previewArticle()
-    } else {
-      editorSubView.value = 'preview'
-    }
+    await previewArticle()
   }
 
   async function viewArticle(article: Article) {

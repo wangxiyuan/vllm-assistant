@@ -124,6 +124,51 @@ class PersonalTaskCreate(BaseModel):
         return v
 
 
+class SubtaskRow(BaseModel):
+    """批量创建子任务的一行"""
+    title: str
+    description: str = ""
+    priority: Optional[str] = "P2"
+    assignee_id: Optional[int] = None
+    group: Optional[str] = None  # 所属分组标题，会作为 title 前缀
+
+
+class BulkSubtaskCreate(BaseModel):
+    """批量创建子任务请求"""
+    rows: List[SubtaskRow] = []
+
+    @field_validator("rows")
+    @classmethod
+    def validate_rows(cls, v):
+        if not v:
+            raise ValueError("rows must not be empty")
+        for row in v:
+            if not (row.title or "").strip():
+                raise ValueError("each subtask row must have a title")
+        return v
+
+
+class MarkdownParseRequest(BaseModel):
+    """解析 Markdown 清单，生成子任务行预览"""
+    text: str = ""
+
+
+class MarkdownParseRow(BaseModel):
+    """解析出的子任务行"""
+    title: str
+    description: str = ""
+    priority: Optional[str] = "P2"
+    assignee_id: Optional[int] = None
+    group: Optional[str] = None  # 所属分组标题
+    user_id: Optional[int] = None  # 责任人，未匹配到用户时为 None
+    skipped: bool = False  # 是否被跳过（纯分隔行/表头）
+
+
+class MarkdownParseResponse(BaseModel):
+    """解析结果"""
+    rows: List[MarkdownParseRow] = []
+
+
 class PersonalTaskUpdate(BaseModel):
     """更新个人任务（所有字段可选）"""
     title: Optional[str] = None
