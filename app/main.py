@@ -3,6 +3,7 @@ vLLM Assistant - FastAPI 主应用
 """
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from starlette.staticfiles import StaticFiles as StarletteStaticFiles
@@ -32,6 +33,10 @@ static_dir = Path(__file__).parent.parent / "static"
 
 # 用于持有后台 asyncio tasks，防止被 GC 回收
 _background_tasks = set()
+
+# 独立线程池：跑 CPU/IO 重的后台任务（知识库构建等），
+# 避免挤占 FastAPI 处理普通请求所用的默认线程池，造成前端请求排队/卡顿。
+_bg_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bg")
 
 
 @asynccontextmanager
@@ -156,7 +161,7 @@ async def _init_knowledge_base():
         def _build():
             return mem.build_code_knowledge()
 
-        result = await loop.run_in_executor(None, _build)
+        result = await loop.run_in_executor(_bg_executor, _build)
         logger.info(f"Knowledge base build complete: {result}")
     except Exception:
         logger.exception("Failed to initialize knowledge base")

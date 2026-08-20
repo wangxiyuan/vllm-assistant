@@ -3,8 +3,9 @@
    Amber phosphor on deep blue-black. The contributor's terminal.
    ===================================================================== */
 
-/* ── Fonts ── */
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap');
+/* ── Fonts ──
+   字体异步从 index.html 加载（media=print onload 技巧），避免阻塞渲染；
+   本地仍有完整的系统字体 fallback，Google Fonts 不可用时自动回退。 */
 
 :root {
     /* ── Surfaces ── */
