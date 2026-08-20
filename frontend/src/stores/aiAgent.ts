@@ -263,7 +263,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
         body: JSON.stringify({
           messages: pendingMessages.map(m => ({ role: m.role, content: m.content })),
           session_id: sessionId,
-          tools: ['github', 'knowledge', 'code'],
+          tools: ['github', 'knowledge', 'code', 'web'],
           stream: true,
         }),
       })

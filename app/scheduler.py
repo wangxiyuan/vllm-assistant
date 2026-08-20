@@ -347,14 +347,23 @@ def _sync_single_repo_community(repo: str):
                 all_issues.append(it)
 
         # 翻页拉最新 open PR（按 updated desc）
+        # 分页期间 PR 可能在前后两页间被更新，导致同一 PR 重复出现，
+        # 必须按 number 去重，否则批量插入时会违反 items 的唯一约束
         pulls: list = []
+        seen_pr_numbers = set()
         for page in range(1, COMMUNITY_FETCH_PAGES + 1):
             page_prs = github_client.get_pulls(
                 state="open", sort="updated", direction="desc", page=page, repo=repo
             ) or []
             if not page_prs:
                 break
-            pulls.extend(page_prs)
+            for pr in page_prs:
+                if not isinstance(pr, dict):
+                    continue
+                num = pr.get("number")
+                if num and num not in seen_pr_numbers:
+                    seen_pr_numbers.add(num)
+                    pulls.append(pr)
             if len(page_prs) < DEFAULT_PER_PAGE:
                 break
 
@@ -379,6 +388,26 @@ def _sync_single_repo_community(repo: str):
             f"Synced {len(real_issues)} issues and {len(pulls)} PRs for {repo} "
             f"(filtered {len(all_issues) - len(real_issues)} PRs from issues)"
         )
+    except IntegrityError:
+        logger.warning(
+            f"IntegrityError during commit for {repo}, rolling back and retrying per-item",
+            exc_info=True,
+        )
+        db.rollback()
+        try:
+            for issue in real_issues:
+                _process_single_issue(db, issue, mapper, repo)
+                db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(f"Failed to commit issue batch for {repo}, skipping")
+        try:
+            for pr in pulls:
+                _process_single_pr_item(db, pr, github_client, mapper, repo)
+                db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(f"Failed to commit PR batch for {repo}, skipping")
     finally:
         db.close()
 
@@ -1439,7 +1468,7 @@ def _build_daily_report_memory_context(db) -> str:
 def cleanup_old_data():
     from app.models import FileChangeHistory, AICache, IntelligenceReport, AIMemory, SlackConfig
     from app.services.memory_service import MemoryService
-    from sqlalchemy import text
+    from sqlalchemy import IntegrityError, or_, text
 
     db = SessionLocal()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1492,7 +1521,7 @@ def cleanup_old_data():
         manual_cutoff = now - timedelta(days=retention_days)
         deleted_manual = db.query(IntelligenceReport).filter(
             IntelligenceReport.status == "completed",
-            db.or_(
+            or_(
                 IntelligenceReport.category == "manual",
                 IntelligenceReport.category.is_(None),
             ),

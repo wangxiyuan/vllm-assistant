@@ -168,19 +168,31 @@ class SlackCollector:
             db.close()
 
     def _resolve_channel_id(self, channel_name: str) -> Optional[str]:
-        """将 #general 解析为 channel ID (C...)"""
+        """将 #general 解析为 channel ID (C...)
+
+        conversations.list 默认每页最多 1000 条，必须翻页遍历，
+        否则频道数超过 1000 时排靠后的频道解析不到。
+        """
         if channel_name.startswith("C"):
             return channel_name
-        data = self._api_call("conversations.list", {
-            "limit": 1000,
-            "types": "public_channel,private_channel",
-        })
-        if not data.get("ok"):
-            return None
-        for ch in data.get("channels", []):
-            if ch.get("name") == channel_name.lstrip("#"):
-                return ch.get("id")
-        return None
+        target = channel_name.lstrip("#")
+        cursor = None
+        while True:
+            params = {
+                "limit": 1000,
+                "types": "public_channel,private_channel",
+            }
+            if cursor:
+                params["cursor"] = cursor
+            data = self._api_call("conversations.list", params)
+            if not data.get("ok"):
+                return None
+            for ch in data.get("channels", []):
+                if ch.get("name") == target:
+                    return ch.get("id")
+            cursor = data.get("response_metadata", {}).get("next_cursor", "")
+            if not cursor:
+                return None
 
     def _collect_channel(self, db, channel_id: str, channel_name: str, oldest: float) -> tuple:
         """采集单个频道的消息"""

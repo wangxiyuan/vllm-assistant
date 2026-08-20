@@ -129,7 +129,11 @@ class GitHubClient:
             for attempt in Retrying(
                 stop=stop_after_attempt(3),
                 wait=wait_exponential(multiplier=0.5, min=0.5, max=8.0),
-                retry=retry_if_exception_type(RateLimitError),
+                retry=retry_if_exception_type((
+                    RateLimitError,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout,
+                )),
                 reraise=True,
             ):
                 with attempt:
