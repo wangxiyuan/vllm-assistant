@@ -14,6 +14,7 @@ from sqlalchemy import (
     Date,
     Boolean,
     Text,
+    Float,
     ForeignKey,
     Index,
     PrimaryKeyConstraint,
@@ -721,6 +722,11 @@ class AIChatMessage(Base):
     role = Column(String(20), nullable=False)  # user / assistant
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    # 对话过程（thinking/工具调用），JSON 字符串；assistant 消息可能携带，user 消息为空
+    steps = Column(Text, nullable=True)
+    # 应答用量与耗时（可选）
+    usage = Column(Text, nullable=True)
+    duration_s = Column(Float, nullable=True)
 
 
 class QuickPrompt(Base):

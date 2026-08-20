@@ -4,11 +4,13 @@ import { api } from '@/api/client'
 import { useAppStore } from './app'
 
 export interface ChatMessage {
+  id?: string
   role: 'user' | 'assistant'
   content: string
   created_at?: string
   usage?: { input_tokens: number; output_tokens: number; total_tokens: number } | null
   duration_s?: number | null
+  steps?: AgentStep[] | null
 }
 
 export interface Session {
@@ -50,6 +52,7 @@ export interface AgentStep {
   tool?: { name: string; args?: any; result?: any }
   round?: number
   _key?: number
+  _open?: boolean
 }
 
 // Human-readable labels for knowledge source types
@@ -91,6 +94,14 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
   const lastDuration = ref<number | null>(null)
   let _stepSeq = 0
   const error = ref('')
+  // 会话切换加载中：避免清空 messages 后短暂闪现「试试这样问我」空态
+  const loadingSession = ref(false)
+  // 本地生成消息的稳定自增 id（DB 消息用后端 id）
+  let _msgSeq = 0
+
+  function _nextMsgId(): string {
+    return `local-${++_msgSeq}`
+  }
 
   // 模块级 AbortController：sendMessage 写、stopGenerating 读 + abort
   let abortController: AbortController | null = null
@@ -143,15 +154,23 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
     currentSessionId.value = sessionId
     messages.value = []
     error.value = ''
+    _msgSeq = 0
+    loadingSession.value = true
     try {
       const data: any = await api(`/api/ai-agent/sessions/${sessionId}/messages`)
       messages.value = (data.messages || []).map((m: any) => ({
+        id: m.id != null ? String(m.id) : _nextMsgId(),
         role: m.role as 'user' | 'assistant',
         content: m.content,
         created_at: m.created_at,
+        steps: m.steps || null,
+        usage: m.usage || null,
+        duration_s: m.duration_s ?? null,
       }))
     } catch (e: any) {
       useAppStore().showToast('加载消息失败', e.message, 'error')
+    } finally {
+      loadingSession.value = false
     }
   }
 
@@ -189,7 +208,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
 
   async function sendMessage(content: string, tools?: string[]) {
     if (!content.trim()) return
-    messages.value.push({ role: 'user', content: content.trim() })
+    messages.value.push({ role: 'user', content: content.trim(), id: _nextMsgId() })
     await _doStream(messages.value)
   }
 
@@ -328,6 +347,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
                 tool: { name: event.data.name, args: event.data.args },
                 round: event.round,
                 _key: ++_stepSeq,
+                _open: false,
               })
               break
             }
@@ -376,10 +396,12 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
         const finalText = streamingFinal.value.trim()
         if (finalText) {
           messages.value.push({
+            id: _nextMsgId(),
             role: 'assistant',
             content: finalText,
             usage: lastUsage.value,
             duration_s: lastDuration.value,
+            steps: streamingSteps.value.length ? [...streamingSteps.value] : null,
           })
         }
       }
@@ -496,7 +518,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
 
   return {
     messages, sessions, currentSessionId, loading, streaming, activeStreamingSessionId, streamingSteps, streamingFinal, error, userStopped,
-    liveThinking, liveAnswer, lastUsage, lastDuration,
+    liveThinking, liveAnswer, lastUsage, lastDuration, loadingSession,
     loadSessions, createSession, switchSession, deleteSession, sendMessage, retriggerFrom, editUserMessage, stopGenerating,
 
     // Knowledge base

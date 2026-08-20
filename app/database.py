@@ -445,6 +445,32 @@ def _ensure_intelligence_reports_category():
                 logger.warning(f"Failed to add category column to intelligence_reports: {e}")
 
 
+def _ensure_ai_chat_messages_proc_columns():
+    """确保 ai_chat_messages 表包含 steps / usage / duration_s 列（向后兼容迁移）"""
+    from sqlalchemy import inspect, DDL
+
+    with engine.connect() as conn:
+        try:
+            existing_cols = {c["name"] for c in inspect(conn).get_columns("ai_chat_messages")}
+        except Exception:
+            return  # 表不存在，create_all 会处理
+
+        migrations = {
+            "steps": "ALTER TABLE ai_chat_messages ADD COLUMN steps TEXT",
+            "usage": "ALTER TABLE ai_chat_messages ADD COLUMN usage TEXT",
+            "duration_s": "ALTER TABLE ai_chat_messages ADD COLUMN duration_s FLOAT",
+        }
+
+        for col_name, ddl in migrations.items():
+            if col_name not in existing_cols:
+                try:
+                    conn.execute(DDL(ddl))
+                    conn.commit()
+                    logger.info(f"Added column {col_name} to ai_chat_messages")
+                except Exception as e:
+                    logger.warning(f"Failed to add column {col_name} to ai_chat_messages: {e}")
+
+
 def _cleanup_obsolete_schema():
     """清理已废弃的表和字段（dedup_check_result, task_dedup_cache）"""
     from sqlalchemy import inspect, DDL, text
@@ -514,6 +540,7 @@ _ensure_watchlist_repo_column()
 _ensure_my_prs_repo_column()
 _ensure_slack_configs_schema()
 _ensure_intelligence_reports_category()
+_ensure_ai_chat_messages_proc_columns()
 _cleanup_obsolete_schema()
 # 重建表会丢失索引，迁移后重新补建
 _ensure_indexes()

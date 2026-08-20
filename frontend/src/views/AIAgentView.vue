@@ -41,6 +41,12 @@ const hiddenStepCount = computed(() => {
   const total = agentStore.streamingSteps.length
   return Math.max(0, total - MAX_VISIBLE_STEPS)
 })
+// 单独拆分 thinking / tool 步，便于分别渲染与美化，同时保持顺序（filter 保序）
+const visibleThinkingSteps = computed(() => streamingStepsByType('thinking').slice(-MAX_VISIBLE_STEPS))
+const visibleToolSteps = computed(() => streamingStepsByType('tool_call').slice(-MAX_VISIBLE_STEPS))
+function streamingStepsByType(type: string) {
+  return agentStore.streamingSteps.filter(s => s.type === type)
+}
 const stepCountSummary = computed(() => {
   const steps = agentStore.streamingSteps
   const tools = steps.filter(s => s.type === 'tool_call').length
@@ -133,6 +139,66 @@ async function addPrompt() {
 
 const editingMsgIdx = ref<number | null>(null)
 const editingMsgText = ref('')
+// 已完成 assistant 消息「处理过程」折叠展开状态（按消息下标）
+const showMsgProcess = ref<Set<string>>(new Set())
+// 已完成消息里每个工具返回结果的折叠状态（key: "msgId:toolIdx"）
+const openMsgTools = ref<Set<string>>(new Set())
+// 错误消息的重试状态（按 session 标识，避免重试时状态残留）
+const retrying = ref(false)
+
+function toggleMsgProcess(msgId: string) {
+  const s = new Set(showMsgProcess.value)
+  if (s.has(msgId)) s.delete(msgId)
+  else s.add(msgId)
+  showMsgProcess.value = s
+}
+
+function toggleMsgTool(msgId: string, si: number) {
+  const key = `${msgId}:${si}`
+  const s = new Set(openMsgTools.value)
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
+  openMsgTools.value = s
+}
+
+function openMsgTool(msgId: string, si: number): boolean {
+  return openMsgTools.value.has(`${msgId}:${si}`)
+}
+
+const copiedMsgId = ref<string | null>(null)
+let copyTimer: ReturnType<typeof setTimeout> | null = null
+
+function copyMessageContent(msgId: string | undefined, content: string) {
+  const text = content || ''
+  const id = msgId ?? ''
+  const done = () => {
+    copiedMsgId.value = id
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copiedMsgId.value = null }, 2000)
+  }
+  if (!navigator.clipboard) {
+    fallbackCopy(text); done(); return
+  }
+  navigator.clipboard.writeText(text).then(done).catch(() => {
+    fallbackCopy(text); done()
+  })
+}
+
+async function retrySend() {
+  if (!agentStore.messages.length || retrying.value) return
+  const lastIndex = agentStore.messages.length - 1
+  if (agentStore.messages[lastIndex].role !== 'user') return
+  retrying.value = true
+  await agentStore.retriggerFrom(lastIndex)
+  retrying.value = false
+}
+
+function processSummary(steps: any[]): string {
+  if (!steps || !steps.length) return ''
+  const tools = steps.filter(s => s?.type === 'tool_call').length
+  if (tools === 0) return `${steps.length} 步`
+  return `${steps.length} 步 / ${tools} 次工具`
+}
 
 function startEditMsg(idx: number) {
   editingMsgIdx.value = idx
@@ -190,6 +256,18 @@ function formatTokens(n: number | undefined): string {
   if (n == null) return ''
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
   return `${n}`
+}
+
+function toolResultText(result: any): string {
+  if (result == null) return ''
+  try {
+    const obj = typeof result === 'string' ? JSON.parse(result) : result
+    if (typeof obj === 'string') return obj
+    const s = JSON.stringify(obj, null, 2)
+    return s.length > 2000 ? s.slice(0, 2000) + '…[已截断]' : s
+  } catch {
+    return String(result)
+  }
 }
 
 function formatDuration(s: number | null | undefined): string {
@@ -291,15 +369,54 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleOutsideClick)
 })
 
-// 流式输出时自动滚动到底部
-watch(() => agentStore.streamingFinal, () => {
-  if (agentStore.streaming) {
-    nextTick(() => {
-      if (chatContainer.value) {
-        chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-      }
-    })
+// 滚动到底部（nearest 保留用户可能的中间位置不会强跳）
+function scrollToBottom() {
+  nextTick(() => {
+    if (chatContainer.value) {
+      chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+    }
+  })
+}
+
+// 用户是否"贴底"：距底部 < 80px 视为贴底（用于流式中自动跟随）
+function isNearBottom(): boolean {
+  const el = chatContainer.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+
+// 底部固定指示器：流式中若用户滚离底部，提示可一键回底
+const showScrollHint = ref(false)
+let scrollHintTimer: ReturnType<typeof setTimeout> | null = null
+function onChatScroll() {
+  if (!agentStore.streaming) return
+  if (isNearBottom()) {
+    showScrollHint.value = false
+  } else {
+    showScrollHint.value = true
+    if (scrollHintTimer) clearTimeout(scrollHintTimer)
+    scrollHintTimer = setTimeout(() => { showScrollHint.value = false }, 4000)
   }
+}
+
+// 流式中：内容增长时，若用户贴底则自动跟随滚动（工具结果/思考/回答都覆盖）
+watch(() => [
+  agentStore.streamingFinal,
+  agentStore.liveThinking,
+  agentStore.liveAnswer,
+  agentStore.streamingSteps?.length,
+], () => {
+  if (agentStore.streaming && isNearBottom()) {
+    scrollToBottom()
+  }
+}, { deep: true })
+
+// 切会话 / 首次加载完成后滚动到底部
+watch(() => agentStore.currentSessionId, () => {
+  scrollToBottom()
+})
+watch(() => agentStore.loadingSession, (val) => {
+  if (!val) scrollToBottom()
 })
 
 async function send() {
@@ -661,35 +778,77 @@ const groupedSessions = computed(() => {
 
       <!-- Chat area -->
       <div class="agent-chat">
-        <div ref="chatContainer" class="chat-messages">
-          <div v-for="(msg, i) in agentStore.messages" :key="i"
+        <div ref="chatContainer" class="chat-messages" @scroll="onChatScroll">
+          <button v-if="showScrollHint" class="scroll-hint-btn" @click="scrollToBottom">
+            <Icon name="chevronRight" :size="12" />
+            回到底部
+          </button>
+          <div v-for="(msg, i) in agentStore.messages" :key="msg.id || i"
                class="chat-message" :class="'msg-' + msg.role">
             <div class="msg-avatar">{{ msg.role === 'user' ? 'U' : 'AI' }}</div>
             <div class="msg-body">
               <div v-if="editingMsgIdx === i" class="msg-edit-row">
-                <textarea class="textarea textarea-sm w-100" v-model="editingMsgText" rows="2" @keydown.enter.ctrl="saveEditMsg()" @keydown.escape="cancelEditMsg()"></textarea>
+                <textarea class="textarea msg-edit-textarea w-100" v-model="editingMsgText" rows="4" @keydown.enter.ctrl="saveEditMsg()" @keydown.escape="cancelEditMsg()"></textarea>
                 <div class="msg-edit-actions">
                   <button class="btn btn-xs btn-primary" @click="saveEditMsg()">保存并重新生成</button>
                   <button class="btn btn-xs" @click="cancelEditMsg()">取消</button>
                 </div>
               </div>
-              <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
-              <div v-if="msg.role === 'assistant' && (msg.usage || msg.duration_s != null)" class="msg-usage">
-                <Icon name="zap" :size="11" />
-                <span v-if="msg.usage">≈{{ formatTokens(msg.usage.output_tokens) }} tokens</span>
-                <span v-if="msg.duration_s != null">· {{ formatDuration(msg.duration_s) }}</span>
-              </div>
-              <div class="msg-footer">
-                <span v-if="msg.created_at" class="msg-time">{{ formatTimeShort(msg.created_at) }}</span>
-                <div v-if="msg.role === 'user'" class="msg-actions">
-                  <button class="msg-action-btn" @click="startEditMsg(i)" title="编辑">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                  </button>
-                  <button class="msg-action-btn" @click="regenerateResponse(i)" title="重新生成回复" v-if="i < agentStore.messages.length - 1 && agentStore.messages[i + 1]?.role === 'assistant'">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                  </button>
+              <div v-if="msg.role === 'assistant' && msg.steps?.length" class="msg-process-compact">
+                <button class="tool-result-toggle" @click="toggleMsgProcess(msg.id!)">
+                  <span class="tool-result-arrow" :class="{ open: showMsgProcess.has(msg.id!) }">▸</span>
+                  <Icon name="gear" :size="11" />
+                  <span>查看处理过程 ({{ processSummary(msg.steps) }})</span>
+                </button>
+                <div v-if="showMsgProcess.has(msg.id!)" class="msg-process-panel">
+                  <div v-for="(step, si) in msg.steps" :key="si"
+                       class="agent-tool-block" :class="{ 'step-panel-thinking': step.type === 'thinking' }">
+                    <div v-if="step.type === 'thinking'" class="agent-step step-thinking">
+                      <span class="step-pill step-pill-think"><Icon name="brain" :size="12" /></span>
+                      <span class="step-text" v-html="renderMarkdown(step.thinking || '')"></span>
+                    </div>
+                    <template v-else-if="step.type === 'tool_call'">
+                      <div class="agent-tool-head">
+                        <span class="step-pill step-pill-tool"><Icon name="wrench" :size="12" /></span>
+                        <code class="tool-name">{{ step.tool?.name }}</code>
+                        <span v-if="step.tool?.args && hasArgs(step.tool.args)" class="step-tool-args">{{ formatArgs(step.tool.args) }}</span>
+                        <span v-if="step.tool?.result !== undefined" class="tool-status"><span class="step-tool-done"><Icon name="check" :size="12" /><span>完成</span></span></span>
+                      </div>
+                      <div class="agent-tool-result">
+                        <button class="tool-result-toggle" @click="toggleMsgTool(msg.id!, si)" style="padding:2px 10px 8px;">
+                          <span class="tool-result-arrow" :class="{ open: openMsgTool(msg.id!, si) }">▸</span>
+                          <span>查看返回结果</span>
+                        </button>
+                        <div v-if="openMsgTool(msg.id!, si)" class="tool-result-body" style="margin:0 10px 8px;" v-html="renderMarkdown(toolResultText(step.tool?.result))"></div>
+                      </div>
+                    </template>
+                  </div>
                 </div>
-</div>
+              </div>
+              <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
+              <div v-if="msg.role === 'assistant' || msg.usage || msg.duration_s != null" class="msg-meta-line">
+                <button v-if="msg.role === 'assistant'" class="msg-copy-btn" @click="copyMessageContent(msg.id, msg.content)" title="复制回答">
+                  <svg v-if="copiedMsgId !== msg.id" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <Icon v-else :size="12" name="check" />
+                </button>
+                <template v-if="msg.role === 'assistant' && (msg.usage || msg.duration_s != null)">
+                  <span class="msg-meta-sep"></span>
+                  <Icon name="zap" :size="11" />
+                  <span v-if="msg.usage">≈{{ formatTokens(msg.usage.output_tokens) }} tokens</span>
+                  <span v-if="msg.duration_s != null">· {{ formatDuration(msg.duration_s) }}</span>
+                </template>
+                <span v-if="msg.role === 'assistant' && msg.created_at" class="msg-meta-time">{{ formatTimeShort(msg.created_at) }}</span>
+              </div>
+              <div v-if="msg.role === 'user'" class="msg-user-actions">
+                <span v-if="msg.created_at" class="msg-time">{{ formatTimeShort(msg.created_at) }}</span>
+                <span class="msg-meta-sep"></span>
+                <button class="msg-action-btn" @click="startEditMsg(i)" title="编辑" :disabled="isStreamingHere">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button class="msg-action-btn" @click="regenerateResponse(i)" title="重新生成回复" v-if="i < agentStore.messages.length - 1 && agentStore.messages[i + 1]?.role === 'assistant'" :disabled="isStreamingHere">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -701,27 +860,36 @@ const groupedSessions = computed(() => {
               <div v-if="agentStore.streamingSteps.length || agentStore.liveThinking" class="agent-process" open>
                 <div class="agent-process-summary">
                   <span class="agent-process-icon"><Icon name="gear" :size="12" /></span>
-                  <span>处理过程 ({{ stepCountSummary }})</span>
+                  <span>处理过程 <em class="summary-count">({{ stepCountSummary }})</em></span>
                 </div>
                 <div class="agent-process-body">
-                  <div v-for="(step, i) in visibleSteps" :key="step._key || i" class="agent-step" :class="'step-' + step.type">
-                    <div v-if="step.type === 'thinking'" class="step-thinking">
-                      <span class="step-icon"><Icon name="brain" :size="12" /></span>
-                      <span class="step-text" v-html="renderMarkdown(step.thinking || '')"></span>
-                    </div>
-                    <div v-else-if="step.type === 'tool_call'" class="step-tool-call">
-                      <span class="step-icon"><Icon name="wrench" :size="12" /></span>
-                      <span class="step-text">
-                        调用工具 <code>{{ step.tool?.name }}</code>
-                        <span v-if="step.tool?.args && hasArgs(step.tool.args)" class="step-tool-args">({{ formatArgs(step.tool.args) }})</span>
-                        <span v-if="step.tool && step.tool.result !== undefined" class="step-tool-done"><Icon name="check" :size="11" /></span>
-                        <span v-else-if="agentStore.streaming" class="step-tool-pending"><span class="tool-spinner"></span></span>
+                  <!-- 思考 -->
+                  <div v-for="(step, i) in visibleThinkingSteps" :key="step._key || i" class="agent-step step-thinking">
+                    <span class="step-pill step-pill-think"><Icon name="brain" :size="12" /></span>
+                    <span class="step-text" v-html="renderMarkdown(step.thinking || '')"></span>
+                  </div>
+                  <!-- 工具调用 -->
+                  <div v-for="(step, i) in visibleToolSteps" :key="step._key || i" class="agent-tool-block">
+                    <div class="agent-tool-head">
+                      <span class="step-pill step-pill-tool"><Icon name="wrench" :size="12" /></span>
+                      <code class="tool-name">{{ step.tool?.name }}</code>
+                      <span v-if="step.tool?.args && hasArgs(step.tool.args)" class="step-tool-args">{{ formatArgs(step.tool.args) }}</span>
+                      <span class="tool-status">
+                        <span v-if="step.tool && step.tool.result !== undefined" class="step-tool-done"><Icon name="check" :size="12" /><span>完成</span></span>
+                        <span v-else-if="agentStore.streaming" class="step-tool-pending"><span class="tool-spinner"></span><span>执行中</span></span>
                       </span>
+                    </div>
+                    <div v-if="step.tool && step.tool.result !== undefined" class="agent-tool-result">
+                      <button class="tool-result-toggle" @click="step._open = !step._open">
+                        <span class="tool-result-arrow" :class="{ open: step._open }">▸</span>
+                        <span>查看返回结果</span>
+                      </button>
+                      <div v-if="step._open" class="tool-result-body" v-html="renderMarkdown(toolResultText(step.tool?.result))"></div>
                     </div>
                   </div>
                   <!-- 实时思考打字（未提交为步骤前） -->
                   <div v-if="agentStore.liveThinking" class="agent-step step-thinking step-thinking-live">
-                    <span class="step-icon"><Icon name="brain" :size="12" /></span>
+                    <span class="step-pill step-pill-think"><Icon name="brain" :size="12" /></span>
                     <span class="step-text" v-html="renderMarkdown(agentStore.liveThinking)"></span><span class="cursor-blink">▊</span>
                   </div>
                   <div v-if="hiddenStepCount > 0" class="agent-step step-hidden">
@@ -755,10 +923,16 @@ const groupedSessions = computed(() => {
 
           <!-- Error -->
           <div v-if="agentStore.error" class="chat-message msg-error">
-            <div class="msg-content">{{ agentStore.error }}</div>
+            <div class="msg-avatar">!</div>
+            <div class="msg-content">
+              <div class="msg-content">{{ agentStore.error }}</div>
+              <button class="btn btn-sm" style="margin-top:var(--space-2)" @click="retrySend" :disabled="retrying">
+                {{ retrying ? '重试中…' : '重新生成' }}
+              </button>
+            </div>
           </div>
 
-          <div v-if="agentStore.messages.length === 0 && !agentStore.streaming" class="quick-prompts-area">
+          <div v-if="agentStore.messages.length === 0 && !agentStore.streaming && !agentStore.loadingSession" class="quick-prompts-area">
             <div class="quick-prompts-header">
               <span class="quick-prompts-header-icon"><Icon name="zap" :size="18" /></span>
               <span class="quick-prompts-header-text">试试这样问我</span>
@@ -1204,7 +1378,33 @@ const groupedSessions = computed(() => {
   overflow-y: auto;
   padding: var(--space-5) 0;
   min-height: 0;
+  position: relative;
 }
+/* 底部固定提示按钮：固定在聊天区底部居中浮动 */
+.scroll-hint-btn {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--space-5) + 72px);
+  z-index: var(--z-drop, 50);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--bg-elev-3);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  box-shadow: var(--shadow-md, 0 2px 10px rgba(0,0,0,.2));
+  opacity: 0;
+  animation: scroll-hint-in .18s ease forwards;
+}
+.scroll-hint-btn:hover { color: var(--text-primary); }
+.scroll-hint-btn svg { transform: rotate(-90deg); }
+@keyframes scroll-hint-in { from { opacity: 0; transform: translateX(-50%) translateY(6px);} to { opacity: 1; transform: translateX(-50%) translateY(0);} }
 .chat-message {
   display: flex;
   gap: var(--space-4);
@@ -1220,6 +1420,36 @@ const groupedSessions = computed(() => {
 }
 .msg-user .msg-avatar { background: var(--amber-glow); color: var(--amber); }
 .msg-assistant .msg-avatar { background: var(--signal-blue-glow); color: var(--signal-blue); }
+/* 用户消息右对齐 + 气泡，与 AI 消息区分 */
+.msg-user {
+  flex-direction: row-reverse;
+}
+.msg-user .msg-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.msg-user .msg-content {
+  background: var(--amber-glow-soft);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius) var(--radius-xs) var(--radius) var(--radius);
+  padding: var(--space-3) var(--space-4);
+  max-width: max(70%, 340px);
+}
+.msg-user .msg-footer {
+  justify-content: flex-end;
+}
+.msg-user .msg-content :deep(code) { background: var(--bg-elev-2); }
+/* 编辑时：编辑框占满宽度，方便改写长消息 */
+.msg-user .msg-edit-row {
+  align-self: stretch;
+  width: 100%;
+}
+.msg-edit-textarea {
+  font-family: var(--font-ui);
+  resize: vertical;
+  min-height: 96px;
+}
 .msg-content {
   flex: 1;
   font-size: var(--text-base);
@@ -1364,22 +1594,76 @@ const groupedSessions = computed(() => {
 }
 .step-icon { flex-shrink: 0; opacity: 0.85; }
 .step-text { flex: 1; word-break: break-word; }
-.step-thinking { color: var(--text-tertiary); font-style: italic; }
-.step-tool-call code {
+.step-thinking {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+/* 思考 / 工具 徽标区分 */
+.step-pill {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+.step-pill-think {
+  color: var(--signal-blue);
+  background: var(--signal-blue-glow);
+}
+.step-pill-tool {
+  color: var(--amber-bright);
+  background: var(--amber-glow-soft);
+}
+
+/* 工具调用块 */
+.agent-tool-block {
+  margin: 2px 0;
+  border: 1px solid var(--border-faint);
+  border-left: 2px solid var(--amber);
+  border-radius: 6px;
+  overflow: hidden;
   background: var(--bg-elev-2);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 0.9em;
+}
+.agent-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  flex-wrap: wrap;
+}
+.agent-tool-head .tool-name {
   font-family: var(--font-mono, monospace);
+  font-size: 0.92em;
+  font-weight: 600;
+  color: var(--amber-bright);
+  background: var(--bg-elev-3);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 .step-tool-args {
   color: var(--text-tertiary);
   font-size: 0.85em;
   font-family: var(--font-mono, monospace);
-  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
 }
-.step-tool-done { color: var(--signal-green); }
-.step-tool-pending { color: var(--text-tertiary); }
+.tool-status {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.85em;
+  flex-shrink: 0;
+}
+.step-tool-done { color: var(--signal-green); display: inline-flex; align-items: center; gap: 3px; }
+.step-tool-pending { color: var(--text-tertiary); display: inline-flex; align-items: center; gap: 5px; }
 .tool-spinner {
   display: inline-block;
   width: 11px;
@@ -1393,8 +1677,119 @@ const groupedSessions = computed(() => {
 @keyframes tool-spin {
   to { transform: rotate(360deg); }
 }
+
+/* 工具返回结果（可折叠） */
+.tool-result-toggle {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: 0.85em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px 5px;
+}
+.tool-result-toggle:hover { color: var(--text-secondary); }
+.tool-result-arrow {
+  display: inline-block;
+  transition: transform var(--t-base);
+  color: var(--amber);
+  font-size: 0.7em;
+}
+.tool-result-arrow.open { transform: rotate(90deg); }
+
+/* 已完成消息：折叠的处理过程 */
+.msg-process-compact {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  background: var(--bg-elev-1);
+}
+.msg-process-compact .tool-result-toggle {
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+}
+.msg-process-compact .tool-result-toggle:hover { color: var(--text-secondary); }
+.msg-process-panel {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+/* 滚动条美化 */
+.msg-process-panel::-webkit-scrollbar { width: 6px; }
+.msg-process-panel::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.msg-process-panel::-webkit-scrollbar-track { background: transparent; }
+.msg-process-panel .agent-tool-block { margin: 0; flex-shrink: 0; }
+.step-panel-thinking {
+  border-left-color: var(--signal-blue) !important;
+  border-color: var(--border-faint);
+  margin-bottom: 2px;
+}
+.step-panel-thinking .step-thinking { padding: 6px 10px; }
+/* 相邻 thinking 之间加分隔，避免粘连成一大块 */
+.msg-process-panel .step-thinking + .agent-step,
+.msg-process-panel .step-panel-thinking + .step-panel-thinking {
+  border-top: 1px dashed var(--border-faint);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+/* 工具返回结果区也独立滚动，超长内容看得清 */
+.msg-process-panel .tool-result-body {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.tool-result-body {
+  margin: 0 10px 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  background: var(--bg-elev-1);
+  font-size: 0.9em;
+  max-height: 220px;
+  overflow-y: auto;
+  color: var(--text-secondary);
+}
+.tool-result-body :deep(code) {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  background: var(--bg-elev-2);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.tool-result-body :deep(pre) {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 0;
+}
+.tool-result-body :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+
 .step-thinking-live {
   opacity: 0.75;
+}
+/* 流式中相邻 thinking 分隔 */
+.agent-process-body .step-thinking + .step-thinking {
+  border-top: 1px dashed var(--border-faint);
+  padding-top: 8px;
+  margin-top: 4px;
 }
 .agent-usage,
 .msg-usage {
@@ -1655,8 +2050,70 @@ const groupedSessions = computed(() => {
   color: var(--accent);
   background: var(--bg-elev-2);
 }
+/* 用户消息操作行：时间 + 编辑/重试 右对齐，与 AI 回复的 meta 行对齐风格一致 */
+.msg-user-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+  min-height: 20px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.msg-user-actions .msg-time {
+  font-size: var(--text-xs);
+  color: var(--text-quaternary);
+}
+.msg-user-actions .msg-action-btn {
+  width: 22px;
+  height: 22px;
+}
+.msg-user-actions .msg-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .msg-edit-row {
   margin-bottom: var(--space-2);
+}
+/* 复制/用量/时间：同在一行，紧贴内容下方 */
+.msg-meta-line {
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.msg-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-quaternary);
+  padding: 3px 5px;
+  margin-left: -5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.msg-copy-btn:hover {
+  color: var(--text-secondary);
+  background: var(--bg-elev-2);
+}
+.msg-copy-btn svg { opacity: .85; }
+.msg-meta-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--border-faint);
+  flex-shrink: 0;
+}
+.msg-meta-time {
+  font-size: var(--text-xs);
+  color: var(--text-quaternary);
+  flex-shrink: 0;
 }
 .msg-edit-actions {
   display: flex;

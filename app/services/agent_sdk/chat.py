@@ -92,8 +92,32 @@ async def chat_stream(
       - {'type':'thinking', 'data':str, 'round'}   工具轮文本定稿（thinking 块）
       - {'type':'token','data':str,'round'}        最终回答（完整，供持久化）
       - {'type':'tool_call'|'tool_result', ...}    不变
-      - {'type':'done','data':{'usage':..,'duration_s':..},'round'}
+      - {'type':'done','data':{'usage':..,'duration_s':..,'steps':[...]},'round'}
     """
+    # 收集本轮思考/工具过程，随 done 事件携带，供调用方持久化
+    steps: List[dict] = []
+    _live_thinking: List[str] = []
+
+    def _push_thinking():
+        txt = "".join(_live_thinking).strip()
+        if txt:
+            steps.append({"type": "thinking", "thinking": txt})
+        _live_thinking.clear()
+
+    def _push_tool_call(name: str, arguments: str):
+        _push_thinking()
+        try:
+            args = json.loads(arguments or "{}")
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        steps.append({"type": "tool_call", "tool": {"name": name, "args": args}})
+
+    def _push_tool_result(name: str, result: dict):
+        # 回填最近一个尚未拿到结果的 tool_call
+        for s in reversed(steps):
+            if s["type"] == "tool_call" and not s["tool"].get("result"):
+                s["tool"]["result"] = result
+                break
     if system_prompt is None:
         from app.services.agent_prompt import build_system_prompt
         system_prompt = build_system_prompt(messages)
@@ -110,10 +134,8 @@ async def chat_stream(
     start_ts = _now()
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     final_text = ""
-    # 区分实时分片所属区域：见到过工具调用且已过工具轮 → answer，否则 thinking
-    saw_any_tool = False
-    in_answer = False
-
+    # 实时分片统一按 thinking 流式展示（处理过程区）；
+    # 真正的最终回答统一由后置的 token 事件（final_output 兜底）下发并持久化。
     builder = ChatEventBuilder()
 
     def drain():
@@ -127,32 +149,25 @@ async def chat_stream(
         async for ev in run_stage_stream(stage, ctx, input=_to_sdk_input(messages)):
             kind = ev.get("kind")
             if kind == "text_delta":
-                # 实时分片：工具调用前的轮 → thinking；之后 → answer
-                k = "answer" if in_answer else "thinking"
-                emit("delta", {"data": ev["delta"], "kind": k})
+                # 实时分片：一律作为思考过程流式展示（answer 区不展示实时分片，
+                # 最终回答由 token 事件统一下发，避免工具轮之间的过渡文本被误当回答）
+                emit("delta", {"data": ev["delta"], "kind": "thinking"})
+                _live_thinking.append(ev["delta"])
                 builder.add_text_delta(ev["delta"])
             elif kind == "tool_call":
                 builder.mark_tool()
                 builder.flush_as_thinking()
-                try:
-                    args = json.loads(ev["arguments"] or "{}")
-                except (json.JSONDecodeError, TypeError):
-                    args = {}
-                emit(EVENT_TOOL_CALL, {"name": ev["name"], "args": args})
-                saw_any_tool = True
+                _push_tool_call(ev["name"], ev.get("arguments") or "")
+                emit(EVENT_TOOL_CALL, {"name": ev["name"], "args": json.loads(ev["arguments"] or "{}") if (ev.get("arguments") or "").strip() else {}})
             elif kind == "tool_output":
                 result = _parse_tool_result(ev.get("output", ""))
                 payload = {"name": ev.get("name", ""), "result": result}
+                _push_tool_result(ev.get("name", ""), result)
                 emit(EVENT_TOOL_RESULT, payload)
-                # 工具执行完成后，后续文本属于最终回答区
-                in_answer = True
             elif kind == "message_end":
                 # 实时分片已由 delta 事件流式发出；此处仅推进轮次，
                 # 不再重复发 thinking/token（thinking 由 tool_call 前的 flush 提交）
                 builder.begin_new_turn()
-                # 有工具调用的轮结束后，后续文本属于最终回答区
-                if saw_any_tool:
-                    in_answer = True
             elif kind in ("stage_final", "stage_done"):
                 if ev.get("text"):
                     final_text = final_text or ev["text"]
@@ -193,7 +208,9 @@ async def chat_stream(
     # 聚合用量 + 耗时，发出最终的 done（在 finally 之外）
     duration_s = round(_now() - start_ts, 1)
     _fill_usage_estimate(usage, final_text)
-    emit(EVENT_DONE, {"usage": usage, "duration_s": duration_s})
+    # 注意：不要在这里 flush 末尾的 _live_thinking —— 流结束时的文本分片就是最终 AI 答案
+    #（由 token 事件下发），不属于"处理过程"，避免把答案误收为最后一条 thinking 步骤。
+    emit(EVENT_DONE, {"usage": usage, "duration_s": duration_s, "steps": steps})
     for e in drain():
         yield e
 

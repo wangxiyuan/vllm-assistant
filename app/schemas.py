@@ -64,6 +64,9 @@ class AIChatMessageResponse(BaseModel):
     role: str
     content: str
     created_at: Optional[str] = None
+    steps: Optional[list] = None
+    usage: Optional[dict] = None
+    duration_s: Optional[float] = None
 
     class Config:
         from_attributes = True

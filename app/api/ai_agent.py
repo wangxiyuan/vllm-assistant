@@ -27,6 +27,15 @@ def _require_api_key():
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
 
 
+def _safe_json_loads(s):
+    if not s:
+        return None
+    try:
+        return json.loads(s)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
 # ======================================================================
 # 请求/响应模型
 # ======================================================================
@@ -117,10 +126,17 @@ async def chat(request: ChatRequest, fastapi_request: Request):
                     else:
                         assistant_content += event["data"]
 
+                # done 事件携带使用量、耗时与处理过程
+                if event["type"] == "done":
+                    d = event.get("data") or {}
+                    assistant_steps = d.get("steps")
+                    assistant_usage = d.get("usage")
+                    assistant_duration = d.get("duration_s")
+
                 # 在 done 事件发出前保存 assistant 回复并更新会话标题，
                 # 避免前端 loadSessions() 与后端保存操作产生竞态条件
                 if event["type"] == "done" and request.session_id and assistant_content:
-                    _save_assistant_message(request.session_id, assistant_content)
+                    _save_assistant_message(request.session_id, assistant_content, steps=assistant_steps, usage=assistant_usage, duration_s=assistant_duration)
 
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as e:
@@ -194,7 +210,7 @@ def _sync_and_save_user_message(session_id: str, messages: List[dict]):
         db.close()
 
 
-def _save_assistant_message(session_id: str, content: str):
+def _save_assistant_message(session_id: str, content: str, steps=None, usage=None, duration_s=None):
     """将 assistant 回复存入数据库"""
     from app.database import SessionLocal
     from app.models import AIChatSession, AIChatMessage
@@ -205,6 +221,9 @@ def _save_assistant_message(session_id: str, content: str):
             session_id=session_id,
             role="assistant",
             content=content,
+            steps=json.dumps(steps, ensure_ascii=False) if steps else None,
+            usage=json.dumps(usage, ensure_ascii=False) if usage else None,
+            duration_s=duration_s,
         ))
         # 更新会话信息
         session = db.query(AIChatSession).filter(AIChatSession.id == session_id).first()
@@ -492,6 +511,9 @@ async def get_session_messages(session_id: str):
                     "role": m.role,
                     "content": m.content,
                     "created_at": m.created_at.isoformat() + "Z" if m.created_at else None,
+                    "steps": _safe_json_loads(m.steps),
+                    "usage": _safe_json_loads(m.usage),
+                    "duration_s": m.duration_s,
                 }
                 for m in messages
             ]
