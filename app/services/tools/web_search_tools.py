@@ -144,6 +144,9 @@ EXTRACT_WEB_CONTENT = {
         "description": (
             "从指定 URL 提取清洁的文本内容，去除广告、导航等干扰信息。"
             "返回纯文本，适合 AI 阅读和分析。"
+            "**仅对一般网页/新闻/博客/文档使用**；"
+            "如果是 GitHub issue 或 PR 链接（github.com/.../issues/ 或 /pull/），"
+            "请改用 get_issue_detail / get_pr_diff 工具直接获取结构化正文与评论，不要用本工具。"
             "当需要深入了解某个搜索结果的详细信息时调用此工具。"
         ),
         "parameters": {

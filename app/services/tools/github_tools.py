@@ -117,7 +117,7 @@ GET_ISSUE_DETAIL = {
     "type": "function",
     "function": {
         "name": "get_issue_detail",
-        "description": "获取某个 issue/PR 的正文内容和评论。当 search_issues 发现感兴趣的条目时调用此函数深入了解。",
+        "description": "获取某个 issue/PR 的正文内容和评论。当 search_issues 发现感兴趣的条目时调用此函数深入了解。也用于拿到 github.com/.../issues/{n} 或 /pull/{n} 链接时，直接按 repo+number 调用本工具获取结构化详情，而不是用 extract_web_content 抓取 HTML。",
         "parameters": {
             "type": "object",
             "properties": {

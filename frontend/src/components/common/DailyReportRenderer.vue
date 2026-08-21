@@ -21,7 +21,7 @@ const tabs = [
 ]
 
 const tabHeadings: Record<string, string[]> = {
-  yesterday: ['昨日概览', '昨日新增 Issue 明细', '昨日新增 PR 明细', '版本发布'],
+  yesterday: ['昨日数据', '昨日概览', '昨日新增 Issue 明细', '昨日新增 PR 明细', '版本发布'],
   quality: ['质量与架构'],
   competitive: ['竞品动态与对比'],
   academic: ['学术动态'],
