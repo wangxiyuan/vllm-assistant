@@ -445,6 +445,18 @@ def _ensure_intelligence_reports_category():
                 logger.warning(f"Failed to add category column to intelligence_reports: {e}")
 
 
+def _ensure_intelligence_report_traces():
+    """确保 intelligence_report_traces 表存在（向后兼容，CREATE IF NOT EXISTS 幂等）。"""
+    conn_key = "intelligence_report_traces"
+    if conn_key not in Base.metadata.tables:
+        logger.warning(f"{conn_key} table not defined in metadata, skipping creation")
+        return
+    table = Base.metadata.tables[conn_key]
+    with engine.begin() as conn:
+        table.create(bind=conn, checkfirst=True)
+        logger.info("Ensured intelligence_report_traces table exists")
+
+
 def _ensure_ai_chat_messages_proc_columns():
     """确保 ai_chat_messages 表包含 steps / usage / duration_s 列（向后兼容迁移）"""
     from sqlalchemy import inspect, DDL
@@ -540,6 +552,7 @@ _ensure_watchlist_repo_column()
 _ensure_my_prs_repo_column()
 _ensure_slack_configs_schema()
 _ensure_intelligence_reports_category()
+_ensure_intelligence_report_traces()
 _ensure_ai_chat_messages_proc_columns()
 _cleanup_obsolete_schema()
 # 重建表会丢失索引，迁移后重新补建

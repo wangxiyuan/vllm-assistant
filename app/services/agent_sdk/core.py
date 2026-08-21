@@ -5,6 +5,7 @@ OpenAI Agents SDK — 归一化 Agent 引擎
 两端（chat.py / report.py）只声明 AgentStage 并消费事件/结果，不重复工具适配、
 max_turns 强制、模型/温度控制等逻辑。
 """
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import AsyncIterator, List, Optional
@@ -54,7 +55,10 @@ def create_agent(stage: AgentStage, ctx: ToolRunContext) -> Agent:
         instructions=stage.instructions,
         tools=tools,
         model=build_chat_model(),
-        model_settings=ModelSettings(temperature=stage.temperature),
+        model_settings=ModelSettings(
+            temperature=stage.temperature,
+            preserve_raw_usage=True,
+        ),
     )
 
 
@@ -64,6 +68,17 @@ def _run_config() -> RunConfig:
 
 async def run_stage_nonstream(stage: AgentStage, ctx: ToolRunContext, input) -> str:
     """非流式跑单个阶段，返回最终输出文本。"""
+    res = await run_stage_with_meta(stage, ctx, input)
+    return res["final_output"]
+
+
+async def run_stage_with_meta(stage: AgentStage, ctx: ToolRunContext, input) -> dict:
+    """非流式跑单个阶段，返回含痕迹元信息的完整结果。
+
+    之所以非流式：本项目的 OpenAI 兼容端口仅在非流式响应中返回 token 用量，
+    流式响应（stream=True）每 chunk 的 usage 为 None，无法拿到真实 Token 数。
+    返回 dict：final_output / tool_calls[{name, arguments, call_id, output}] / usage / turns。
+    """
     _ensure_tracing_disabled()
     agent = create_agent(stage, ctx)
     result = await Runner.run(
@@ -72,7 +87,53 @@ async def run_stage_nonstream(stage: AgentStage, ctx: ToolRunContext, input) -> 
         max_turns=stage.max_turns,
         run_config=_run_config(),
     )
-    return result.final_output or ""
+    tool_calls: List[dict] = []
+    for resp in getattr(result, "raw_responses", None) or []:
+        for item in getattr(resp, "output", None) or []:
+            if getattr(item, "type", None) == "function_call":
+                tool_calls.append({
+                    "name": getattr(item, "name", "") or "",
+                    "arguments": getattr(item, "arguments", "") or "",
+                    "call_id": getattr(item, "call_id", "") or "",
+                    "output": "",
+                })
+    # 从 new_items 提取工具输出（按 call_id 配对）
+    outs = {}
+    for it in getattr(result, "new_items", None) or []:
+        if getattr(it, "type", None) == "tool_call_output_item":
+            cid = _raw_item_call_id(it)
+            if cid and hasattr(it, "output"):
+                outs[cid] = _raw_attr(getattr(it, "raw_item", None), "output") or getattr(it, "output", "") or ""
+    for tc in tool_calls:
+        if tc["call_id"] in outs:
+            tc["output"] = outs[tc["call_id"]]
+        tc["status"] = _tool_status(outs.get(tc.get("call_id", ""), ""))
+    return {
+        "final_output": result.final_output or "",
+        "tool_calls": tool_calls,
+        "usage": _agg_usage(result),
+        "turns": len(tool_calls),
+    }
+
+
+def _raw_item_call_id(it) -> str:
+    raw = getattr(it, "raw_item", None)
+    if isinstance(raw, dict):
+        return raw.get("call_id", "") or ""
+    return getattr(raw, "call_id", "") or ""
+
+
+def _tool_status(output: str) -> str:
+    """根据工具输出 JSON 判断执行状态：工具统一以 {"error": ...} 表示失败。"""
+    if not output:
+        return "unknown"
+    try:
+        obj = json.loads(output)
+    except (TypeError, ValueError):
+        return "success"
+    if isinstance(obj, dict) and obj.get("error"):
+        return "error"
+    return "success"
 
 
 async def run_stage_stream(stage: AgentStage, ctx: ToolRunContext, input) -> AsyncIterator[dict]:
@@ -114,11 +175,11 @@ async def run_stage_stream(stage: AgentStage, ctx: ToolRunContext, input) -> Asy
                     cid = _raw_attr(raw, "call_id") or ""
                     if cid:
                         call_names[cid] = name
-                    yield {"kind": "tool_call", "name": name, "arguments": arguments}
+                    yield {"kind": "tool_call", "name": name, "arguments": arguments, "call_id": cid}
                 elif itype == "tool_call_output_item":
                     output = getattr(item, "output", None) or ""
                     cid = _raw_attr(getattr(item, "raw_item", None), "call_id") or ""
-                    yield {"kind": "tool_output", "name": call_names.get(cid, ""), "output": output}
+                    yield {"kind": "tool_output", "name": call_names.get(cid, ""), "output": output, "call_id": cid}
     except Exception as e:
         # max_turns 耗尽时 SDK 会抛 MaxTurnsExceeded，但 final_output 仍可用，视为正常结束
         from agents.exceptions import MaxTurnsExceeded
@@ -150,19 +211,41 @@ def _raw_attr(src, name: str):
     return getattr(src, name, None)
 
 
+def _glue_value(obj, *keys, _default=0):
+    """从 object 或 dict 中按多个候选键取第一个非空值（用法：_glue_value(u, 'input_tokens', 'prompt_tokens')）。"""
+    for k in keys:
+        if isinstance(obj, dict):
+            v = obj.get(k)
+        else:
+            v = getattr(obj, k, None)
+        if v:
+            return v
+    return _default
+
+
 def _agg_usage(result) -> dict:
-    """汇总一次 run 的 token 用量（输入/输出 token）。"""
+    """汇总一次 run 的 token 用量（输入/输出 token）。
+
+    优先读 raw_usage（preserve_raw_usage=True 时由 ModelResponse 保留的原始 usage dict，
+    含 prompt_tokens/completion_tokens），该值在部分兼容端口未被 SDK 归一化到 usage 上时为 0。
+    退而读 usage（object/dict，fields input_tokens/output_tokens 或 prompt/completion_tokens）。
+    """
     total_in = 0
     total_out = 0
     raw_responses = getattr(result, "raw_responses", None) or []
     for resp in raw_responses:
-        usage = getattr(resp, "usage", None) or getattr(resp, "response_usage", None)
+        raw_usage = getattr(resp, "raw_usage", None)
+        usage = raw_usage or getattr(resp, "usage", None) or getattr(resp, "response_usage", None)
         if usage is None:
             continue
-        ti = getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", 0) or 0
-        to = getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", 0) or 0
-        total_in += ti or 0
-        total_out += to or 0
+        if isinstance(usage, dict) and not usage:
+            continue
+        if raw_usage is not None:
+            total_in += _glue_value(raw_usage, "prompt_tokens", "input_tokens")
+            total_out += _glue_value(raw_usage, "completion_tokens", "output_tokens")
+        else:
+            total_in += _glue_value(usage, "prompt_tokens", "input_tokens")
+            total_out += _glue_value(usage, "completion_tokens", "output_tokens")
     return {"input_tokens": total_in, "output_tokens": total_out, "total_tokens": total_in + total_out}
 
 

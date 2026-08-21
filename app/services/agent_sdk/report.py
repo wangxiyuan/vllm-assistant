@@ -8,11 +8,13 @@ OpenAI Agents SDK — 洞察报告三阶段流水线
 三阶段共用同一个 ToolRunContext（工具结果跨阶段去重）。
 """
 import asyncio
+import json
 import logging
+from time import time
 from typing import List, Optional
 
 from app.config import Config
-from app.services.agent_sdk.core import AgentStage, ToolRunContext, run_stage_stream
+from app.services.agent_sdk.core import AgentStage, ToolRunContext, run_stage_with_meta
 from app.services.agent_sdk.model import build_chat_model
 from app.services.report_progress import (
     add_tool, clear_report_progress, init_report_progress, complete_report, update_stage,
@@ -209,20 +211,97 @@ def _report_system_prompt(
     )
 
 
+def _persist_stage_trace(
+    report_id: Optional[int],
+    stage_name: str,
+    stage_index: int,
+    system_prompt: str,
+    user_input: str,
+    final_output: str,
+    tool_calls: List[dict],
+    turns: int,
+    usage: dict,
+    temperature: Optional[float],
+    max_turns: Optional[int],
+    duration_ms: int,
+    fallback: bool = False,
+) -> None:
+    """将单个阶段的生成痕迹持久化到 intelligence_report_traces。
+
+    使用独立 SessionLocal（后台线程里外层 db 可能已关闭）。失败仅告警，不影响报告流程。
+    """
+    if report_id is None:
+        return
+    try:
+        from app.database import SessionLocal
+        from app.models import IntelligenceReportTrace
+        from datetime import datetime, timezone
+
+        db = SessionLocal()
+        try:
+            rec = IntelligenceReportTrace(
+                report_id=report_id,
+                stage=stage_name,
+                stage_index=stage_index,
+                system_prompt=system_prompt,
+                user_input=user_input,
+                final_output=final_output,
+                tool_calls=json.dumps(tool_calls, ensure_ascii=False),
+                turns=turns,
+                usage=json.dumps(usage, ensure_ascii=False),
+                temperature=temperature,
+                max_turns=max_turns,
+                model=Config.OPENAI_MODEL,
+                duration_ms=duration_ms,
+                fallback=fallback,
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+            db.add(rec)
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("failed to persist report trace (report_id=%s stage=%s)", report_id, stage_name)
+
+
 async def _run_stage_collect(
     stage: AgentStage, ctx: ToolRunContext, input, report_id: Optional[int], stage_index: int,
 ) -> str:
-    """流式执行单个阶段并收集进度 + 最终文本（不推送到浏览器）。"""
+    """执行单个阶段并收集进度 + 痕迹，返回最终文本。
+
+    使用非流式执行（run_stage_with_meta），以获得真实 token 用量与结构化的工具调用明细。
+    """
     if report_id is not None:
         update_stage(report_id, stage.name, stage_index)
-    final_text = ""
-    async for ev in run_stage_stream(stage, ctx, input=input):
-        kind = ev.get("kind")
-        if kind == "tool_call" and report_id is not None:
-            add_tool(report_id, ev.get("name", ""))
-        elif kind in ("stage_final", "stage_done"):
-            final_text = final_text or ev.get("text") or ""
-    return final_text
+    start = time()
+    meta = await run_stage_with_meta(stage, ctx, input=input)
+    tool_calls = meta["tool_calls"]
+    if report_id is not None:
+        for tc in tool_calls:
+            add_tool(report_id, tc.get("name", ""))
+    _truncate_tool_outputs(tool_calls, limit=2000)
+    _persist_stage_trace(
+        report_id=report_id,
+        stage_name=stage.name,
+        stage_index=stage_index,
+        system_prompt=stage.instructions,
+        user_input=input,
+        final_output=meta["final_output"],
+        tool_calls=tool_calls,
+        turns=meta["turns"],
+        usage=meta["usage"],
+        temperature=getattr(stage, "temperature", None),
+        max_turns=getattr(stage, "max_turns", None),
+        duration_ms=int((time() - start) * 1000),
+    )
+    return meta["final_output"]
+
+
+def _truncate_tool_outputs(tool_calls: List[dict], limit: int = 2000) -> None:
+    for tc in tool_calls:
+        out = tc.get("output") or ""
+        if len(out) > limit:
+            tc["output"] = out[:limit] + "…[截断]"
 
 
 async def _generate_report_async(
@@ -300,16 +379,33 @@ async def _generate_report_fallback(
     task_title: str, task_description: str,
     effective_sources: List[str], extra_prompt: str,
     github_repos: List[str], source_config: dict,
+    report_id: Optional[int] = None,
 ) -> str:
     """单次回退：先批量搜索，再让 AI 一次性生成报告。"""
     from app.services.intelligence_report import IntelligenceReportGenerator
-    # 复用旧的 single-shot 逻辑（无 agent 循环）
+    start = time()
     gen = IntelligenceReportGenerator()
-    return gen.single_shot_report_for_sdk(
+    content = gen.single_shot_report_for_sdk(
         task_title=task_title, task_description=task_description,
         effective_sources=effective_sources, extra_prompt=extra_prompt,
         github_repos=github_repos, source_config=source_config,
     )
+    _persist_stage_trace(
+        report_id=report_id,
+        stage_name="fallback",
+        stage_index=0,
+        system_prompt="",
+        user_input=f"任务主题：{task_title}\n背景：{task_description}",
+        final_output=content,
+        tool_calls=[],
+        turns=0,
+        usage={},
+        temperature=None,
+        max_turns=None,
+        duration_ms=int((time() - start) * 1000),
+        fallback=True,
+    )
+    return content
 
 
 def generate_report_sync(
@@ -363,6 +459,7 @@ def generate_report_sync(
                 task_title=task_title, task_description=task_description,
                 effective_sources=effective_sources, extra_prompt=extra_prompt,
                 github_repos=github_repos, source_config=source_config,
+                report_id=report_id,
             ))
             return {"content": content, "sources": effective_sources}
         raise

@@ -211,6 +211,44 @@ async def get_latest_daily_report(db: Session = Depends(get_db)):
     return {"report": report.to_dict(include_content=True)}
 
 
+@router.get("/reports/{report_id}/trace")
+async def get_report_trace(report_id: int):
+    """获取报告生成过程痕迹（提示词/工具调用/用量），按阶段升序。"""
+    db = SessionLocal()
+    try:
+        report = db.query(IntelligenceReport).filter(IntelligenceReport.id == report_id).first()
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        from app.models import IntelligenceReportTrace
+        traces = db.query(IntelligenceReportTrace).filter(
+            IntelligenceReportTrace.report_id == report_id,
+        ).order_by(IntelligenceReportTrace.stage_index.asc(), IntelligenceReportTrace.id.asc()).all()
+
+        total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        total_duration_ms = 0
+        trace_list = []
+        for tr in traces:
+            d = tr.to_dict()
+            u = d.get("usage") or {}
+            total_usage["input_tokens"] += u.get("input_tokens", 0) or 0
+            total_usage["output_tokens"] += u.get("output_tokens", 0) or 0
+            total_usage["total_tokens"] += u.get("total_tokens", 0) or 0
+            total_duration_ms += d.get("duration_ms") or 0
+            trace_list.append(d)
+
+        return {
+            "report_id": report_id,
+            "title": report.title,
+            "status": report.status,
+            "traces": trace_list,
+            "total_usage": total_usage,
+            "total_duration_ms": total_duration_ms,
+        }
+    finally:
+        db.close()
+
+
 @router.get("/reports/{report_id}/progress")
 async def get_report_progress(report_id: int):
     """获取报告生成进度（阶段 / 工具列表 / 百分比）。"""

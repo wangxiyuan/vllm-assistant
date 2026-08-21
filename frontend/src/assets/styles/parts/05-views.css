@@ -1450,6 +1450,98 @@
     border-radius: var(--radius-md);
     background: var(--bg-elev-1);
 }
+.trace-body {
+    max-height: 75vh;
+    overflow-y: auto;
+}
+.trace-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+.trace-stage {
+    margin-bottom: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--border, rgba(255,255,255,0.08));
+    border-radius: var(--radius-md);
+    background: var(--bg-elev-1);
+}
+.trace-stage-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    justify-content: space-between;
+}
+.trace-meta {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+}
+.trace-model {
+    color: var(--accent, #7aa2f7);
+}
+.trace-time {
+    color: var(--text-tertiary);
+    opacity: 0.85;
+}
+.trace-section {
+    margin-top: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+.trace-section summary {
+    cursor: pointer;
+    color: var(--accent, #7aa2f7);
+    margin-bottom: var(--space-1);
+}
+.trace-subhead {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-tertiary);
+    margin: var(--space-2) 0 var(--space-1);
+}
+.trace-tool {
+    margin-bottom: var(--space-2);
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elev-2);
+}
+.trace-tool-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--accent, #7aa2f7);
+    margin-bottom: var(--space-1);
+}
+.trace-tool-name.is-error {
+    color: var(--signal-red, #f7768e);
+}
+.trace-tool-detail {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+}
+.trace-tool-detail summary {
+    cursor: pointer;
+    margin: var(--space-1) 0;
+}
+.trace-pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    background: var(--bg-elev-2);
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    margin: 0;
+    max-height: 40vh;
+    overflow-y: auto;
+}
 .source-tag {
     display: inline-flex;
     padding: 1px 7px;

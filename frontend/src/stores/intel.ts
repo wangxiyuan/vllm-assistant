@@ -25,6 +25,8 @@ export const useIntelStore = defineStore('intel', () => {
   const dailyGenLoading = ref(false)
   // 报告生成进度：report_id -> 进度对象
   const reportProgress = ref<Record<number, any>>({})
+  // 报告生成痕迹：report_id -> { traces: [], total_usage, total_duration_ms }
+  const reportTrace = ref<Record<number, any>>({})
 
   async function loadReports() {
     loading.value = true
@@ -178,6 +180,17 @@ export const useIntelStore = defineStore('intel', () => {
       }
     } catch (_) {
       // 进度接口不可用/已结束则忽略
+    }
+  }
+
+  async function fetchReportTrace(reportId: number) {
+    try {
+      const data: any = await api(`/api/intelligence/reports/${reportId}/trace`, {}, { timeout: 15000 })
+      if (data && data.report_id) {
+        reportTrace.value[reportId] = data
+      }
+    } catch (_) {
+      // 无痕迹/接口异常则忽略
     }
   }
 
@@ -360,8 +373,10 @@ export const useIntelStore = defineStore('intel', () => {
   return {
     reports, loading, showModal, intelForm, genLoading, intelTasks,
     selectedReport, reportDetails, reportModalLoading, pollingTimer, reportProgress,
+    reportTrace,
     loadReports, loadIntelTasks, openModal, toggleSource, isSourceSelected,
-    generateReport, pollReportStatus, fetchReportProgress, viewReport, closeReport,
+    generateReport, pollReportStatus, fetchReportProgress, fetchReportTrace,
+    viewReport, closeReport,
     deleteReport, regenerateReport, copyReportMarkdown, triggerDailyReport,
     dailyGenLoading,
     intelSourceLabel, intelSourceClass, intelSourceStyle,

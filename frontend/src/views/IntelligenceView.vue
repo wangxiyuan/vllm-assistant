@@ -86,6 +86,55 @@ function progressPercent(report: any): number {
   if (!p || typeof p.progress !== 'number') return 0
   return Math.min(Math.round(p.progress * 100), 99)
 }
+
+const showTraceModal = ref(false)
+const traceLoaded = ref(false)
+
+function traceOf(report: any): any {
+  return report && intelStore.reportTrace[report.id]
+}
+
+function stageLabel(key: string): string {
+  const map: Record<string, string> = { search: '搜索情报', detail: '深入分析', report: '撰写报告', fallback: '单次回退' }
+  return map[key] || key
+}
+
+function fmtDuration(ms: number): string {
+  if (!ms) return '-'
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function fmtTime(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('zh-CN', { hour12: false })
+}
+
+function fmtArgs(args: string): string {
+  if (!args) return '(无)'
+  try {
+    return JSON.stringify(JSON.parse(args))
+  } catch {
+    return args
+  }
+}
+
+function failedCount(toolCalls: any[]): number {
+  return (toolCalls || []).filter(tc => tc.status === 'error').length
+}
+
+async function openTraceModal(reportId: number) {
+  showTraceModal.value = true
+  traceLoaded.value = false
+  await intelStore.fetchReportTrace(reportId)
+  traceLoaded.value = true
+}
+
+function closeTraceModal() {
+  showTraceModal.value = false
+}
 </script>
 
 <template>
@@ -229,6 +278,10 @@ function progressPercent(report: any): number {
           <div class="modal-header">
             <h3>{{ intelStore.selectedReport.title || '报告详情' }}</h3>
             <div class="drawer-actions" style="margin-left:auto;">
+              <button class="btn btn-sm" @click="openTraceModal(intelStore.selectedReport.id)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                生成过程
+              </button>
               <button class="btn btn-sm" @click="intelStore.copyReportMarkdown()">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 复制 Markdown
@@ -267,6 +320,81 @@ function progressPercent(report: any): number {
           </div>
           <div v-else class="modal-body report-content">
             <div class="pr-body" v-html="renderMarkdown('(无内容)')"></div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Trace Modal -->
+    <Teleport to="body">
+      <div v-if="showTraceModal" class="modal-backdrop" @click="closeTraceModal">
+        <div class="modal modal-xl" @click.stop>
+          <div class="modal-header">
+            <h3>生成过程追溯</h3>
+            <button class="modal-close" @click="closeTraceModal" title="关闭">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="modal-body trace-body">
+            <div v-if="!traceLoaded" class="detail-loading">加载中…</div>
+            <template v-else-if="traceOf(intelStore.selectedReport)">
+              <div v-if="!traceOf(intelStore.selectedReport).traces || !traceOf(intelStore.selectedReport).traces.length" class="empty-state">
+                <p>本次生成无过程记录（旧报告可能不含痕迹）。</p>
+              </div>
+              <div v-else>
+                <div class="trace-summary">
+                  <span class="badge">共 {{ traceOf(intelStore.selectedReport).traces.length }} 阶段</span>
+                  <span class="badge">Tokens: {{ traceOf(intelStore.selectedReport).total_usage?.total_tokens ?? 0 }}</span>
+                  <span class="badge">耗时 {{ fmtDuration(traceOf(intelStore.selectedReport).total_duration_ms) }}</span>
+                </div>
+                <div v-for="tr in traceOf(intelStore.selectedReport).traces" :key="tr.id" class="trace-stage">
+                  <div class="trace-stage-head">
+                    <span class="badge badge-info">{{ stageLabel(tr.stage) }}</span>
+                    <span v-if="tr.fallback" class="badge" style="background:var(--signal-yellow);color:#000;">回退</span>
+                    <span class="trace-meta">
+                      <span v-if="tr.turns">工具 {{ tr.turns }} 次</span>
+                      <span v-if="tr.usage?.total_tokens">Tokens: {{ tr.usage.total_tokens }}</span>
+                      <span v-if="tr.usage?.input_tokens || tr.usage?.output_tokens">(in {{ tr.usage.input_tokens }} / out {{ tr.usage.output_tokens }})</span>
+                      <span>耗时 {{ fmtDuration(tr.duration_ms) }}</span>
+                      <span v-if="tr.model" class="trace-model">{{ tr.model }}</span>
+                      <span v-if="tr.temperature != null">temp {{ tr.temperature }}</span>
+                      <span v-if="tr.max_turns">max_turns {{ tr.max_turns }}</span>
+                      <span v-if="fmtTime(tr.created_at)" class="trace-time">{{ fmtTime(tr.created_at) }}</span>
+                    </span>
+                  </div>
+
+                  <details class="trace-section" v-if="tr.system_prompt">
+                    <summary>系统提示词</summary>
+                    <pre class="trace-pre">{{ tr.system_prompt }}</pre>
+                  </details>
+                  <details class="trace-section" v-if="tr.user_input">
+                    <summary>阶段输入</summary>
+                    <pre class="trace-pre">{{ tr.user_input }}</pre>
+                  </details>
+
+                  <div v-if="tr.tool_calls && tr.tool_calls.length" class="trace-section">
+                    <div class="trace-subhead">工具调用（{{ tr.tool_calls.length }} 次<template v-if="failedCount(tr.tool_calls)">，失败 {{ failedCount(tr.tool_calls) }} 次</template>）</div>
+                    <div v-for="(tc, i) in tr.tool_calls" :key="i" class="trace-tool">
+                      <div class="trace-tool-name" :class="{ 'is-error': tc.status === 'error' }">{{ tc.name }}<template v-if="tc.status === 'error'"> ⚠</template></div>
+                      <details class="trace-tool-detail">
+                        <summary>参数</summary>
+                        <pre class="trace-pre">{{ fmtArgs(tc.arguments) }}</pre>
+                      </details>
+                      <details class="trace-tool-detail" v-if="tc.output">
+                        <summary>结果</summary>
+                        <pre class="trace-pre">{{ tc.output }}</pre>
+                      </details>
+                    </div>
+                  </div>
+
+                  <details class="trace-section" v-if="tr.final_output">
+                    <summary>阶段输出</summary>
+                    <pre class="trace-pre">{{ tr.final_output }}</pre>
+                  </details>
+                </div>
+              </div>
+            </template>
+            <div v-else class="empty-state"><p>加载失败或无记录。</p></div>
           </div>
         </div>
       </div>

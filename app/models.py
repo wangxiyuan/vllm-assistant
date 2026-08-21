@@ -386,6 +386,55 @@ class IntelligenceReport(Base):
         return d
 
 
+class IntelligenceReportTrace(Base):
+    """报告生成过程痕迹（每阶段一条，含提示词/工具调用/用量，供追溯）"""
+
+    __tablename__ = "intelligence_report_traces"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    report_id = Column(Integer, ForeignKey("intelligence_reports.id"), nullable=False, index=True)
+
+    # 阶段信息
+    stage = Column(String(20), nullable=False)  # search / detail / report / fallback
+    stage_index = Column(Integer, default=0)
+    system_prompt = Column(Text)  # 该阶段完整 instructions
+    user_input = Column(Text)     # 阶段用户输入（可能含上一阶段结果）
+
+    # 执行结果
+    final_output = Column(Text)
+    tool_calls = Column(Text)     # JSON: [{name, arguments, output}]
+    turns = Column(Integer, default=0)
+    usage = Column(Text)          # JSON: {input_tokens, output_tokens, total_tokens}
+
+    # 运行时元信息
+    temperature = Column(Float)
+    max_turns = Column(Integer)
+    model = Column(String(100))
+    duration_ms = Column(Integer)
+    fallback = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "report_id": self.report_id,
+            "stage": self.stage,
+            "stage_index": self.stage_index or 0,
+            "system_prompt": self.system_prompt or "",
+            "user_input": self.user_input or "",
+            "final_output": self.final_output or "",
+            "tool_calls": json.loads(self.tool_calls) if self.tool_calls else [],
+            "turns": self.turns or 0,
+            "usage": json.loads(self.usage) if self.usage else {},
+            "temperature": self.temperature,
+            "max_turns": self.max_turns,
+            "model": self.model or "",
+            "duration_ms": self.duration_ms or 0,
+            "fallback": bool(self.fallback),
+            "created_at": _iso_utc(self.created_at),
+        }
+
+
 # ======================================================================
 # 学习文章管理系统（DESIGN-ARTICLES.md）
 # ======================================================================
