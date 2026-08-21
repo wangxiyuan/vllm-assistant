@@ -317,8 +317,9 @@ async def _generate_report_async(
     try:
         ctx = ToolRunContext()
 
-        search_turns = max(len(github_repos), 3)
-        detail_turns = max(Config.AGENT_MAX_TURNS - search_turns - 1, 3)
+        # 搜索阶段：独立轮次预算（不再由仓库数决定，之前 "4 轮" 即仓库数过小所致）
+        search_turns = Config.AGENT_SEARCH_TURNS
+        detail_turns = max(Config.AGENT_MAX_TURNS - search_turns, 3)
 
         # 阶段1：搜索
         stage1 = AgentStage(

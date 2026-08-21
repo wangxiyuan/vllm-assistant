@@ -77,15 +77,25 @@ async def run_stage_with_meta(stage: AgentStage, ctx: ToolRunContext, input) -> 
 
     之所以非流式：本项目的 OpenAI 兼容端口仅在非流式响应中返回 token 用量，
     流式响应（stream=True）每 chunk 的 usage 为 None，无法拿到真实 Token 数。
-    返回 dict：final_output / tool_calls[{name, arguments, call_id, output}] / usage / turns。
+    返回 dict：final_output / tool_calls[{name, arguments, call_id, output, status}] / usage / turns。
+
+    max_turns 耗尽时 SDK 会抛 MaxTurnsExceeded；通过 error_handlers 捕获并复用已生成的
+    raw_responses，使 final_output / usage / 工具调用仍可回溯，而非整个阶段失败。
     """
     _ensure_tracing_disabled()
     agent = create_agent(stage, ctx)
+
+    def _max_turns_handler(hin):
+        # 取最近一条文本消息作为最终输出，保证在 max_turns 内已生成的内容不丢失
+        text = _last_text_from_run_data(hin.run_data)
+        return {"final_output": text or "（已达最大轮次，未生成完整结果）", "include_in_history": True}
+
     result = await Runner.run(
         agent,
         input=input,
         max_turns=stage.max_turns,
         run_config=_run_config(),
+        error_handlers={"max_turns": _max_turns_handler},
     )
     tool_calls: List[dict] = []
     for resp in getattr(result, "raw_responses", None) or []:
@@ -134,6 +144,36 @@ def _tool_status(output: str) -> str:
     if isinstance(obj, dict) and obj.get("error"):
         return "error"
     return "success"
+
+
+def _last_text_from_run_data(run_data) -> str:
+    """从 max_turns 的 RunErrorData 中提取最后一条模型文本消息。"""
+    try:
+        items = getattr(run_data, "new_items", None) or []
+        # 取最后一个 message_output_item 的文本
+        for it in reversed(items):
+            if getattr(it, "type", None) == "message_output_item":
+                try:
+                    from agents.items import ItemHelpers
+                    return ItemHelpers.text_message_output(it) or ""
+                except Exception:
+                    pass
+        # 回退：遍历 raw_responses 输出里的文本
+        for resp in reversed(getattr(run_data, "raw_responses", None) or []):
+            parts = []
+            for item in getattr(resp, "output", None) or []:
+                if getattr(item, "type", None) == "message":
+                    ints = getattr(item, "content", None) or []
+                    if isinstance(ints, list):
+                        for c in ints:
+                            t = getattr(c, "text", None)
+                            if t:
+                                parts.append(t)
+            if parts:
+                return "".join(parts)
+    except Exception:
+        logger.debug("failed to extract last text from run_data", exc_info=True)
+    return ""
 
 
 async def run_stage_stream(stage: AgentStage, ctx: ToolRunContext, input) -> AsyncIterator[dict]:

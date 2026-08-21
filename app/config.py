@@ -22,7 +22,10 @@ class Config:
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1048576"))
 
     # ===== Agent (OpenAI Agents SDK) 配置 =====
-    AGENT_MAX_TURNS: int = int(os.getenv("AGENT_MAX_TURNS", "30"))
+    # 对接自建 LLM（上下文 1M）无成本，放宽轮次预算，避免深度调研因轮次上限中断
+    AGENT_MAX_TURNS: int = int(os.getenv("AGENT_MAX_TURNS", "100"))
+    # 报告生成：搜索阶段独立轮次预算（之前误把仓库数当轮次，导致每阶段仅 3-4 轮）
+    AGENT_SEARCH_TURNS: int = int(os.getenv("AGENT_SEARCH_TURNS", "20"))
     AGENT_TOOL_OUTPUT_LIMIT: int = int(os.getenv("AGENT_TOOL_OUTPUT_LIMIT", "30000"))
 
     # Server
