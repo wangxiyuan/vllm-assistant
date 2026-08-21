@@ -169,7 +169,7 @@ async def handle_extract_web_content(args: dict) -> dict:
     tavily_url = (Config.TAVILY_API_URL or DEFAULT_TAVILY_URL).rstrip("/")
     tavily_key = Config.TAVILY_API_KEY or ""
 
-    payload = {"url": url}
+    payload = {"urls": [url]}
     headers = {"Content-Type": "application/json"}
     if tavily_key:
         headers["Authorization"] = f"Bearer {tavily_key}"
@@ -188,14 +188,24 @@ async def handle_extract_web_content(args: dict) -> dict:
     except Exception as e:
         return {"error": f"content extraction failed: {e}"}
 
-    # 提取清洁文本内容
-    raw_content = data.get("content", "") or data.get("raw_content", "")
-    if raw_content:
-        return {
-            "url": url,
-            "content": raw_content[:8000],
-            "truncated": len(raw_content) > 8000,
-        }
+    # Tavily /extract 成功响应形如 {"results": [{"url","raw_content","content",...}], "failed_results":[...]}
+    results = data.get("results") or []
+    if results:
+        item = results[0]
+        raw_content = item.get("raw_content") or item.get("content") or ""
+        if raw_content:
+            return {
+                "url": item.get("url") or url,
+                "title": item.get("title") or "",
+                "content": raw_content[:8000],
+                "truncated": len(raw_content) > 8000,
+            }
+
+    # 失败结果：能拿到时如实返回原因
+    failed = data.get("failed_results") or []
+    if failed:
+        err = failed[0].get("error") or "页面提取失败"
+        return {"url": url, "content": "", "error": str(err)}
 
     return {"url": url, "content": "", "note": "未提取到内容"}
 
