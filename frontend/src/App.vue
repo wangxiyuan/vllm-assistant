@@ -8,12 +8,14 @@ import { useReposStore } from '@/stores/repos'
 import { useSlackStore } from '@/stores/slack'
 import type { SlackChannel } from '@/stores/slack'
 import { useWatchlistStore } from '@/stores/watchlist'
+import { useRulesStore } from '@/stores/rules'
 import { useKeyboard } from '@/composables/useKeyboard'
 import AuthScreen from '@/components/auth/AuthScreen.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import ToastContainer from '@/components/common/ToastContainer.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import LoadingBar from '@/components/common/LoadingBar.vue'
+import RulesManagerModal from '@/components/common/RulesManagerModal.vue'
 
 const authStore = useAuthStore()
 const appStore = useAppStore()
@@ -21,6 +23,7 @@ const usersStore = useUsersStore()
 const reposStore = useReposStore()
 const slackStore = useSlackStore()
 const watchlistStore = useWatchlistStore()
+const rulesStore = useRulesStore()
 const router = useRouter()
 
 useKeyboard()
@@ -145,14 +148,14 @@ async function startApp() {
 }
 
 // Watch for auth state changes
-watch(() => authStore.authenticated, async (val) => {
-  if (val) {
-    await startApp()
-    if (router.currentRoute.value.path === '/' || router.currentRoute.value.path === '/login') {
-      router.push({ name: 'community' })
+  watch(() => authStore.authenticated, async (val) => {
+    if (val) {
+      await startApp()
+      if (router.currentRoute.value.path === '/' || router.currentRoute.value.path === '/login') {
+        router.push({ name: 'overview' })
+      }
     }
-  }
-})
+  })
 </script>
 
 <template>
@@ -492,6 +495,9 @@ watch(() => authStore.authenticated, async (val) => {
       </div>
     </div>
   </Teleport>
+
+  <!-- AI Rules Manager Modal -->
+  <RulesManagerModal />
 </template>
 
 <style>

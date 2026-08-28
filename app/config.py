@@ -42,6 +42,14 @@ class Config:
     POLLING_INTERVAL: int = int(os.getenv("POLLING_INTERVAL", "10"))
     GITHUB_SYNC_ENABLED: bool = os.getenv("GITHUB_SYNC_ENABLED", "true").lower() in ("1", "true", "yes")
 
+    # ===== AI 筛选规则（总览页）=====
+    # 分诊定时任务间隔（分钟）；仅当有新增条目时才会实际调用 LLM
+    AI_TRIAGE_INTERVAL: int = int(os.getenv("AI_TRIAGE_INTERVAL", "30"))
+    # 单条规则单轮分诊的候选条目上限
+    AI_TRIAGE_CANDIDATE_LIMIT: int = int(os.getenv("AI_TRIAGE_CANDIDATE_LIMIT", "100"))
+    # 手动"重新筛选"时回看的天数窗口
+    AI_TRIAGE_RERUN_WINDOW_DAYS: int = int(os.getenv("AI_TRIAGE_RERUN_WINDOW_DAYS", "7"))
+
     # Tavily 兼容 Web Search API（用于 web 搜索工具）
     # 默认使用公益服务 https://tavily.claude-code-best.win，无需 API Key
     # 也可配置为官方 Tavily 或其他兼容服务

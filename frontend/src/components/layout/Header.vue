@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 
@@ -6,9 +7,7 @@ const route = useRoute()
 const appStore = useAppStore()
 
 const viewTitles: Record<string, string> = {
-  'community': '社区动态',
-  'watchlist': '特别关注',
-  'pr-center': '贡献面板',
+  'overview': '总览',
   'personal-todo': '任务面板',
   'intelligence': '洞察面板',
   'articles': '技术Blog',
@@ -17,16 +16,14 @@ const viewTitles: Record<string, string> = {
 }
 
 const viewPlaceholders: Record<string, string> = {
-  'community': '搜索 Issues 和 PRs…',
-  'watchlist': '搜索关注项…',
-  'pr-center': '搜索你的 PR 和 Issue…',
+  'overview': '搜索 Issues 和 PRs…',
 }
 
-const searchSupportedRoutes = new Set(['community', 'watchlist', 'pr-center'])
+const searchSupportedRoutes = new Set(['overview'])
 
-const currentTitle = viewTitles[route.name as string] || ''
-const searchPlaceholder = viewPlaceholders[route.name as string] || '搜索…'
-const showSearch = searchSupportedRoutes.has(route.name as string)
+const currentTitle = computed(() => viewTitles[route.name as string] || '')
+const searchPlaceholder = computed(() => viewPlaceholders[route.name as string] || '搜索…')
+const showSearch = computed(() => searchSupportedRoutes.has(route.name as string))
 </script>
 
 <template>

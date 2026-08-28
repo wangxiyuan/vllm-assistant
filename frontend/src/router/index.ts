@@ -4,26 +4,18 @@ import type { RouteRecordRaw } from 'vue-router'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/community',
+    redirect: '/overview',
   },
   {
-    path: '/community',
-    name: 'community',
-    component: () => import('@/views/CommunityView.vue'),
-    meta: { title: '社区动态' },
+    path: '/overview',
+    name: 'overview',
+    component: () => import('@/views/OverviewView.vue'),
+    meta: { title: '总览' },
   },
-  {
-    path: '/watchlist',
-    name: 'watchlist',
-    component: () => import('@/views/WatchlistView.vue'),
-    meta: { title: '特别关注' },
-  },
-  {
-    path: '/pr-center',
-    name: 'pr-center',
-    component: () => import('@/views/PRCenterView.vue'),
-    meta: { title: '贡献面板' },
-  },
+  // 旧页面路由重定向（三页已合并为总览页）
+  { path: '/community', redirect: '/overview' },
+  { path: '/watchlist', redirect: '/overview' },
+  { path: '/pr-center', redirect: '/overview' },
   {
     path: '/personal-todo',
     name: 'personal-todo',

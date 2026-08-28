@@ -28,16 +28,14 @@ export function useKeyboard() {
       return
     }
 
-    // Number keys 1-8: navigate to views (matches sidebar kbd badges)
+    // Number keys 1-6: navigate to views (matches sidebar kbd badges)
     const viewByKey: Record<string, string> = {
-      '1': 'community',
-      '2': 'watchlist',
-      '3': 'pr-center',
-      '4': 'personal-todo',
-      '5': 'intelligence',
-      '6': 'articles',
-      '7': 'anatomy',
-      '8': 'ai-agent',
+      '1': 'overview',
+      '2': 'personal-todo',
+      '3': 'intelligence',
+      '4': 'articles',
+      '5': 'anatomy',
+      '6': 'ai-agent',
     }
     const routeName = viewByKey[e.key]
     if (routeName) {

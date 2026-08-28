@@ -19,7 +19,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import Config
 from app.database import SessionLocal
-from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask, RepoCache, SlackConfig, LocalCodeCache
+from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask, RepoCache, SlackConfig, LocalCodeCache, Watchlist
 from app.services.github_client import GitHubClient, DEFAULT_PER_PAGE
 from app.services.area_mapper import AreaMapper
 
@@ -809,10 +809,68 @@ def _refresh_personal_task_refs():
         db.commit()
         if updated:
             logger.info(f"Refreshed state for {updated} personal tasks' refs (including subtasks)")
+
+        # —— watchlist 状态刷新（总览页"我的关注"卡片的状态来源）——
+        # watchlist.repo 可能存短名（历史数据）或全名，先经 short->full 映射兜底
+        repo_map = {}
+        try:
+            for rc in db.query(RepoCache).filter(RepoCache.status == "active").all():
+                repo_map[rc.repo] = _clone_url_to_full_repo(rc.clone_url)
+        except Exception:
+            pass
+        wl_updated = _refresh_watchlist_states(db, headers, repo_map)
+        db.commit()
+        if wl_updated:
+            logger.info(f"Refreshed {wl_updated} watchlist item states")
     except Exception:
         logger.exception("Failed to refresh personal task refs")
     finally:
         db.close()
+
+
+def _refresh_watchlist_states(db, headers: dict, repo_map: dict) -> int:
+    """刷新 watchlist 非终态条目的 GitHub 实时状态。
+
+    状态发生跃迁（open -> closed/merged 等）时同步写 last_state_change_at，
+    供总览页"我的关注"卡片展示状态变化提示。
+    """
+    import requests
+
+    from sqlalchemy import or_
+
+    rows = db.query(Watchlist).filter(
+        or_(Watchlist.state == "open", Watchlist.state.is_(None))
+    ).all()
+    if not rows:
+        return 0
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    updated = 0
+    for row in rows:
+        # 短名优先映射为全名；本身已是全名（owner/repo）时直接使用
+        repo_path = repo_map.get(row.repo or "", "") or row.repo or ""
+        if not repo_path:
+            continue
+        if row.item_type == "pr":
+            url = f"https://api.github.com/repos/{repo_path}/pulls/{row.number}"
+        else:
+            url = f"https://api.github.com/repos/{repo_path}/issues/{row.number}"
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            state = data.get("state", "")
+            if row.item_type == "pr" and state == "closed" and data.get("merged", False):
+                state = "merged"
+            if not state or state == (row.state or ""):
+                continue
+            row.state = state
+            row.last_state_change_at = now
+            updated += 1
+        except Exception:
+            continue
+    return updated
 
 
 def generate_daily_vllm_report():
@@ -995,6 +1053,24 @@ def collect_slack_messages():
             logger.warning("Slack 凭证已过期，请通过前端配置页面重新设置 token 和 cookie")
 
 
+def run_ai_triage_job():
+    """AI 筛选规则定时分诊（总览页规则 tab 的数据源）"""
+    job_id = "ai_triage"
+    if job_id in _running_jobs:
+        logger.debug(f"{job_id} already running, skipping")
+        return
+    _running_jobs.add(job_id)
+    try:
+        from app.services.ai_triage import run_all_rules
+        results = run_all_rules()
+        if any(r.get("candidates") for r in results.values() if isinstance(r, dict)):
+            logger.info(f"AI triage round done: {results}")
+    except Exception:
+        logger.exception("AI triage job failed")
+    finally:
+        _running_jobs.discard(job_id)
+
+
 def start_scheduler():
     """启动定时调度器
 
@@ -1082,6 +1158,15 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # AI 筛选规则分诊（总览页规则 tab；仅有新增条目时才会实际调用 LLM）
+    scheduler.add_job(
+        run_ai_triage_job,
+        trigger=IntervalTrigger(minutes=Config.AI_TRIAGE_INTERVAL),
+        id="ai_triage",
+        name="AI Triage Rules",
+        replace_existing=True,
+    )
+
     # vLLM 每日社区报告（每天早上 8 点北京时间）
     scheduler.add_job(
         generate_daily_vllm_report,
@@ -1124,6 +1209,7 @@ def start_scheduler():
             if has_repos:
                 sync_all_repos_job()
             _refresh_personal_task_refs()
+            run_ai_triage_job()
         except Exception:
             logger.exception("Initial sync failed (will retry on schedule)")
     threading.Thread(target=_initial_sync, daemon=True, name="initial-sync").start()

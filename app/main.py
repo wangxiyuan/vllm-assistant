@@ -223,6 +223,7 @@ from app.api.repos import router as repos_router
 from app.api.ai_agent import router as ai_agent_router
 from app.api.slack import router as slack_router
 from app.api.comments import router as comments_router
+from app.api.ai_rules import router as ai_rules_router
 
 app.include_router(community_router, prefix="/api/community", tags=["Community Pulse"])
 app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command Center"])
@@ -238,6 +239,7 @@ app.include_router(repos_router, prefix="/api/repos", tags=["Repos"])
 app.include_router(ai_agent_router, prefix="/api/ai-agent", tags=["AI Agent"])
 app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])
 app.include_router(comments_router, prefix="/api/comments", tags=["Comments"])
+app.include_router(ai_rules_router, prefix="/api/rules", tags=["AI Rules"])
 
 
 # 静态文件

@@ -190,6 +190,9 @@ class Watchlist(Base):
     note = Column(Text)  # 用户备注，可选
     assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 责任人
     added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    # 最近一次状态跃迁时间（open -> closed/merged 等），由定时刷新任务维护；
+    # 前端据此在总览页展示"状态变化"提示
+    last_state_change_at = Column(DateTime)
 
     __table_args__ = (
         UniqueConstraint("repo", "number", "item_type", name="uq_watchlist_repo_number_type"),
@@ -209,6 +212,7 @@ class Watchlist(Base):
             "note": self.note or "",
             "assignee_id": self.assignee_id,
             "added_at": _iso_utc(self.added_at),
+            "last_state_change_at": _iso_utc(self.last_state_change_at),
         }
 
 
@@ -858,3 +862,72 @@ class SlackConfig(Base):
             "updated_at": _iso_utc(self.updated_at),
             "created_at": _iso_utc(self.created_at),
         }
+
+
+# ======================================================================
+# AI 筛选规则（总览页）：每条规则 = 一段自然语言筛选要求，
+# 定时对社区条目（items）做增量分诊，命中结果在总览页按规则分 tab 展示
+# ======================================================================
+
+
+class AIRule(Base):
+    """AI 筛选规则（每条 enabled 规则在总览页呈现为一个 tab）"""
+
+    __tablename__ = "ai_triage_rules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)  # tab 显示名
+    prompt = Column(Text, nullable=False)  # 自然语言筛选要求
+    item_type = Column(String(10), nullable=False, default="both")  # 'pr' / 'issue' / 'both'
+    repos = Column(Text)  # JSON array，完整仓库名（与 items.repo 同格式），空 = 全部
+    areas = Column(Text)  # JSON array，领域 ID（areas.id），空 = 全部
+    enabled = Column(Boolean, nullable=False, default=True)
+    sort_order = Column(Integer, default=0)  # tab 排序
+    last_triage_at = Column(DateTime)  # 增量水位线：只分诊 items.last_sync 晚于该时间的条目
+    last_run_at = Column(DateTime)  # 最近一次执行时间（含无候选的空跑）
+    last_error = Column(Text)  # 最近一次失败原因，成功后清空
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                        onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self, match_count: Optional[int] = None) -> Dict[str, Any]:
+        d = {
+            "id": self.id,
+            "name": self.name,
+            "prompt": self.prompt,
+            "item_type": self.item_type or "both",
+            "repos": json.loads(self.repos) if self.repos else [],
+            "areas": json.loads(self.areas) if self.areas else [],
+            "enabled": bool(self.enabled),
+            "sort_order": self.sort_order or 0,
+            "last_triage_at": _iso_utc(self.last_triage_at),
+            "last_run_at": _iso_utc(self.last_run_at),
+            "last_error": self.last_error,
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }
+        if match_count is not None:
+            d["match_count"] = match_count
+        return d
+
+
+class AIRuleMatch(Base):
+    """AI 筛选规则命中结果
+
+    存编号引用而非 items.id 外键（items 会被清理任务删除），
+    展示时按 (repo, item_type, number) join items。
+    """
+
+    __tablename__ = "ai_triage_matches"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rule_id = Column(Integer, ForeignKey("ai_triage_rules.id", ondelete="CASCADE"), nullable=False, index=True)
+    repo = Column(String(100), nullable=False)
+    item_type = Column(String(10), nullable=False)  # 'pr' / 'issue'
+    number = Column(Integer, nullable=False)
+    reason = Column(Text)  # AI 给出的一句话命中理由
+    matched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    __table_args__ = (
+        UniqueConstraint("rule_id", "repo", "item_type", "number", name="uq_ai_rule_match"),
+    )

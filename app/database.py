@@ -519,6 +519,25 @@ def _ensure_ai_chat_messages_proc_columns():
                     logger.warning(f"Failed to add column {col_name} to ai_chat_messages: {e}")
 
 
+def _ensure_watchlist_state_change_column():
+    """确保 watchlist 表包含 last_state_change_at 列（向后兼容迁移）"""
+    from sqlalchemy import inspect, DDL
+
+    with engine.connect() as conn:
+        try:
+            existing_cols = {c["name"] for c in inspect(conn).get_columns("watchlist")}
+        except Exception:
+            return
+
+        if "last_state_change_at" not in existing_cols:
+            try:
+                conn.execute(DDL("ALTER TABLE watchlist ADD COLUMN last_state_change_at TIMESTAMP"))
+                conn.commit()
+                logger.info("Added last_state_change_at column to watchlist table")
+            except Exception as e:
+                logger.warning(f"Failed to add last_state_change_at column to watchlist: {e}")
+
+
 def _cleanup_obsolete_schema():
     """清理已废弃的表和字段（dedup_check_result, task_dedup_cache）"""
     from sqlalchemy import inspect, DDL, text
@@ -591,6 +610,7 @@ _ensure_anatomy_schema()
 _ensure_intelligence_reports_category()
 _ensure_intelligence_report_traces()
 _ensure_ai_chat_messages_proc_columns()
+_ensure_watchlist_state_change_column()
 _cleanup_obsolete_schema()
 # 重建表会丢失索引，迁移后重新补建
 _ensure_indexes()
