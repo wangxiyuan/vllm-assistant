@@ -185,7 +185,7 @@ function toggleAll() {
 }
 .ps-toggle-arrow {
   display: inline-block;
-  font-size: 9px;
+  font-size: 15px;
   color: var(--amber);
   transition: transform var(--t-base) var(--ease-out);
 }

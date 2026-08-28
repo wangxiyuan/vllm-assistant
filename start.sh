@@ -128,8 +128,12 @@ echo ""
 # 构建前端（Vue 3 SPA）
 print_info "构建前端..."
 cd frontend
-print_info "安装前端依赖..."
-npm install
+if [ -d "node_modules" ] && [ -f "package-lock.json" ]; then
+    print_info "node_modules 已存在，跳过依赖安装..."
+else
+    print_info "安装前端依赖..."
+    npm install
+fi
 npm run build && {
     print_success "前端构建成功"
 } || {

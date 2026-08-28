@@ -426,6 +426,42 @@ def _ensure_slack_configs_schema():
                     logger.warning(f"Failed to add column {col_name} to slack_configs: {e}")
 
 
+def _ensure_anatomy_schema():
+    """确保模型拆解表（building_block / model_assembly）包含 config 列（向后兼容迁移）
+
+    config 列是新版本为了在 YAML 中携带用户提供的模型 config、并解析 `${config.x}`
+    表达式而新增的。老库若已存在这两张表，会被 create_all 跳过（不改已有表），
+    导致写入时报 “no column named config”，故此处幂等补列。
+    """
+    from sqlalchemy import inspect, DDL
+
+    # 各表需要补的列：{列名: DDL}
+    add_cols = {
+        "building_block": {
+            "config": "ALTER TABLE building_block ADD COLUMN config TEXT",
+            "formula": "ALTER TABLE building_block ADD COLUMN formula TEXT",
+        },
+        "model_assembly": {
+            "config": "ALTER TABLE model_assembly ADD COLUMN config TEXT",
+        },
+    }
+    with engine.connect() as conn:
+        for table, cols in add_cols.items():
+            try:
+                existing_cols = {c["name"] for c in inspect(conn).get_columns(table)}
+            except Exception:
+                continue  # 表不存在，create_all 会处理
+            for col_name, ddl in cols.items():
+                if col_name in existing_cols:
+                    continue
+                try:
+                    conn.execute(DDL(ddl))
+                    conn.commit()
+                    logger.info(f"已为 {table} 添加 {col_name} 列")
+                except Exception as e:
+                    logger.warning(f"Failed to add {col_name} column to {table}: {e}")
+
+
 def _ensure_intelligence_reports_category():
     """确保 intelligence_reports 表包含 category 列（向后兼容迁移）"""
     from sqlalchemy import inspect, DDL
@@ -551,6 +587,7 @@ _ensure_items_repo_column()
 _ensure_watchlist_repo_column()
 _ensure_my_prs_repo_column()
 _ensure_slack_configs_schema()
+_ensure_anatomy_schema()
 _ensure_intelligence_reports_category()
 _ensure_intelligence_report_traces()
 _ensure_ai_chat_messages_proc_columns()

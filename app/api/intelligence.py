@@ -300,8 +300,12 @@ async def delete_report(report_id: int, db: Session = Depends(get_db)):
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
+    from app.models import Comment, IntelligenceReportTrace
+    db.query(IntelligenceReportTrace).filter(
+        IntelligenceReportTrace.report_id == report_id
+    ).delete()
+
     from app.services.memory_service import MemoryService
-    from app.models import Comment
     mem = MemoryService()
     mem.forget_by_source_ref_prefix(f"intelligence_report#{report_id}", hard_delete=True)
 

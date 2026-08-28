@@ -119,11 +119,11 @@ export function useKeyboard() {
     if (watchlistStore.showAddModal) { watchlistStore.closeAddModal(); return }
     if (watchlistStore.showEditModal) { watchlistStore.closeEditModal(); return }
     if (usersStore.showUserManager) { usersStore.closeManager(); return }
-    if (anatomyStore.showOperatorEditor) { anatomyStore.closeOperatorEditor(); return }
-    if (anatomyStore.showModelEditor) { anatomyStore.closeModelEditor(); return }
-    if (anatomyStore.showCategoryManager) { anatomyStore.showCategoryManager = false; return }
-    if (anatomyStore.showOperatorDetail) { anatomyStore.closeOperatorDetail(); return }
-    if (anatomyStore.showModelDetail) { anatomyStore.closeModelDetail(); return }
+    if (anatomyStore.showBlockEditor) { anatomyStore.closeBlockEditor(); return }
+    if (anatomyStore.showAssemblyEditor) { anatomyStore.closeAssemblyEditor(); return }
+    if (anatomyStore.showYAMLImport) { anatomyStore.closeYAMLImport(); return }
+    if (anatomyStore.showBlockDetail) { anatomyStore.closeBlockDetail(); return }
+    if (anatomyStore.showAssemblyDetail) { anatomyStore.closeAssemblyDetail(); return }
     // 10. Mobile sidebar
     if (appStore.mobileMenuOpen) { appStore.mobileMenuOpen = false }
   }

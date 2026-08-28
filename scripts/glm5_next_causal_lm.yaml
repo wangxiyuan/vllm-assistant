@@ -1,0 +1,1377 @@
+# =============================================================================
+# GLM-5.3-Flash (Glm5NextForCausalLM) — vLLM 文本主干模型拆解积木 YAML
+# 唯一数据源。用于 vllm-assistant「模型拆解 / 搭积木」功能导入、校验与渲染。
+# 依据 vLLM 已合入的 GLM5Next 插件实现（vllm/models/glm5next/nvidia/）逐行核对。
+#
+# 文件说明：
+#   单个顶层列表，成员三种 kind：
+#     atomic    —— 不可再分的基础积木（对应单个 vLLM PluggableLayer / CustomOp）
+#     composite —— 由若干子积木通过端口连接组合而成
+#     assembly  —— 顶层模型：用 loop / condition 组织积木实例
+#
+# 术语约定：
+#   - params_schema.properties.<name>.source: 该参数运行期取值来源，
+#     形如 config.xxx（读 Glm5NextTextConfig）。
+#   - port_bind.<name>: 组装时对子积木参数的绑定/覆写，支持 ${...} 展开为
+#     config 引用或算术表达式，由 shape_engine 求值。
+#   - condition: 布尔表达式，决定子积木是否参与（per-layer MLA/KDA、dense/MoE）。
+#   - edges[i].from_segment: 组合积木对多列合并投影输出做 split 的段名（见 segments）。
+#   - ports: 端口 + 形状。恒定形状之外用符号（H/V/proj 等）由 shape_engine 绑定求值。
+#   - file / weights / ops: 平铺的实现来源字段（对应 vLLM 源码路径 / 权重映射 / 内核列表）。
+#   - formula: 该算子的数学计算公式（多行，可含 unicodede 符号，仅展示）。
+#
+# 模型层级与数据流（已核对 vLLM 源码）：
+#   Glm5NextForCausalLM ─┬─ model: Glm5NextModel ─ embed_tokens(VocabParallelEmbedding)
+#                        │                       ├─ layers[45] = Glm5NextDecoderLayer[]
+#                        │                       └─ norm(RMSNorm)
+#                        ├─ lm_head: ParallelLMHead
+#                        └─ logits_processor: LogitsProcessor(vocab, scale=1.0)
+#
+#   Glm5NextDecoderLayer:
+#       input_layernorm(RMSNorm)
+#       → self_attn: 若 layer_types[i]=='linear_attention' 用 Glm5NextLinearAttention(KDA)
+#                    否则用 Glm5NextMLAAttention(DSA/MLA)
+#       → post_attention_layernorm(RMSNorm)
+#       → mlp: mlp_layer_types[i]=='sparse' 且 is_moe 用 Glm5NextMoE，否则 Glm5NextMLP
+#       (+ 可选 MHC 多残差流)
+#
+#   Glm5NextMLAAttention（vLLM MLAModules 封装）：
+#       fused_qkv_a_proj → split[q_c, kv_lora]
+#       q_c -> q_a_layernorm -> q_b_proj -> q ；kv_lora -> split[kv_c,k_pe] -> kv_a_layernorm -> kv_b_proj
+#       indexer(DSV3,可选,index_topk!=None) + rotary(可选,qk_rope>0) → MLAAttention → o_proj
+#   Glm5NextLinearAttention（KDA,Gated-DeltaNet）：
+#       in_proj_qkvbfg_a(六路 q,k,v,b,f_a,g_a)
+#       q/k/v 各过 causal conv1d；f_a->f_b_proj, g_a->g_b_proj
+#       A_log, dt_bias(时变) → GatedDeltaNet 核 → o_norm(FusedRMSNormGated) → o_proj
+#
+# GLM-5.3-Flash config 实值（Glm5NextTextConfig，注意存查双方字段名归一化）：
+#   hidden_size=4096 num_hidden_layers=45 num_attention_heads=64
+#   num_key_value_heads=64 head_dim=0(未直接用作 MLA dim)
+#   vocab_size=154880 intermediate_size=12288 moe_intermediate_size=2048
+#   n_routed_experts=288 n_shared_experts=1 num_experts_per_token=8
+#   n_group=1 topk_group=1 renormalize=moe_renormalize(norm_topk_prob=True) routed_scaling_factor=2.5
+#   q_lora_rank=1536 kv_lora_rank=512 qk_nope_head_dim=256 qk_head_dim=256
+#   qk_rope_head_dim=0 v_head_dim=256 mla_nope=True(检查点 mla_use_nope)
+#   index_topk=2048 index_n_heads=32 index_head_dim=128 index_kpool=4
+#   mhc=True n_streams=mhc_num_residual_streams(检查点 hc_mult=4)
+#   hc_eps=1e-6 sinkhorn_iter=mhc_sinkhorn_iterations(检查点 hc_sinkhorn_iters=20)
+#   swiglu_limit=10.0 rms_norm_eps=1e-5 topk_method=noaux_tc scoring_func=sigmoid
+#   tie_word_embeddings=False max_position_embeddings=1048576
+#   num_nextn_predict_layers=1 logit_scale(缺省)=1.0
+#   linear_num_heads=64 linear_head_dim=128 linear_conv_kernel_dim=4
+#   kda_lower_bound=linear_lower_bound(检查点 linear_attn_config.gate_lower_bound=-5)
+# =============================================================================
+
+# ============================================================================
+# A. building_block —— 原子积木
+# ============================================================================
+
+# ---- Embedding / 词表 ----
+- kind: atomic
+  name: VocabParallelEmbedding
+  category: embedding
+  description: 沿词表维度并行的 Embedding；对词表 padding 以被 TP 整除，独立处理 LoRA 增补词。
+  formula:
+    - "out[B,S,H] = Embedding_PadVocab(input_ids)  # 词表按 TP padding 为 V_padded"
+    - "out = lookup_table[input_ids]  # 权重形状 [V_padded, H]"
+  params_schema:
+    type: object
+    required: [num_embeddings, embedding_dim]
+    properties:
+      num_embeddings:     { type: integer, source: config.vocab_size }
+      embedding_dim:      { type: integer, source: config.hidden_size }
+      org_num_embeddings: { type: integer, nullable: true }
+      padding_size:       { type: integer, default: 64 }
+      disable_tp:         { type: boolean, default: false }
+  ports:
+    inputs:  [{ id: input_ids, type: tensor, shape: "[B, S]", dtype: int64, role: token_ids }]
+    outputs: [{ id: hidden,    type: tensor, shape: "[B, S, H]", dtype: float16, role: activation }]
+  file: vllm/model_executor/layers/vocab_parallel_embedding.py
+  weights: [{ name: weight, shape: "[V_padded, H]", loader: weight_loader }]
+
+- kind: atomic
+  name: ParallelLMHead
+  category: head
+  description: 语言建模头，词表维度并行。GLM-5.3-Flash tie_word_embeddings=False，独立权重。
+  formula:
+    - "logits[B,S,V] = hidden @ W^T  # W: [V_padded, H] 词表并行"
+  params_schema:
+    type: object
+    required: [vocab_size, hidden_size]
+    properties:
+      vocab_size:  { type: integer, source: config.vocab_size }
+      hidden_size: { type: integer, source: config.hidden_size }
+  ports:
+    inputs:  [{ id: hidden, type: tensor, shape: "[B, S, H]", dtype: float16 }]
+    outputs: [{ id: logits, type: tensor, shape: "[B, S, V]", dtype: float32 }]
+  file: vllm/model_executor/layers/vocab_parallel_embedding.py
+  weights: [{ name: weight, shape: "[V_padded, H]", loader: weight_loader }]
+
+- kind: atomic
+  name: LogitsProcessor
+  category: head
+  description: 最终 logits 处理（scale 缩放）。scale 缺省 1.0；GLM-5.3-Flash 未配置 logit_scale。
+  formula:
+    - "logits_out = logits_in * scale  # scale 缺省 1.0"
+  params_schema:
+    type: object
+    properties:
+      vocab_size: { type: integer, source: config.vocab_size }
+      scale:      { type: number, default: 1.0 }
+  ports:
+    inputs:  [{ id: hidden, type: tensor, shape: "[B, S, H]", dtype: float16, role: activation }]
+    outputs: [{ id: logits, type: tensor, shape: "[B, S, V]", dtype: float32, role: distribution }]
+  file: vllm/model_executor/layers/logits_processor.py
+
+# ---- Normalization ----
+- kind: atomic
+  name: RMSNorm
+  category: normalization
+  description: Root Mean Square Layer Normalization，GLM5Next 文本主干统一采用。
+  formula:
+    - "y = x / sqrt(mean(x^2,-1) + eps) * weight"
+  params_schema:
+    type: object
+    required: [hidden_size]
+    properties:
+      hidden_size: { type: integer, source: config.hidden_size }
+      eps:         { type: number, source: config.rms_norm_eps }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., H]", dtype: float16 }]
+    outputs: [{ id: y, type: tensor, shape: "[..., H]", dtype: float16 }]
+  file: vllm/model_executor/layers/layernorm.py
+  weights: [{ name: weight, shape: "[H]" }]
+
+- kind: atomic
+  name: LayerNorm
+  category: normalization
+  description: 标准 LayerNorm（含 bias）。
+  formula:
+    - "y = (x - mean(x)) / sqrt(var(x) + eps) * weight + bias"
+  params_schema:
+    type: object
+    required: [normalized_shape]
+    properties:
+      normalized_shape: { type: integer }
+      eps:              { type: number, default: 1e-6 }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., D]", dtype: float16 }]
+    outputs: [{ id: y, type: tensor, shape: "[..., D]", dtype: float16 }]
+  file: vllm/model_executor/layers/layernorm.py
+  weights:
+      - { name: weight, shape: "[D]" }
+      - { name: bias,   shape: "[D]" }
+
+- kind: atomic
+  name: FusedRMSNormGated
+  category: normalization
+  description: KDA 的 o_norm，对注意力输出做门控 RMSNorm（activation='sigmoid'）。
+  formula:
+    - "x_norm = RMSNorm(x, eps)"
+    - "out = x_norm * sigmoid(g)  # activation=sigmoid; swish: x_norm * g * silu(g)"
+  params_schema:
+    type: object
+    required: [head_dim]
+    properties:
+      head_dim:   { type: integer, source: config.linear_head_dim }
+      activation: { type: string, default: sigmoid }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[B, T, nhead, head_dim]" }]
+    outputs: [{ id: y, type: tensor, shape: "[B, T, nhead, head_dim]" }]
+  file: vllm/third_party/flash_linear_attention/ops/kda.py
+
+# ---- Linear / 投影（通用）----
+- kind: atomic
+  name: ColumnParallelLinear
+  category: linear
+  description: 按输出列并行的线性层。
+  formula:
+    - "y = x @ W_c^T + b  # 输出列切分到各 TP rank"
+  params_schema:
+    type: object
+    required: [input_size, output_size]
+    properties:
+      input_size:  { type: integer }
+      output_size: { type: integer }
+      bias:        { type: boolean, default: false }
+      gather_output: { type: boolean, default: false }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., I]", dtype: float16 }]
+    outputs: [{ id: y, type: tensor, shape: "[..., O]", dtype: float16 }]
+  file: vllm/model_executor/layers/linear.py
+
+- kind: atomic
+  name: RowParallelLinear
+  category: linear
+  description: 按输入行并行的线性层，输出时经 allreduce 归约。
+  formula:
+    - "y = x @ W_r^T + allreduce(x @ W_r^T)  # 输入行切分，输出归约"
+  params_schema:
+    type: object
+    required: [input_size, output_size]
+    properties:
+      input_size:     { type: integer }
+      output_size:    { type: integer }
+      bias:           { type: boolean, default: false }
+      reduce_results: { type: boolean, default: true }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., I]", dtype: float16 }]
+    outputs: [{ id: y, type: tensor, shape: "[..., O]", dtype: float16 }]
+  file: vllm/model_executor/layers/linear.py
+
+- kind: atomic
+  name: ReplicatedLinear
+  category: linear
+  description: 各 TP rank 上完全复制的线性层（无切分、无归约）。
+  formula:
+    - "y = x @ W^T + b  # 各 TP rank 权重完整复制"
+  params_schema:
+    type: object
+    required: [input_size, output_size]
+    properties:
+      input_size:  { type: integer }
+      output_size: { type: integer }
+      bias:        { type: boolean, default: false }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., I]" }]
+    outputs: [{ id: y, type: tensor, shape: "[..., O]" }]
+  file: vllm/model_executor/layers/linear.py
+
+- kind: atomic
+  name: MergedColumnParallelLinear
+  category: linear
+  description: 多个输出列的合并列并行线性层。
+  formula:
+    - "cats = [ x @ W0^T, x @ W1^T, ... ]  # 多输出列一次 GEMM，末维拼接"
+  params_schema:
+    type: object
+    required: [input_size, output_sizes]
+    properties:
+      input_size:   { type: integer }
+      output_sizes: { type: array, items: integer }
+      bias:         { type: boolean, default: false }
+      disable_tp:   { type: boolean, default: false }
+  ports:
+    inputs:  [{ id: x,    type: tensor, shape: "[..., I]" }]
+    outputs: [{ id: cats, type: tensor, shape: "[..., sum(output_sizes)]" }]
+  file: vllm/model_executor/layers/linear.py
+
+- kind: atomic
+  name: QKVParallelLinear
+  category: linear
+  description: Q、K、V 三路并行线性层（多模态视觉注意力用），total_num_heads 与 total_num_kv_heads 指定头数。
+  formula:
+    - "qkv = x @ W_qkv^T  # 拆为 [q, k, v]，head 维度按 TP 切分"
+  params_schema:
+    type: object
+    required: [hidden_size]
+    properties:
+      hidden_size:         { type: integer }
+      head_size:           { type: integer }
+      total_num_heads:     { type: integer }
+      total_num_kv_heads:  { type: integer }
+      bias:                { type: boolean, default: true }
+      disable_tp:          { type: boolean, default: false }
+  ports:
+    inputs:  [{ id: x,    type: tensor, shape: "[..., H]" }]
+    outputs: [{ id: qkv,  type: tensor, shape: "[..., 3, nhead, head_size]" }]
+  file: vllm/model_executor/layers/linear.py
+
+- kind: atomic
+  name: Conv2dLayer
+  category: conv
+  description: 2D 卷积层（多模态 downsample，spatial_merge 下采样）。
+  formula:
+    - "y = conv2d(x, W, stride, padding)  # [N,C,H,W] -> [N,C_o,H/s,W/s]"
+  params_schema:
+    type: object
+    required: [in_channels, out_channels, kernel_size]
+    properties:
+      in_channels:  { type: integer }
+      out_channels: { type: integer }
+      kernel_size:  { type: integer }
+      stride:       { type: integer }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[N, C, H, W]" }]
+    outputs: [{ id: y, type: tensor, shape: "[N, C_o, H/s, W/s]" }]
+  file: vllm/model_executor/layers/conv.py
+
+- kind: atomic
+  name: Conv3dLayer
+  category: conv
+  description: 3D 卷积层（多模态视觉 patch_embed：temporal×patch×patch 核）。
+  formula:
+    - "y = conv3d(x, W, stride)  # patch_embed / 时空 3D 卷积"
+  params_schema:
+    type: object
+    required: [in_channels, hidden_size, kernel_size]
+    properties:
+      in_channels: { type: integer }
+      hidden_size: { type: integer }
+      kernel_size: { type: integer }
+      stride:      { type: integer }
+      bias:        { type: boolean, default: true }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[N, T, C, H, W]" }]
+    outputs: [{ id: y, type: tensor, shape: "[N, H0, T', H', W']" }]
+  file: vllm/model_executor/layers/conv.py
+
+- kind: atomic
+  name: MMEncoderAttention
+  category: attention
+  description: 多模态编码器注意力内核（视觉塔 blocks 内），支持 flash/vanilla 后端。
+  formula:
+    - "score = softmax(q @ k^T / sqrt(head_size)) ;  attn = score @ v"
+  params_schema:
+    type: object
+    required: [num_heads, head_size]
+    properties:
+      num_heads: { type: integer }
+      head_size: { type: integer }
+      scale:     { type: number }
+  ports:
+    inputs:
+      - { id: query, type: tensor }
+      - { id: key,   type: tensor }
+      - { id: value, type: tensor }
+      - { id: cu_seqlens, type: tensor }
+    outputs:
+      - { id: out, type: tensor }
+  file: vllm/model_executor/layers/attention.py
+
+- kind: atomic
+  name: ApplyRotaryEmb
+  category: attention
+  description: 视觉塔旋转嵌入（is_neox_style=True, partial_rotary_factor=0.5），对 qk 拼接施加 cos/sin。
+  formula:
+    - "x_r = x * cos + rotate_half(x) * sin  # 视觉 RoPE，is_neox_style=True"
+  ports:
+    inputs:
+      - { id: x,    type: tensor }
+      - { id: cos,  type: tensor }
+      - { id: sin,  type: tensor }
+    outputs: [{ id: y, type: tensor }]
+  file: vllm/model_executor/layers/rotary_embedding/common.py
+
+# ---- 激活 ----
+- kind: atomic
+  name: SiluAndMul
+  category: activation
+  description: SwiGLU：输入后段为 gate，前段为 up，输出 x[:M] * silu(x[M:])。
+  formula:
+    - "out = x[:M] * silu(x[M:])  # SwiGLU; silu(z)=z*sigmoid(z)"
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., 2*M]" }]
+    outputs: [{ id: y, type: tensor, shape: "[..., M]" }]
+  file: vllm/model_executor/layers/activation.py
+
+- kind: atomic
+  name: SiluAndMulWithClamp
+  category: activation
+  description: >-
+    带 clamp 的 SwiGLU：glu=clamp(x[:M], max=L)，up=clamp(x[M:], -L, L)，输出 glu*silu(up)。
+    GLM-5.3-Flash 文本/视觉/合并器均配置 swiglu_limit=10.0，故实际选用本算子而非 SiluAndMul。
+  formula:
+    - "gate = clamp(x[:M], max=L) ;  up = clamp(x[M:], -L, L)"
+    - "out = gate * silu(up)      ;  L = swiglu_limit"
+  params_schema:
+    type: object
+    properties:
+      swiglu_limit: { type: number, source: config.swiglu_limit, default: 10.0 }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., 2*M]" }]
+    outputs: [{ id: y, type: tensor, shape: "[..., M]" }]
+  file: vllm/model_executor/layers/activation.py
+
+# ---- 多模态 / 视觉塔原子 ----
+- kind: atomic
+  name: GELU
+  category: activation
+  description: 高斯误差线性单元 GELU。仅用于多模态合并器 Glm5NextPatchMerger 的 extra_activation_func。
+  formula:
+    - "out = GELU(x)  # 多模态合并器 extra_activation_func"
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., D]" }]
+    outputs: [{ id: y, type: tensor, shape: "[..., D]" }]
+  file: vllm/models/glm5next/nvidia/multimodal.py
+
+# ---- Rotary（MLA 用）----
+- kind: atomic
+  name: RotaryEmbedding
+  category: attention
+  description: 旋转位置编码（DeepSeek-YARN/DeepSeek-Llama 缩放）。GLM-5.3-Flash qk_rope_head_dim=0 且 mla_nope=True（config 由检查点 mla_use_nope 折叠而来），故 MLA 层实际无 rotary。
+  formula:
+    - "pos_emb = theta^{-2i/dim} * pos ;  RoPE(q, k)"
+    - "# qk_rope_head_dim=0 时 MLA 层无 rotary"
+  params_schema:
+    type: object
+    required: [rope_dim]
+    properties:
+      rope_dim:      { type: integer, source: config.qk_rope_head_dim }
+      max_position:  { type: integer, source: config.max_position_embeddings }
+      is_neox_style: { type: boolean, default: false }
+  ports:
+    inputs:  [{ id: positions, type: tensor }, { id: qk, type: tensor }]
+    outputs: [{ id: qk, type: tensor }]
+  file: vllm/model_executor/layers/rotary_embedding/__init__.py
+
+# ---- MoE 路由与专家 ----
+- kind: atomic
+  name: GateLinear
+  category: moe
+  description: MoE 路由器 gate。GLM5Next 用 GateLinear(float32 输出)。topk_method='noaux_tc' 时带 e_score_correction_bias。
+  formula:
+    - "router_logits = x @ W_gate^T  # [NT, E]，float32"
+    - "# topk_method=noaux_tc 时加 e_score_correction_bias"
+  params_schema:
+    type: object
+    required: [input_size, num_experts]
+    properties:
+      input_size:  { type: integer, source: config.hidden_size }
+      num_experts: { type: integer, source: config.n_routed_experts }
+      out_dtype:   { type: string, source: config.moe_router_dtype }
+      has_e_score_correction_bias: { type: boolean, condition: "config.topk_method == 'noaux_tc'" }
+  ports:
+    inputs:  [{ id: x,    type: tensor, shape: "[NT, H]", role: activation }]
+    outputs: [{ id: router_logits, type: tensor, shape: "[NT, E]", dtype: float32, role: router_logits }]
+  file: vllm/model_executor/layers/fused_moe/gate.py
+  weights:
+      - { name: weight, shape: "[E, H]" }
+      - { name: e_score_correction_bias, shape: "[E]" }
+
+- kind: atomic
+  name: FusedMoE
+  category: moe
+  description: 融合 MoE 专家计算内核（routed + shared experts，grouped top-k）。
+  formula:
+    - "p = softmax/noaux_tc 路由 ;  topk_group 选组，组内 topk 选专家"
+    - "out = Σ_e gate_e * SwiGLU_W_e(x)  # 内融合 shared_experts"
+  params_schema:
+    type: object
+    required: [num_experts, hidden_size, intermediate_size]
+    properties:
+      num_experts:           { type: integer, source: config.n_routed_experts }
+      top_k:                 { type: integer, source: config.num_experts_per_token }
+      hidden_size:           { type: integer, source: config.hidden_size }
+      intermediate_size:     { type: integer, source: config.moe_intermediate_size }
+      renormalize:           { type: boolean, source: config.moe_renormalize }  # 检查点 norm_topk_prob 折叠为 moe_renormalize
+      num_expert_group:      { type: integer, source: config.n_group }
+      topk_group:            { type: integer, source: config.topk_group }
+      scoring_func:          { type: string, source: config.scoring_func }
+      routed_scaling_factor: { type: number, source: config.routed_scaling_factor }
+      enable_eplb:           { type: boolean, parallel_config: enable_eplb }
+  ports:
+    inputs:
+      - { id: hidden_states, type: tensor, shape: "[NT, H]", role: activation }
+      - { id: router_logits, type: tensor, shape: "[NT, E]", role: router_logits }
+    outputs:
+      - { id: out, type: tensor, shape: "[NT, H]", role: activation }
+  file: vllm/model_executor/layers/fused_moe/fused_moe_runner.py
+
+# ---- MLA 潜空间投影与注意力 ----
+- kind: atomic
+  name: DeepSeekV2FusedQkvAProjLinear
+  category: linear
+  description: MLA 的 q_a + (kv_lora, qk_rope) 合并投影，输出两列 [q_lora_rank, kv_lora_rank+qk_rope_head_dim]。
+  formula:
+    - "q_a = x @ W_q^T           # [..., q_lora_rank]"
+    - "kv_a_rope = x @ W_kv^T   # [..., kv_lora_rank + qk_rope]"
+  params_schema:
+    type: object
+    required: [input_size, q_lora_rank, kv_lora_rank, qk_rope_head_dim]
+    properties:
+      input_size:       { type: integer }
+      q_lora_rank:      { type: integer, source: config.q_lora_rank }
+      kv_lora_rank:     { type: integer, source: config.kv_lora_rank }
+      qk_rope_head_dim: { type: integer, source: config.qk_rope_head_dim }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., H]" }]
+    outputs:
+      - { id: q_a,  type: tensor, shape: "[..., QLR]", description: "q_lora_rank" }
+      - { id: kv_a, type: tensor, shape: "[..., KVLR_R]", description: "kv_lora_rank + qk_rope_head_dim" }
+  file: vllm/model_executor/models/deepseek_v2.py
+
+- kind: atomic
+  name: MLAAttention
+  category: attention
+  description: MLA 注意力内核（MLAAttention 类），用潜向量 q 与压缩 kv cache 计算稀疏/密集注意力。由 MultiHeadLatentAttentionWrapper 构建。
+  formula:
+    - "scale = (qk_head_dim)^-0.5"
+    - "score = q @ k_nope^T * scale ;  attn = softmax(score) @ v"
+    - "out = attn_output  # use_sparse 由 index_topk 是否配置决定"
+  params_schema:
+    type: object
+    required: [num_heads]
+    properties:
+      hidden_size:      { type: integer, source: config.hidden_size }
+      num_heads:        { type: integer, source: config.num_attention_heads }
+      qk_nope_head_dim: { type: integer, source: config.qk_nope_head_dim }
+      qk_rope_head_dim: { type: integer, source: config.qk_rope_head_dim }
+      v_head_dim:       { type: integer, source: config.v_head_dim }
+      q_lora_rank:      { type: integer, source: config.q_lora_rank }
+      kv_lora_rank:     { type: integer, source: config.kv_lora_rank }
+      use_sparse:       { type: boolean, condition: "config.index_topk is not None" }
+  ports:
+    inputs:
+      - { id: q,    type: tensor, shape: "[B, S, nhead*qk_head_dim]", role: query }
+      - { id: kv_c, type: tensor, shape: "[B, S, kv_lora_rank]", role: compressed_kv }
+      - { id: k_pe, type: tensor, shape: "[B, S, qk_rope_head_dim]", role: rope_comp }   # qk_rope=0 时为空
+    outputs:
+      - { id: out, type: tensor, shape: "[B, S, nhead*v_head_dim]", role: attention_output }
+  file: vllm/model_executor/layers/attention/mla_attention.py
+
+- kind: atomic
+  name: MLASparseIndexer
+  category: attention
+  description: DSV3 稀疏注意力 indexer；kpool 压缩缓存 + top-k token 选择。GLM-5.3-Flash index_topk=2048, index_n_heads=32, index_head_dim=128, index_kpool=4。
+  formula:
+    - "gate = sigmoid(hidden @ gate^T / K)  # kpool 压缩，softmax 加权"
+    - "topk 选出 index_topk 个 token 供稀疏 MLA 参考"
+  params_schema:
+    type: object
+    required: [q_lora_rank]
+    properties:
+      q_lora_rank: { type: integer, source: config.q_lora_rank }
+      topk_tokens: { type: integer, source: config.index_topk }
+      n_head:      { type: integer, source: config.index_n_heads }
+      head_dim:    { type: integer, source: config.index_head_dim }
+      rope_dim:    { type: integer, source: config.qk_rope_head_dim }
+      index_kpool: { type: integer, source: config.index_kpool }
+  ports:
+    inputs:
+      - { id: qr,        type: tensor, shape: "[B, S, QLR]" }
+      - { id: hidden,    type: tensor, shape: "[B, S, H]" }
+      - { id: positions, type: tensor, shape: "[B, S]", dtype: int64 }
+    outputs:
+      - { id: out, type: tensor, role: sparse_attention_output }
+  file: vllm/models/glm5next/nvidia/attention.py
+  weights:
+      - { name: index_kpool_compress_ape,  shape: "[kpool, head_dim]" }
+      - { name: index_kpool_compress_gate, shape: "[head_dim, H]" }
+      - { name: wq_b.weight,       shape: "[head_dim*n_head, QLR]" }
+      - { name: wk_weights_proj.weight, shape: "[head_dim+n_head, H]" }
+      - { name: k_norm.weight,     shape: "[head_dim]" }
+      - { name: k_norm.bias,       shape: "[head_dim]" }
+
+# ---- KDA 线性注意力原子 ----
+- kind: atomic
+  name: GatedDeltaNetAttentionKernel
+  category: attention
+  description: KDA/Gated-DeltaNet 线性注意力内核（flash linear attention），含时变 A_log、dt_bias、门控。
+  formula:
+    - "A = exp(A_log) ;  g = sigmoid(exp(A) * (g_raw + dt_bias))  # safe_gate"
+    - "gate_cumsum = cumsum(g) ;  state = A * state + gate * (k^T v)"
+    - "out[t] = state @ q[t]  # Gated-DeltaNet 线性注意力"
+  params_schema:
+    type: object
+    required: [num_heads, head_dim]
+    properties:
+      num_heads: { type: integer, source: config.linear_num_heads }
+      head_dim:  { type: integer, source: config.linear_head_dim }
+      conv_size: { type: integer, source: config.linear_conv_kernel_dim }
+      layer_norm_eps: { type: number, source: config.rms_norm_eps }
+      kda_lower_bound: { type: number, source: config.linear_lower_bound }  # 检查点 linear_attn_config.gate_lower_bound 折叠而来
+  ports:
+    inputs:
+      - { id: q,   type: tensor, shape: "[B, S, proj]" }             # 已过 q_conv1d
+      - { id: k,   type: tensor, shape: "[B, S, proj]" }
+      - { id: v,   type: tensor, shape: "[B, S, proj]" }
+      - { id: g1,  type: tensor, shape: "[B, nhead, head_dim]" }     # f_b_proj(f_a)
+      - { id: g2,  type: tensor, shape: "[B, T, nhead, head_dim]" }
+      - { id: beta,type: tensor, shape: "[B, T, nhead]" }            # b shard
+    outputs:
+      - { id: out, type: tensor, shape: "[B, T, nhead, head_dim]", role: attention_output }
+  file: vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py
+  state:
+    - { form: conv_state, shape: "[B, ..., conv_size]" }
+    - { form: recurrent_state, shape: "[B, num_heads, head_dim, head_dim]" }
+
+- kind: atomic
+  name: MergedQKVBFGA
+  category: linear
+  description: KDA 六路合并投影（q,k,v,b,f_a,g_a）。f_a、g_a 两路在 TP rank 间复制。GLM5 专用 _Glm5NextMergedColumnParallelLinear。
+  formula:
+    - "qkvbfga = x @ W^T  # 六路 [proj,proj,proj,nhead,head_dim,head_dim]"
+    - "# f_a/g_a 两路在 TP rank 间复制(replicated_shard_ids=[4,5])"
+  params_schema:
+    type: object
+    required: [input_size, projection_size, num_heads, head_dim]
+    properties:
+      input_size:      { type: integer, source: config.hidden_size }
+      projection_size: { type: integer }
+      num_heads:       { type: integer, source: config.linear_num_heads }
+      head_dim:        { type: integer, source: config.linear_head_dim }
+      tp_size:         { type: integer, parallel: tensor_parallel_size }
+      replicated_shard_ids: { type: array, items: integer, default: [4, 5] }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., H]" }]
+    outputs: [{ id: qkvbfga, type: tensor, shape: "[..., 3*proj + num_heads + 2*head_dim]" }]
+  file: vllm/models/glm5next/nvidia/kda.py
+
+- kind: atomic
+  name: ColumnLinearConvProjection
+  category: linear
+  description: KDA 的因果卷积列投影（q/k/v conv1d；实现为 ColumnParallelLinear + conv weight reshape）。
+  formula:
+    - "y = silu(causal_conv1d(x))  # 权重 reshape 为 [out, 1, conv_size]"
+  params_schema:
+    type: object
+    required: [conv_size, output_size]
+    properties:
+      conv_size:    { type: integer, source: config.linear_conv_kernel_dim }
+      output_size:  { type: integer }
+      params_dtype: { type: string, default: float32 }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[B, T, conv_size]" }]
+    outputs: [{ id: y, type: tensor, shape: "[B, T, O]" }]
+  file: vllm/model_executor/layers/linear.py
+
+# ---- MHC 算子（原子）----
+- kind: atomic
+  name: MHCPreOp
+  category: decoder_layer
+  description: MHC 扩张算子。输入 norm 权重/eps、高维 fn 基、scale/base 系数与 Sinkhorn 参数，把单残差扩张成多残差流（mhc_pre），返回 post_mix、res_mix、layer_input。
+  formula:
+    - "post_mix, res_mix, layer_input = mhc_pre(x, fn, hc_scale, hc_base)"
+    - "# 单残差经 Sinkhorn 归一扩张为 n_streams 条并行流"
+  params_schema:
+    type: object
+    required: [n_streams, hidden_size]
+    properties:
+      n_streams: { type: integer }
+      hidden_size: { type: integer }
+      hc_pre_eps:   { type: number, source: config.hc_eps }
+      hc_sinkhorn_eps: { type: number, source: config.hc_eps }
+      sinkhorn_repeat: { type: integer, source: config.hc_sinkhorn_iters }
+  ports:
+    inputs:
+      - { id: x,        type: tensor, role: activation }
+      - { id: fn,       type: tensor }
+      - { id: hc_scale, type: tensor }
+      - { id: hc_base,  type: tensor }
+    outputs:
+      - { id: post_mix,    type: tensor }
+      - { id: res_mix,     type: tensor }
+      - { id: layer_input, type: tensor }
+  file: vllm/model_executor/layers/mhc.py
+
+- kind: atomic
+  name: MHCPostOp
+  category: decoder_layer
+  description: MHC 收缩算子。将多流残差状态收缩回单残差（mhc_post）。在最后一个 MHC 层使用。
+  formula:
+    - "x_out = mhc_post(x, residual, post, comb)  # 多流收缩回单残差"
+  params_schema:
+    type: object
+    required: [n_streams]
+    properties:
+      n_streams: { type: integer }
+  file: vllm/model_executor/layers/mhc.py
+
+- kind: atomic
+  name: MHCFusedPostPreOp
+  category: decoder_layer
+  description: MHC 融合算子。将上一层的 post/comb 与当前层的 pre 合成一个 kernel（mhc_fused_post_pre）。
+  formula:
+    - "x, res_out, post_out, comb_out = mhc_fused_post_pre(prev_post, comb, cur_pre)"
+    - "# 融合上一层 post + 当前层 pre + RMSNorm 于一个 kernel"
+  params_schema:
+    type: object
+    properties:
+      n_splits: { type: integer, default: 1 }
+      tile_n:   { type: integer, default: 1 }
+  file: vllm/model_executor/layers/mhc.py
+
+- kind: atomic
+  name: HCHeadOp
+  category: decoder_layer
+  description: MHC 头部算子（hc_head）。用于 MTP/shared_head 的 MHC 头处理。
+  formula:
+    - "out = hc_head(...)  # MTP/shared_head 的 MHC 头处理"
+  file: vllm/model_executor/layers/mhc.py
+
+# ============================================================================
+# ---- Glm5NextMLP（Dense FFN）----
+- kind: composite
+  name: Glm5NextMLP
+  category: ffn
+  description: GLM5Next 的 dense MLP：gate_up(MergedColumn) → SwiGLU → down(Row)。mlp_layer_types[i]=='dense' 时选用。
+  formula:
+    - "gate_up = x @ W_gate_up^T            # MergedColumn [H]->[2*inter]"
+    - "act = clamp-silu(gate_up[:inter]) * silu(clamp(gate_up[inter:]))"
+    - "y = act @ W_down^T + allreduce     # RowParallel"
+  params_schema:
+    type: object
+    required: [hidden_size, intermediate_size]
+    properties:
+      hidden_size:          { type: integer, source: config.hidden_size }
+      intermediate_size:    { type: integer, source: config.intermediate_size }
+      reduce_results:       { type: boolean, default: true }
+      is_sequence_parallel: { type: boolean, parallel_config: use_sequence_parallel_moe }
+      swiglu_limit:         { type: number, source: config.swiglu_limit, nullable: true }
+  children:
+    - { id: gate_up, block: MergedColumnParallelLinear,
+        port_bind: { input_size: "${config.hidden_size}", output_sizes: "[${config.intermediate_size}, ${config.intermediate_size}]" } }
+    - { id: act, block: SiluAndMulWithClamp,
+        port_bind: { swiglu_limit: "${config.swiglu_limit}" },
+        condition: "config.swiglu_limit is not None" }
+    - { id: act_plain, block: SiluAndMul,
+        condition: "config.swiglu_limit is None" }
+    - { id: down, block: RowParallelLinear,
+        port_bind: { input_size: "${config.intermediate_size}", output_size: "${config.hidden_size}" } }
+  edges:
+    - { from: {id: x},             to: {id: gate_up, port: x} }
+    - { from: {id: gate_up, port: cats}, to: {id: act, port: x},       condition: "config.swiglu_limit is not None" }
+    - { from: {id: gate_up, port: cats}, to: {id: act_plain, port: x}, condition: "config.swiglu_limit is None" }
+    - { from: {id: act, port: y},       to: {id: down, port: x}, condition: "config.swiglu_limit is not None" }
+    - { from: {id: act_plain, port: y}, to: {id: down, port: x}, condition: "config.swiglu_limit is None" }
+    - { from: {id: down, port: y},  to: {id: y} }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., H]", role: activation }]
+    outputs: [{ id: y, type: tensor, shape: "[..., H]", role: activation }]
+  file: vllm/models/glm5next/nvidia/model.py
+
+# ---- Glm5NextMoE（Sparse / routed + shared）----
+- kind: composite
+  name: Glm5NextMoE
+  category: moe
+  description: GLM5Next 的 MoE：外部 gate + FusedMoE + 可选 shared_experts。mlp_layer_types[i]=='sparse' 且 is_moe 时选用；GLM-5.3-Flash 有 shared_experts。
+  formula:
+    - "router_logits = x @ W_gate^T"
+    - "y = Σ_e softmax(topk(router_logits))_e * FFN_e(x)  # gate 外部"
+    - "y += shared_experts(x)  # n_shared_experts=1，已并入 FusedMoE"
+  params_schema:
+    type: object
+    properties:
+      n_routed_experts:    { type: integer, source: config.n_routed_experts }
+      n_shared_experts:    { type: integer, source: config.n_shared_experts }
+      routed_scaling_factor: { type: number, source: config.routed_scaling_factor }
+  children:
+    - { id: gate, block: GateLinear,
+        port_bind: { input_size: "${config.hidden_size}", num_experts: "${config.n_routed_experts}" } }
+    - { id: experts, block: FusedMoE,
+        port_bind: { num_experts: "${config.n_routed_experts}", top_k: "${config.num_experts_per_token}", hidden_size: "${config.hidden_size}", intermediate_size: "${config.moe_intermediate_size}" } }
+  edges:
+    - { from: {id: x},   to: {id: gate, port: x} }
+    - { from: {id: gate, port: router_logits}, to: {id: experts, port: router_logits} }
+    - { from: {id: x},   to: {id: experts, port: hidden_states} }
+    - { from: {id: experts, port: out}, to: {id: y}, note: "FusedMoE 内部已将 shared_experts(=Glm5NextMLP) 融合，无需单独子积木" }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., H]", role: activation }]
+    outputs: [{ id: y, type: tensor, shape: "[..., H]", role: activation }]
+  file: vllm/models/glm5next/nvidia/model.py
+
+# ---- Glm5NextMLAAttention（MLA + 稀疏 DSA）：内部即 vLLM MLAModules 封装 ----
+- kind: composite
+  name: Glm5NextMLAAttention
+  category: attention
+  description: GLM5Next 的 MLA 注意力（DSV3 稀疏）。含 fused_qkv_a_proj 潜空间投影、q/kv layernorm、q_b/kv_b 投影、可选稀疏 indexer、MLA 核、o_proj。qk_rope_head_dim=0 时无 RoPE。
+  formula:
+    - "q_c = RMSNorm(x @ W_qa) @ W_qb           # MLA 潜空间 q"
+    - "kv_c = RMSNorm(x @ W_kv_a) @ W_kvb;  k_pe = rope(split)"
+    - "attn = MLA_core(q, k_c, v[, indexer topk])  # scale=(qk_head)^-0.5"
+    - "y = attn @ W_o + allreduce"
+  params_schema:
+    type: object
+    required: [num_heads]
+    properties:
+      hidden_size:      { type: integer, source: config.hidden_size }
+      num_heads:        { type: integer, source: config.num_attention_heads }
+      qk_nope_head_dim: { type: integer, source: config.qk_nope_head_dim }
+      qk_rope_head_dim: { type: integer, source: config.qk_rope_head_dim }
+      v_head_dim:       { type: integer, source: config.v_head_dim }
+      q_lora_rank:      { type: integer, source: config.q_lora_rank }
+      kv_lora_rank:     { type: integer, source: config.kv_lora_rank }
+      skip_rope:        { type: boolean, source: config.mla_nope }   # 检查点字段 mla_use_nope 由 config 折叠为 mla_nope
+      fuse_qkv_rmsnorm: { type: boolean, default: true }
+  children:
+    - { id: fused_qkv_a_proj, block: DeepSeekV2FusedQkvAProjLinear,
+        port_bind: { input_size: "${config.hidden_size}", q_lora_rank: "${config.q_lora_rank}", kv_lora_rank: "${config.kv_lora_rank}", qk_rope_head_dim: "${config.qk_rope_head_dim}" } }
+    - { id: q_a_layernorm, block: RMSNorm, port_bind: { hidden_size: "${config.q_lora_rank}" } }
+    - { id: q_b_proj, block: ColumnParallelLinear,
+        port_bind: { input_size: "${config.q_lora_rank}", output_size: "( ${config.num_attention_heads} * ${config.qk_head_dim} )" } }
+    - { id: kv_a_layernorm, block: RMSNorm, port_bind: { hidden_size: "${config.kv_lora_rank}" } }
+    - { id: kv_b_proj, block: ColumnParallelLinear,
+        port_bind: { input_size: "${config.kv_lora_rank}", output_size: "(${config.num_attention_heads} * ( ${config.qk_nope_head_dim} + ${config.v_head_dim} ))" } }
+    - { id: rotary, block: RotaryEmbedding, port_bind: { rope_dim: "${config.qk_rope_head_dim}" },
+        condition: "( ${config.qk_rope_head_dim} > 0 )" }
+    - { id: indexer, block: MLASparseIndexer, port_bind: { q_lora_rank: "${config.q_lora_rank}" },
+        condition: "config.index_topk is not None" }
+    - { id: mla_core, block: MLAAttention,
+        port_bind: { num_heads: "${config.num_attention_heads}", qk_nope_head_dim: "${config.qk_nope_head_dim}", qk_rope_head_dim: "${config.qk_rope_head_dim}", v_head_dim: "${config.v_head_dim}", q_lora_rank: "${config.q_lora_rank}", kv_lora_rank: "${config.kv_lora_rank}" } }
+    - { id: o_proj, block: RowParallelLinear,
+        port_bind: { input_size: "( ${config.num_attention_heads} * ${config.v_head_dim} )", output_size: "${config.hidden_size}" } }
+  edges:
+    - { from: {id: hidden_states},  to: {id: fused_qkv_a_proj, port: x} }
+    - { from: {id: fused_qkv_a_proj, port: q_a},  to: {id: q_a_layernorm, port: x} }
+    - { from: {id: fused_qkv_a_proj, port: kv_a}, to: {id: kv_a_layernorm, port: x} }
+    - { from: {id: q_a_layernorm, port: y}, to: {id: q_b_proj, port: x} }
+    - { from: {id: kv_a_layernorm, port: y}, to: {id: kv_b_proj, port: x} }
+    - { from: {id: q_b_proj, port: y},  to: {id: mla_core, port: q} }
+    - { from: {id: kv_b_proj, port: y}, to: {id: mla_core, port: kv_c} }
+    - { from: {id: rotary, port: qk},   to: {id: mla_core, port: k_pe}, condition: "( ${config.qk_rope_head_dim} > 0 )" }
+    - { from: {id: indexer, port: out}, to: {id: mla_core, port: q}, condition: "config.index_topk is not None", note: "indexer 与 main MLA 共享 q/cache" }
+    - { from: {id: mla_core, port: out}, to: {id: o_proj, port: x} }
+    - { from: {id: o_proj, port: y}, to: {id: out} }
+  ports:
+    inputs:
+      - { id: hidden_states, type: tensor, shape: "[B, S, H]", role: activation }
+      - { id: positions,     type: tensor, shape: "[B, S]", dtype: int64 }
+    outputs:
+      - { id: out, type: tensor, shape: "[B, S, H]", role: attention_output }
+  file: vllm/models/glm5next/nvidia/attention.py
+  forward_note: "indexer 输出经 topk_indices_buffer 传入 mla_core，用同一 kv cache(MLAAttentionSpec)"
+
+# ---- Glm5NextLinearAttention（KDA,Gated-DeltaNet）----
+- kind: composite
+  name: Glm5NextLinearAttention
+  category: attention
+  description: GLM5Next 的 KDA 线性注意力（Gated-DeltaNet）。六路合并投影 qkvbfg_a → 因果卷积(q,k,v) → A_log/dt_bias 时变 → 门控 o_norm → o_proj。layer_types[i]=='linear_attention' 时作为 self_attn。
+  formula:
+    - "q,k,v,b,f_a,g_a = split(x @ W_qkvbfg)  # 六路合并投影"
+    - "q,k,v = silu(causal_conv1d(q,k,v)) ;  g1 = f_b_proj(f_a); g2 = g_b_proj(g_a)"
+    - "out = GatedDeltaNet(q,k,v,b, A, dt_bias, g)"
+    - "y = FusedRMSNormGated(out, g2) @ W_o + allreduce"
+  params_schema:
+    type: object
+    required: [num_heads, head_dim]
+    properties:
+      num_heads: { type: integer, source: config.linear_num_heads }
+      head_dim:  { type: integer, source: config.linear_head_dim }
+      conv_size: { type: integer, source: config.linear_conv_kernel_dim }
+      tp_size:   { type: integer, parallel: tensor_parallel_size }
+  children:
+    - { id: in_proj, block: MergedQKVBFGA,
+        port_bind: { input_size: "${config.hidden_size}", projection_size: "( ${config.linear_head_dim} * ${config.linear_num_heads} )", num_heads: "${config.linear_num_heads}", head_dim: "${config.linear_head_dim}" } }
+    - { id: q_conv, block: ColumnLinearConvProjection,
+        port_bind: { conv_size: "${config.linear_conv_kernel_dim}", output_size: "( ${config.linear_head_dim} * ${config.linear_num_heads} )" } }
+    - { id: k_conv, block: ColumnLinearConvProjection,
+        port_bind: { conv_size: "${config.linear_conv_kernel_dim}", output_size: "( ${config.linear_head_dim} * ${config.linear_num_heads} )" } }
+    - { id: v_conv, block: ColumnLinearConvProjection,
+        port_bind: { conv_size: "${config.linear_conv_kernel_dim}", output_size: "( ${config.linear_head_dim} * ${config.linear_num_heads} )" } }
+    - { id: f_b_proj, block: ColumnParallelLinear,
+        port_bind: { input_size: "${config.linear_head_dim}", output_size: "( ${config.linear_head_dim} * ${config.linear_num_heads} )" } }
+    - { id: g_b_proj, block: ColumnParallelLinear,
+        port_bind: { input_size: "${config.linear_head_dim}", output_size: "( ${config.linear_head_dim} * ${config.linear_num_heads} )" } }
+    - { id: kda_kernel, block: GatedDeltaNetAttentionKernel,
+        port_bind: { num_heads: "${config.linear_num_heads}", head_dim: "${config.linear_head_dim}" } }
+    - { id: o_norm, block: FusedRMSNormGated, port_bind: { head_dim: "${config.linear_head_dim}" } }
+    - { id: o_proj, block: RowParallelLinear,
+        port_bind: { input_size: "( ${config.linear_head_dim} * ${config.linear_num_heads} )", output_size: "${config.hidden_size}" } }
+  edges:
+    - { from: {id: hidden_states}, to: {id: in_proj, port: x} }
+    - { from: {id: in_proj, port: qkvbfga}, to: {id: q_conv, port: x}, from_segment: q,   note: "split 取 q 段" }
+    - { from: {id: in_proj, port: qkvbfga}, to: {id: k_conv, port: x}, from_segment: k,   note: "split 取 k 段" }
+    - { from: {id: in_proj, port: qkvbfga}, to: {id: v_conv, port: x}, from_segment: v,   note: "split 取 v 段" }
+    - { from: {id: q_conv, port: y}, to: {id: kda_kernel, port: q} }
+    - { from: {id: k_conv, port: y}, to: {id: kda_kernel, port: k} }
+    - { from: {id: v_conv, port: y}, to: {id: kda_kernel, port: v} }
+    - { from: {id: in_proj, port: qkvbfga}, to: {id: kda_kernel, port: beta}, from_segment: b, note: "split 取 b 段" }
+    - { from: {id: in_proj, port: qkvbfga}, to: {id: f_b_proj, port: x}, from_segment: f_a, note: "split 取 f_a 段" }
+    - { from: {id: f_b_proj, port: y},      to: {id: kda_kernel, port: g1}, note: "reshape→g1" }
+    - { from: {id: in_proj, port: qkvbfga}, to: {id: g_b_proj, port: x}, from_segment: g_a, note: "split 取 g_a 段" }
+    - { from: {id: g_b_proj, port: y},      to: {id: kda_kernel, port: g2} }
+    - { from: {id: kda_kernel, port: out},  to: {id: o_norm, port: x} }
+    - { from: {id: o_norm, port: y},        to: {id: o_proj, port: x} }
+    - { from: {id: o_proj, port: y},        to: {id: out} }
+  segments:
+    - { name: q,   offset: 0,                                        size: proj,      source: qkvbfga }
+    - { name: k,   offset: proj,                                     size: proj,      source: qkvbfga }
+    - { name: v,   offset: 2*proj,                                   size: proj,      source: qkvbfga }
+    - { name: b,   offset: 3*proj,                                   size: num_heads, source: qkvbfga }
+    - { name: f_a, offset: 3*proj + num_heads,                       size: head_dim,  source: qkvbfga }
+    - { name: g_a, offset: 3*proj + num_heads + head_dim,            size: head_dim,  source: qkvbfga }
+  ports:
+    inputs:
+      - { id: hidden_states, type: tensor, shape: "[B, S, H]", role: activation }
+      - { id: positions,     type: tensor, shape: "[B, S]", dtype: int64 }
+    outputs:
+      - { id: out, type: tensor, shape: "[B, S, H]", role: attention_output }
+  file: vllm/models/glm5next/nvidia/kda.py
+  weights:
+      - { name: in_proj.weight, shape: "[3*proj + num_heads + 2*head_dim, H]" }
+      - { name: f_b_proj.weight, shape: "[proj, head_dim]" }
+      - { name: g_b_proj.weight, shape: "[proj, head_dim]" }
+      - { name: q_conv.weight, shape: "[proj, 1, conv_size]" }
+      - { name: k_conv.weight, shape: "[proj, 1, conv_size]" }
+      - { name: v_conv.weight, shape: "[proj, 1, conv_size]" }
+      - { name: dt_bias, shape: "[local_proj]" }
+      - { name: A_log,  shape: "[1, 1, num_heads, 1]" }
+      - { name: o_proj.weight, shape: "[H, proj]" }
+
+# ---- MHC 多残差流（组合积木，引用上述 MHC 原子积木）----
+- kind: composite
+  name: MHCMultiResidualStream
+  category: decoder_layer
+  description: MHC 多残差流子系统。将单残差扩张为 n=mhc_num_residual_streams(=hc_mult) 条并行流，经扩张/收缩与注意力、FFN 的 pre/post 交替融合，最后收缩回单残差。
+  formula:
+    - "单残差 -> hc_expand -> n_streams 并行流"
+    - "mhc_pre / mhc_fused_post_pre / mhc_post 与 attn/ffn 交替融合"
+    - "末层 hc_contract 收缩回单残差"
+  params_schema:
+    type: object
+    required: [n_streams]
+    properties:
+      n_streams:      { type: integer, source: config.mhc_num_residual_streams }   # 检查点 hc_mult 折叠而来
+      eta:            { type: number, source: config.hc_eps }
+      sinkhorn_iters: { type: integer, source: config.mhc_sinkhorn_iterations }     # 检查点 hc_sinkhorn_iters 折叠而来
+      post_mult_value: { type: number, source: config.mhc_post_mult_value }
+  children:
+    - { id: mhc_pre_op, block: MHCPreOp, role: expansion }
+    - { id: mhc_post_op, block: MHCPostOp, role: contraction }
+    - { id: mhc_fused_post_pre_op, block: MHCFusedPostPreOp, role: fused }
+  edges: []
+  ports:
+    inputs:
+      - { id: x,        type: tensor, shape: "[B, S, H]", role: activation }
+      - { id: residual, type: tensor, shape: "[B, S, H]", role: residual }
+    outputs:
+      - { id: x,        type: tensor, shape: "[B, S, H]", role: activation }
+      - { id: residual, type: tensor, shape: "[B, S, H]", role: residual }
+  ops: [MHCPreOp, MHCFusedPostPreOp, MHCPostOp, HCHeadOp]
+  file: vllm/model_executor/layers/mhc.py
+
+# ---- Glm5NextDecoderLayer（最关键的复用件）----
+- kind: composite
+  name: Glm5NextDecoderLayer
+  category: decoder_layer
+  description: GLM5Next 解码层。input_layernorm → self_attn(MLA/KDA, 按 layer_types[i]) → post_attention_layernorm → mlp(dense/MoE, 按 mlp_layer_types[i]) + 可选 MHC。
+  formula:
+    - "h = input_layernorm(x)"
+    - "h = self_attn(h)   # layer_types[i] 选 MLA 或 KDA"
+    - "h = post_attention_layernorm(h, residual=x)"
+    - "h = mlp(h)         # mlp_layer_types[i] 选 MoE 或 Dense"
+    - "out, residual = mhc 融合: 非MHC out = residual + mlp"
+  params_schema:
+    type: object
+    required: [layer_idx]
+    properties:
+      layer_idx:   { type: integer }
+      hidden_size: { type: integer, source: config.hidden_size }
+      mhc:         { type: boolean, source: config.mhc }
+      is_mtp_layer: { type: boolean, default: false }
+      is_sequence_parallel: { type: boolean, parallel_config: use_sequence_parallel_moe }
+  children:
+    - { id: input_layernorm, block: RMSNorm, port_bind: { hidden_size: "${config.hidden_size}", eps: "${config.rms_norm_eps}" } }
+    - { id: self_attn_mla, block: Glm5NextMLAAttention,
+        condition: "config.layer_types[layer_idx] == 'deepseek_sparse_attention'" }
+    - { id: self_attn_kda, block: Glm5NextLinearAttention,
+        condition: "config.layer_types[layer_idx] == 'linear_attention'" }
+    - { id: post_attention_layernorm, block: RMSNorm, port_bind: { hidden_size: "${config.hidden_size}", eps: "${config.rms_norm_eps}" } }
+    - { id: mlp_moe, block: Glm5NextMoE,
+        condition: "config.is_moe and config.n_routed_experts is not None and config.mlp_layer_types[layer_idx] == 'sparse'" }
+    - { id: mlp_dense, block: Glm5NextMLP,
+        condition: "config.mlp_layer_types[layer_idx] != 'sparse'" }
+    - { id: mhc, block: MHCMultiResidualStream,
+        condition: "config.mhc and layer_idx < config.num_hidden_layers" }
+  edges:
+    - { from: {id: hidden_states}, to: {id: input_layernorm, port: x} }
+    - { from: {id: positions},     to: {id: self_attn_mla, port: positions}, condition: "config.layer_types[layer_idx] == 'deepseek_sparse_attention'" }
+    - { from: {id: positions},     to: {id: self_attn_kda, port: positions}, condition: "config.layer_types[layer_idx] == 'linear_attention'" }
+    - { from: {id: input_layernorm, port: y},  to: {id: self_attn_mla, port: hidden_states}, condition: "config.layer_types[layer_idx] == 'deepseek_sparse_attention'" }
+    - { from: {id: input_layernorm, port: y},  to: {id: self_attn_kda, port: hidden_states}, condition: "config.layer_types[layer_idx] == 'linear_attention'" }
+    - { from: {id: self_attn_mla, port: out},  to: {id: post_attention_layernorm, port: x}, condition: "config.layer_types[layer_idx] == 'deepseek_sparse_attention'" }
+    - { from: {id: self_attn_kda, port: out},  to: {id: post_attention_layernorm, port: x}, condition: "config.layer_types[layer_idx] == 'linear_attention'" }
+    - { from: {id: post_attention_layernorm, port: y}, to: {id: mlp_moe, port: x},  condition: "config.mlp_layer_types[layer_idx] == 'sparse'" }
+    - { from: {id: post_attention_layernorm, port: y}, to: {id: mlp_dense, port: x}, condition: "config.mlp_layer_types[layer_idx] != 'sparse'" }
+    - { from: {id: mlp_moe, port: y},   to: {id: hidden_states}, condition: "config.mlp_layer_types[layer_idx] == 'sparse'",
+        note: "残差相加在 mhc 融合核/非MHC层 residual+mlp_out 内完成（见 forward_note）" }
+    - { from: {id: mlp_dense, port: y}, to: {id: hidden_states}, condition: "config.mlp_layer_types[layer_idx] != 'sparse'" }
+    - { from: {id: residual}, to: {id: residual}, condition: "not config.mhc or config.is_mtp_layer", note: "非MHC层：residual 旁路直连输出，供下游层/最终输出" }
+  ports:
+    inputs:
+      - { id: hidden_states, type: tensor, shape: "[B, S, H]", role: activation }
+      - { id: positions,     type: tensor, shape: "[B, S]" }
+      - { id: residual,      type: tensor, shape: "[B, S, H]", role: residual, optional: true }
+      - { id: post,          type: tensor, role: mhc_state, optional: true }
+      - { id: comb,          type: tensor, role: mhc_state, optional: true }
+    outputs:
+      - { id: hidden_states, type: tensor, shape: "[B, S, H]", role: activation }
+      - { id: residual,      type: tensor, shape: "[B, S, H]", role: residual, optional: true }
+      - { id: post,          type: tensor, role: mhc_state, optional: true }
+      - { id: comb,          type: tensor, role: mhc_state, optional: true }
+  file: vllm/models/glm5next/nvidia/model.py
+  forward_note: "MHC 层：hc_expand → hc_pre(attn) → attn → hc_fused_post_pre(ffn) → mlp；末层最后 hc_post + hc_contract 收缩回单残差。残差相加在融合核内完成；post/comb 是跨层携带的延迟 hc_post 状态（由 assembly 层循环在层间传递，单个 composite 内无法用静态边表达）。非 MHC/MTP 层：residual=hidden_states 直连，output=residual+mlp_out。MTP 层(is_mtp_layer=True) 强制走非-MHC 路径。"
+
+# ---- 多模态视觉塔组合 ----
+- kind: composite
+  name: Glm5NextVisionMLP
+  category: vision
+  description: 视觉塔 FFN（SwiGLU with clamp）：gate_up(MergedColumn) → SiluAndMulWithClamp → down(Row)，bias=True。
+  formula:
+    - "gate_up = x @ W_gate_up^T ;  act = clamp-silu(gate_up[:D]) * silu(clamp(gate_up[D:]))"
+    - "y = act @ W_down^T + b"
+  params_schema:
+    type: object
+    required: [in_features, hidden_features]
+    properties:
+      in_features:     { type: integer }
+      hidden_features: { type: integer }
+      swiglu_limit:    { type: number, source: config.vision_config.swiglu_limit }
+      bias:            { type: boolean, default: true }
+  children:
+    - { id: gate_up, block: MergedColumnParallelLinear,
+        port_bind: { input_size: "${config.vision_config.hidden_size}", output_sizes: "[${config.vision_config.intermediate_size}, ${config.vision_config.intermediate_size}]", bias: true } }
+    - { id: act, block: SiluAndMulWithClamp,
+        port_bind: { swiglu_limit: "${config.vision_config.swiglu_limit}" } }
+    - { id: down, block: RowParallelLinear,
+        port_bind: { input_size: "${config.vision_config.intermediate_size}", output_size: "${config.vision_config.hidden_size}", bias: true } }
+  edges:
+    - { from: {id: x},            to: {id: gate_up, port: x} }
+    - { from: {id: gate_up, port: cats}, to: {id: act, port: x} }
+    - { from: {id: act, port: y}, to: {id: down, port: x} }
+    - { from: {id: down, port: y}, to: {id: y} }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., D]" }]
+    outputs: [{ id: y, type: tensor, shape: "[..., D]" }]
+  file: vllm/models/glm5next/nvidia/multimodal.py
+
+- kind: composite
+  name: Glm5NextVisionAttention
+  category: vision
+  description: 视觉塔注意力：QKVParallelLinear → split → QKVProjection → RoPE → MMEncoderAttention → proj(Row)。含 q/k RMSNorm(eps=1e-5)。
+  formula:
+    - "q,k,v = split(x @ W_qkv) ;  q = RMSNorm(q); k = RMSNorm(k)  # eps=1e-5"
+    - "q,k = RoPE(q,k) ;  attn = softmax(q k^T / sqrt(d)) v"
+    - "y = attn @ W_proj^T + allreduce"
+  params_schema:
+    type: object
+    required: [embed_dim, num_heads]
+    properties:
+      embed_dim:      { type: integer }
+      num_heads:      { type: integer }
+      projection_size: { type: integer }
+      head_dim:        { type: integer }
+  children:
+    - { id: qkv, block: QKVParallelLinear,
+        port_bind: { hidden_size: "${config.vision_config.hidden_size}", head_size: "( ${config.vision_config.hidden_size} / ${config.vision_config.num_heads} )", total_num_heads: "${config.vision_config.num_heads}", total_num_kv_heads: "${config.vision_config.num_heads}", bias: true } }
+    - { id: mm_attn, block: MMEncoderAttention,
+        port_bind: { num_heads: "${config.vision_config.num_heads}", head_size: "( ${config.vision_config.hidden_size} / ${config.vision_config.num_heads} )", scale: "( ( ${config.vision_config.hidden_size} / ${config.vision_config.num_heads} ) ** -0.5 )" } }
+    - { id: proj, block: RowParallelLinear,
+        port_bind: { input_size: "${config.vision_config.hidden_size}", output_size: "${config.vision_config.hidden_size}", bias: true } }
+  edges:
+    - { from: {id: x},            to: {id: qkv, port: x} }
+    - { from: {id: qkv, port: qkv}, to: {id: mm_attn, port: query}, note: "q/k/v 拆分 + q/k RMSNorm + RoPE 在 forward 内完成；query/key/value/pos 由 mm_attn 消费" }
+    - { from: {id: mm_attn, port: out}, to: {id: proj, port: x} }
+    - { from: {id: proj, port: y},      to: {id: y} }
+  ports:
+    inputs:
+      - { id: x,        type: tensor, shape: "[S, B, D]" }
+      - { id: cu_seqlens, type: tensor }
+      - { id: cos,      type: tensor }
+      - { id: sin,      type: tensor }
+    outputs:
+      - { id: y, type: tensor, shape: "[S, B, D]" }
+  file: vllm/models/glm5next/nvidia/multimodal.py
+
+- kind: composite
+  name: Glm5NextVisionBlock
+  category: vision
+  description: 视觉塔 transformer 块：norm1 → VisionAttention → norm2(residual) → VisionMLP（残差）。norm 用 RMSNorm(eps=1e-6)。
+  formula:
+    - "x_attn = attn(norm1(x))"
+    - "x, residual = norm2(x, residual=x_attn)  # 残差融合 norm"
+    - "y = residual + mlp(x_fused_norm)"
+  params_schema:
+    type: object
+    required: [dim, num_heads]
+    properties:
+      dim:            { type: integer }
+      num_heads:      { type: integer }
+      mlp_hidden_dim: { type: integer }
+      swiglu_limit:   { type: number }
+  children:
+    - { id: norm1, block: RMSNorm, port_bind: { hidden_size: "${dim}", eps: 1e-6 } }
+    - { id: attn, block: Glm5NextVisionAttention }
+    - { id: norm2, block: RMSNorm, port_bind: { hidden_size: "${dim}", eps: 1e-6 } }
+    - { id: mlp, block: Glm5NextVisionMLP }
+  edges:
+    - { from: {id: x},    to: {id: norm1, port: x} }
+    - { from: {id: norm1, port: y}, to: {id: attn, port: x} }
+    - { from: {id: attn, port: y}, to: {id: mlp, port: x} }
+    - { from: {id: mlp, port: y}, to: {id: y} }
+  ports:
+    inputs:
+      - { id: x,        type: tensor, shape: "[S, B, D]" }
+      - { id: cu_seqlens, type: tensor }
+      - { id: cos,      type: tensor }
+      - { id: sin,      type: tensor }
+    outputs:
+      - { id: y, type: tensor, shape: "[S, B, D]" }
+  file: vllm/models/glm5next/nvidia/multimodal.py
+  forward_note: "norm2 以残差模式调用（x_fused_norm,residual = norm2(x, residual=x_attn)）；norm1/attn 前置、mlp 后置，残差相加在 forward 内：x = residual + mlp(x_fused_norm)。"
+
+- kind: composite
+  name: Glm5NextPatchMerger
+  category: vision
+  description: 合并器：proj → post_projection_norm(LayerNorm) → GELU → [gate_up(MergedColumn) → clamp-SwiGLU → down(Row)]；瓶颈宽度 projection_intermediate_size。
+  formula:
+    - "x = proj(x) ;  x = GELU(post_projection_norm(x))"
+    - "gate_up = x @ W_gate_up^T ;  act = clamp-silu(gate_up[:D]) * silu(clamp(gate_up[D:]))"
+    - "y = act @ W_down^T"
+  params_schema:
+    type: object
+    required: [hidden_size]
+    properties:
+      hidden_size:      { type: integer }
+      context_dim:      { type: integer }
+      swiglu_limit:     { type: number }
+  children:
+    - { id: proj, block: ColumnParallelLinear,
+        port_bind: { input_size: "${config.vision_config.out_hidden_size}", output_size: "${config.vision_config.out_hidden_size}", bias: false, gather_output: true } }
+    - { id: pnorm, block: LayerNorm, port_bind: { normalized_shape: "${config.vision_config.out_hidden_size}" } }
+    - { id: gelu, block: GELU }
+    - { id: gate_up, block: MergedColumnParallelLinear,
+        port_bind: { input_size: "${config.vision_config.out_hidden_size}", output_sizes: "[${config.vision_config.projection_intermediate_size}, ${config.vision_config.projection_intermediate_size}]", bias: false } }
+    - { id: act, block: SiluAndMulWithClamp, port_bind: { swiglu_limit: "${config.vision_config.swiglu_limit}" } }
+    - { id: down, block: RowParallelLinear,
+        port_bind: { input_size: "${config.vision_config.projection_intermediate_size}", output_size: "${config.vision_config.out_hidden_size}", bias: false } }
+  edges:
+    - { from: {id: x},            to: {id: proj, port: x} }
+    - { from: {id: proj, port: y}, to: {id: pnorm, port: x} }
+    - { from: {id: pnorm, port: y}, to: {id: gelu, port: x} }
+    - { from: {id: gelu, port: y}, to: {id: gate_up, port: x} }
+    - { from: {id: gate_up, port: cats}, to: {id: act, port: x} }
+    - { from: {id: act, port: y}, to: {id: down, port: x} }
+    - { from: {id: down, port: y}, to: {id: y} }
+  ports:
+    inputs:  [{ id: x, type: tensor, shape: "[..., D]" }]
+    outputs: [{ id: y, type: tensor, shape: "[..., D]" }]
+  file: vllm/models/glm5next/nvidia/multimodal.py
+
+- kind: composite
+  name: Glm5NextVisionTransformer
+  category: vision
+  description: 视觉塔。patch_embed(Conv3d) → blocks[24]（VisionBlock 循环）→ post_layernorm → downsample(Conv2d) → merger。visual 专用 RoPE(is_neox, partial=0.5, max=8192) 与 q/k RMSNorm。
+  formula:
+    - "patch = patch_embed(Conv3d)(x)"
+    - "for b in blocks:  patch = VisionBlock(b)(patch)"
+    - "x = post_layernorm(patch) ;  x = downsample(Conv2d)(x)"
+    - "y = merger(x)  # -> [N, E] 图像特征"
+  params_schema:
+    type: object
+    properties:
+      depth:             { type: integer, source: config.vision_config.depth }
+      hidden_size:       { type: integer, source: config.vision_config.hidden_size }
+      out_hidden_size:   { type: integer, source: config.vision_config.out_hidden_size }
+      swiglu_limit:      { type: number, source: config.vision_config.swiglu_limit }
+  children:
+    - { id: patch_embed, block: Conv3dLayer,
+        port_bind: { in_channels: "${config.vision_config.in_channels}", hidden_size: "${config.vision_config.hidden_size}", kernel_size: "( ${config.vision_config.temporal_patch_size} * ${config.vision_config.patch_size} )" } }
+    - { id: block, block: Glm5NextVisionBlock }
+    - { id: post_layernorm, block: RMSNorm, port_bind: { hidden_size: "${config.vision_config.hidden_size}", eps: 1e-6 } }
+    - { id: downsample, block: Conv2dLayer,
+        port_bind: { in_channels: "${config.vision_config.hidden_size}", out_channels: "${config.vision_config.out_hidden_size}", kernel_size: "${config.vision_config.spatial_merge_size}", stride: "${config.vision_config.spatial_merge_size}" } }
+    - { id: merger, block: Glm5NextPatchMerger,
+        port_bind: { context_dim: "${config.vision_config.projection_intermediate_size}" } }
+  edges:
+    - { from: {id: x},              to: {id: patch_embed, port: x} }
+    - { from: {id: patch_embed, port: y}, to: {id: block, port: x} }
+    - { from: {id: block, port: y}, to: {id: post_layernorm, port: x} }
+    - { from: {id: post_layernorm, port: y}, to: {id: downsample, port: x} }
+    - { from: {id: downsample, port: y}, to: {id: merger, port: x} }
+    - { from: {id: merger, port: y}, to: {id: y} }
+  ports:
+    inputs:
+      - { id: x,    type: tensor, shape: "[N, T, C, H, W]" }
+      - { id: cu_seqlens, type: tensor }
+    outputs:
+      - { id: y, type: tensor, shape: "[N, E]" }
+  file: vllm/models/glm5next/nvidia/multimodal.py
+
+- kind: composite
+  name: Glm5NextModel
+  category: hybrid
+  description: GLM5Next 文本主干（composite，可复用）。embed_tokens → layers[45] → norm。layers 为 DecoderLayer 循环，per-layer layer_types/mlp_layer_types 决定 MLA/KDA 与 dense/MoE。
+  formula:
+    - "h = embed_tokens(input_ids)"
+    - "for i < num_hidden_layers:  h, residual = DecoderLayer(layer_types[i], mlp_layer_types[i])(h)"
+    - "y = RMSNorm(h)  # -> [B,S,H]"
+  children:
+    - { id: embed_tokens, block: VocabParallelEmbedding, as: embed_tokens,
+        port_bind: { num_embeddings: "${config.vocab_size}", embedding_dim: "${config.hidden_size}" } }
+    - { id: layers, block: Glm5NextDecoderLayer, as: layers,
+        loop: { count: "${config.num_hidden_layers}", per_iter_bind: { layer_idx: "${loop_index}" } },
+        note: "每层依 config.layer_types[i]/config.mlp_layer_types[i] 自动选型；残差/ MTP post-comb 状态在层间携带" }
+    - { id: norm, block: RMSNorm, as: norm, port_bind: { hidden_size: "${config.hidden_size}", eps: "${config.rms_norm_eps}" } }
+  edges:
+    - { from: {id: input_ids},         to: {id: embed_tokens, port: input_ids} }
+    - { from: {id: positions},         to: {id: layers, port: positions} }
+    - { from: {id: embed_tokens, port: hidden}, to: {id: layers, port: hidden_states} }
+    - { from: {id: layers, port: hidden_states}, to: {id: norm, port: x} }
+    - { from: {id: norm, port: y},     to: {id: out} }
+  ports:
+    inputs:
+      - { id: input_ids, type: tensor, shape: "[B, S]", dtype: int64, role: token_ids }
+      - { id: positions, type: tensor, shape: "[B, S]", dtype: int64 }
+    outputs: [{ id: hidden,    type: tensor, shape: "[B, S, H]", dtype: float16, role: activation }]
+
+- kind: composite
+  name: Glm5NextMultiTokenPredictorLayer
+  category: mtp
+  description: MTP 单层（composite，可复用）：embed_tokens + enorm(embeds) + hnorm(prev) → eh_proj(2H→H) → 复用 Glm5NextDecoderLayer(is_mtp_layer=True) → shared_head.norm 残差归一。MTP 层索引 = num_hidden_layers。
+  formula:
+    - "h = fused_eh_norm(embed_tokens(input_ids), prev_hidden)  # 2H -> H"
+    - "h, residual = DecoderLayer(is_mtp_layer=True)(h, prev_hidden)"
+  children:
+    - { id: embed_tokens, block: VocabParallelEmbedding, as: embed_tokens,
+        port_bind: { num_embeddings: "${config.vocab_size}", embedding_dim: "${config.hidden_size}" } }
+    - { id: enorm, block: RMSNorm, port_bind: { hidden_size: "${config.hidden_size}", eps: "${config.rms_norm_eps}" } }
+    - { id: hnorm, block: RMSNorm, port_bind: { hidden_size: "${config.hidden_size}", eps: "${config.rms_norm_eps}" } }
+    - { id: eh_proj, block: ReplicatedLinear, port_bind: { input_size: "( 2 * ${config.hidden_size} )", output_size: "${config.hidden_size}", bias: false } }
+    - { id: mtp_block, block: Glm5NextDecoderLayer, as: mtp_block,
+        port_bind: { layer_idx: "${config.num_hidden_layers}", is_mtp_layer: true } }
+  edges:
+    - { from: {id: input_ids},     to: {id: embed_tokens, port: input_ids} }
+    - { from: {id: embed_tokens, port: hidden}, to: {id: mtp_block, port: hidden_states} }
+    - { from: {id: positions},     to: {id: mtp_block, port: positions} }
+  ports:
+    inputs:
+      - { id: input_ids, type: tensor, shape: "[B, S]", dtype: int64 }
+      - { id: positions, type: tensor, shape: "[B, S]", dtype: int64 }
+      - { id: previous_hidden_states, type: tensor, shape: "[B, S, H]" }
+    outputs:
+      - { id: hidden_states, type: tensor, shape: "[B, S, H]" }
+      - { id: residual,      type: tensor, shape: "[B, S, H]" }
+  file: vllm/models/glm5next/nvidia/mtp.py
+  forward_note: "enorm/hnorm/eh_proj 在 fused_eh_norm 中融合；mtp_block 走非-MHC 路径（is_mtp_layer=True），输出 pair 直接喂 shared_head.norm 的融合残差加归一（一次核）。"
+
+- kind: composite
+  name: Glm5NextMultiTokenPredictor
+  category: mtp
+  description: MTP 草稿预测器（composite，可复用）。持有 layers(ModuleDict of Glm5NextMultiTokenPredictorLayer × num_nextn_predict_layers) + 共享 embed_tokens + logits_processor。层索引自 num_hidden_layers 起。
+  formula:
+    - "h = embed_tokens(input_ids)"
+    - "for mtp_layer in layers:  h = MultiTokenPredictorLayer(mtp_layer)(h, prev)"
+    - "logits = LogitsProcessor(h)"
+  children:
+    - { id: layers, block: Glm5NextMultiTokenPredictorLayer, as: layers,
+        loop: { count: "${config.num_nextn_predict_layers}", per_iter_bind: { layer_idx: "(${config.num_hidden_layers} + ${loop_index})" } },
+        note: "num_nextn_predict_layers=1 时即单一 MTP 层（层索引 num_hidden_layers）" }
+    - { id: embed_tokens, block: VocabParallelEmbedding, as: embed_tokens,
+        port_bind: { num_embeddings: "${config.vocab_size}", embedding_dim: "${config.hidden_size}" } }
+    - { id: logits_processor, block: LogitsProcessor, as: logits_processor,
+        port_bind: { vocab_size: "${config.vocab_size}", scale: 1.0 } }
+  edges:
+    - { from: {id: input_ids}, to: {id: embed_tokens, port: input_ids} }
+    - { from: {id: embed_tokens, port: hidden}, to: {id: layers, port: hidden_states} }
+    - { from: {id: layers, port: hidden_states}, to: {id: logits_processor, port: hidden} }
+    - { from: {id: logits_processor, port: logits}, to: {id: out} }
+  ports:
+    inputs:
+      - { id: input_ids, type: tensor, shape: "[B, S]", dtype: int64 }
+      - { id: positions, type: tensor, shape: "[B, S]", dtype: int64 }
+      - { id: previous_hidden_states, type: tensor, shape: "[B, S, H]" }
+    outputs:
+      - { id: hidden_states,  type: tensor, shape: "[B, S, H]" }
+  file: vllm/models/glm5next/nvidia/mtp.py
+  forward_note: "embed_tokens/logits_processor 与主模型共享权重（tie）。layers 为 ModuleDict；index_share_for_mtp_iteration 下 step0 算 top-k、后续复用。"
+
+# ============================================================================
+- kind: assembly
+  name: Glm5NextForConditionalGeneration
+  category: multimodal
+  description: >-
+    GLM5Next 多模态因果语言模型：visual 塔提取图像/视频特征 → 投影到文本 hidden；
+    language_model 复用 Glm5NextForCausalLM。registry 与 text-only 分开（主 config architectures 为
+    Glm5NextForConditionalGeneration）。
+  config:
+    num_hidden_layers: 45
+    hidden_size: 4096
+    num_attention_heads: 64
+    num_key_value_heads: 64
+    vocab_size: 154880
+    rms_norm_eps: 1e-5
+  formula:
+    - "feat = VisionTransformer(pixel_values)  # [N,E] 图像特征"
+    - "x_emb = patch_merge_to_text_hidden(feat, input_ids)"
+    - "logits = language_model(x_emb, input_ids, positions)"
+  steps:
+    - { id: visual, block: Glm5NextVisionTransformer, as: visual }
+    - { id: language_model, block: Glm5NextForCausalLM, as: language_model }
+  edges: []
+  ports:
+    inputs:
+      - { id: pixel_values, type: tensor }
+      - { id: input_ids,    type: tensor, shape: "[B, S]", dtype: int64 }
+      - { id: positions,    type: tensor, shape: "[B, S]", dtype: int64 }
+    outputs:
+      - { id: logits, type: tensor, shape: "[B, S, V]", dtype: float32 }
+  file: vllm/models/glm5next/nvidia/model.py
+  weight_prefix_note: "视觉塔权重前缀 model.visual.→visual.；文本塔 model.language_model.(model.)→language_model.model.，lm_head→language_model.lm_head。图片特征经 PatchMerger 投影为 text hidden（见 Glm5NextVisionTransformer），由语言模型 inputs_embeds 消费。"
+
+- kind: assembly
+  name: Glm5NextMTP
+  category: mtp
+  description: MTP 草稿模型（spec-dec 入口）。持自 Glm5NextMultiTokenPredictor（含 MTP 层循环 + 共享 embed_tokens + 内部 logits_processor）。
+  config:
+    num_hidden_layers: 45
+    num_nextn_predict_layers: 1
+    hidden_size: 4096
+    vocab_size: 154880
+    rms_norm_eps: 1e-5
+  formula:
+    - "h = MultiTokenPredictor(input_ids, prev_hidden_states)"
+    - "out = LogitsProcessor(h)  # -> [B,S,V]"
+  steps:
+    - id: predictor
+      block: Glm5NextMultiTokenPredictor
+      as: model
+      note: "num_nextn_predict_layers 由 config 决定；层索引自 num_hidden_layers 起逐层递增。"
+  edges:
+    - { from: {id: input_ids},     to: {id: predictor, port: input_ids} }
+    - { from: {id: positions},     to: {id: predictor, port: positions} }
+    - { from: {id: previous_hidden_states}, to: {id: predictor, port: previous_hidden_states} }
+  ports:
+    inputs:
+      - { id: input_ids, type: tensor, shape: "[B, S]", dtype: int64 }
+      - { id: positions, type: tensor, shape: "[B, S]", dtype: int64 }
+      - { id: previous_hidden_states, type: tensor, shape: "[B, S, H]" }
+    outputs:
+      - { id: out, type: tensor, shape: "[B, S, V]", dtype: float32, role: distribution }
+  file: vllm/models/glm5next/nvidia/mtp.py
+  weight_prefix_note: "MTP 草稿权重位于 model.layers.45.*，共享 embed_tokens 与 shared_head.head 从 model. 读取；前缀重写见 _rewrite_spec_layer_name（mtp.py）。"
+
+- kind: assembly
+  name: Glm5NextForCausalLM
+  category: hybrid
+  description: GLM5Next 完整因果语言模型。text 主干 + lm_head + logits。tie_word_embeddings=False 故 lm_head 独立。
+  config:
+    num_hidden_layers: 45
+    hidden_size: 4096
+    num_attention_heads: 64
+    num_key_value_heads: 64
+    vocab_size: 154880
+    intermediate_size: 12288
+    moe_intermediate_size: 2048
+    n_routed_experts: 288
+    n_shared_experts: 1
+    num_experts_per_token: 8
+    q_lora_rank: 1536
+    kv_lora_rank: 512
+    qk_nope_head_dim: 256
+    qk_rope_head_dim: 0
+    v_head_dim: 256
+    index_topk: 2048
+    rms_norm_eps: 1e-5
+    mhc: true
+    tie_word_embeddings: false
+    logit_scale: 1.0
+  formula:
+    - "h = Glm5NextModel(input_ids, positions)"
+    - "logits = lm_head(h)  # tie_word_embeddings=False 独立权重"
+    - "logits = LogitsProcessor(logits)  # scale=1.0"
+  steps:
+    - { id: decoder, block: Glm5NextModel, as: model }
+    - { id: lm_head, block: ParallelLMHead, as: lm_head,
+        port_bind: { vocab_size: "${config.vocab_size}", hidden_size: "${config.hidden_size}" },
+        condition: "not config.tie_word_embeddings" }
+    - { id: logits_processor, block: LogitsProcessor, as: logits_processor, port_bind: { scale: 1.0 } }
+  edges:
+    - { from: {id: input_ids}, to: {id: decoder, port: input_ids} }
+    - { from: {id: decoder, port: hidden}, to: {id: lm_head, port: hidden} }
+    - { from: {id: lm_head, port: logits}, to: {id: logits_processor, port: hidden} }
+    - { from: {id: logits_processor, port: logits}, to: {id: out} }
+  ports:
+    inputs:  [{ id: input_ids, type: tensor, shape: "[B, S]", dtype: int64, role: token_ids }]
+    outputs: [{ id: logits,    type: tensor, shape: "[B, S, V]", dtype: float32, role: distribution }]

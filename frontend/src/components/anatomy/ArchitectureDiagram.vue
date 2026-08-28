@@ -590,7 +590,7 @@ function repeatBadgeWidth(count: number | undefined): number {
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: var(--radius-xs);
-  font-size: 14px;
+  font-size: 15px;
   font-family: var(--font-mono);
   transition: all var(--t-fast);
 }
@@ -600,7 +600,7 @@ function repeatBadgeWidth(count: number | undefined): number {
 }
 .arch-zoom-label {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 15px;
   color: var(--text-tertiary);
   padding: 0 4px;
   min-width: 36px;
@@ -651,7 +651,7 @@ function repeatBadgeWidth(count: number | undefined): number {
 .arch-block-title {
   fill: var(--amber);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 600;
   dominant-baseline: central;
 }
@@ -676,7 +676,7 @@ function repeatBadgeWidth(count: number | undefined): number {
 .arch-text-name {
   fill: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   text-anchor: middle;
   dominant-baseline: central;
@@ -685,7 +685,7 @@ function repeatBadgeWidth(count: number | undefined): number {
 .arch-text-label {
   fill: var(--text-tertiary);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 15px;
   text-anchor: middle;
   dominant-baseline: central;
 }
@@ -698,7 +698,7 @@ function repeatBadgeWidth(count: number | undefined): number {
 .arch-repeat-pill-text {
   fill: var(--text-on-accent);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 15px;
   font-weight: 700;
   dominant-baseline: central;
 }

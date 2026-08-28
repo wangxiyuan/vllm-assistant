@@ -421,7 +421,7 @@ class MemoryService:
         article_stats = self._build_from_articles()
         stats["article"] = article_stats.get("count", 0)
 
-        # 4. 从 Operator / ModelAnatomy 表构建架构知识
+        # 4. 从 BuildingBlock / ModelAssembly 表构建架构知识
         model_stats = self._build_from_model_anatomy()
         stats["model"] = model_stats.get("count", 0)
 
@@ -683,37 +683,47 @@ class MemoryService:
         return stats
 
     def _build_from_model_anatomy(self) -> Dict[str, int]:
-        """从 Operator / ModelAnatomy 表增量构建架构知识
+        """从 BuildingBlock / ModelAssembly 表增量构建架构知识
 
         按 checksum（updated_at）判断是否需要更新。
         """
         from app.database import SessionLocal
-        from app.models import Operator, ModelAnatomy
+        from app.models import BuildingBlock, ModelAssembly
 
         stats = {"count": 0}
         db = SessionLocal()
         try:
-            # 算子
-            operators = db.query(Operator).all()
-            for op in operators:
-                source_ref = f"operator#{op.id}"
-                op_checksum = str(op.updated_at.timestamp()) if op.updated_at else ""
+            # 积木（算子）
+            blocks = db.query(BuildingBlock).all()
+            for block in blocks:
+                source_ref = f"building_block#{block.id}"
+                block_checksum = str(block.updated_at.timestamp()) if block.updated_at else ""
 
-                tags = json.loads(op.tags) if op.tags else []
-                tags = ["operator"] + tags
+                tags = json.loads(block.tags) if block.tags else []
+                tags = ["building_block", block.kind, block.category] + tags
+                ports = json.loads(block.ports) if block.ports else {}
+                port_descs = []
+                for p in (ports.get("inputs") or []):
+                    port_descs.append(f"in:{p.get('id')}{p.get('shape') or ''}")
+                for p in (ports.get("outputs") or []):
+                    port_descs.append(f"out:{p.get('id')}{p.get('shape') or ''}")
                 content = (
-                    f"## 算子: {op.display_name} ({op.name})\n\n"
-                    f"**分类**: {op.category}\n"
-                    f"**描述**: {op.description or '暂无'}\n"
-                    f"**输入**: {op.input_shape_desc or 'N/A'}\n"
-                    f"**输出**: {op.output_shape_desc or 'N/A'}\n"
+                    f"## 积木: {block.name} ({block.kind})\n\n"
+                    f"**分类**: {block.category}\n"
+                    f"**描述**: {block.description or '暂无'}\n"
+                    f"**端口**: {', '.join(port_descs) or 'N/A'}\n"
                 )
+                vllm = json.loads(block.vllm) if block.vllm else {}
+                if vllm.get("file"):
+                    content += f"**vLLM 源码**: {vllm.get('file')}\n"
+                if vllm.get("class"):  # 兼容历史数据
+                    content += f"**vLLM**: {vllm.get('class')}@{vllm.get('file')}\n"
 
                 existing = self.find_by_source_ref(source_ref)
                 if existing:
-                    if existing.checksum == op_checksum:
+                    if existing.checksum == block_checksum:
                         continue
-                    self.update(existing.id, content=content, checksum=op_checksum)
+                    self.update(existing.id, content=content, checksum=block_checksum)
                     stats["count"] += 1
                 else:
                     self.remember(
@@ -721,23 +731,26 @@ class MemoryService:
                         source_type="code_structure",
                         source_ref=source_ref,
                         tags=tags,
-                        checksum=op_checksum,
+                        checksum=block_checksum,
                     )
                     stats["count"] += 1
 
-            # 模型架构
-            models = db.query(ModelAnatomy).all()
+            # 模型组装
+            models = db.query(ModelAssembly).all()
             for model in models:
-                source_ref = f"model_anatomy#{model.id}"
+                source_ref = f"model_assembly#{model.id}"
                 model_checksum = str(model.updated_at.timestamp()) if model.updated_at else ""
 
                 tags = json.loads(model.tags) if model.tags else []
-                tags = ["model_anatomy"] + tags
+                tags = ["model_assembly", model.category] + tags
+                definition = json.loads(model.definition) if model.definition else {}
+                steps = definition.get("steps") or []
+                step_names = ", ".join(s.get("as") or s.get("id") for s in steps)
                 content = (
-                    f"## 模型: {model.display_name} ({model.name})\n\n"
+                    f"## 模型: {model.name}\n\n"
                     f"**分类**: {model.category}\n"
                     f"**描述**: {model.description or '暂无'}\n"
-                    f"**算子数量**: {model.operators_count or 0}\n"
+                    f"**组成**: {step_names or 'N/A'}\n"
                 )
 
                 existing = self.find_by_source_ref(source_ref)

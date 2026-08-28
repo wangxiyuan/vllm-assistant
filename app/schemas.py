@@ -238,64 +238,83 @@ class IntelligenceGenerateRequest(BaseModel):
         return v
 
 
-# ===== 模型拆解（docs/model_anatomy.md）=====
+# ===== 模型拆解（building_block / model_assembly，YAML 为唯一数据源）=====
 
 
-class CategoryCreate(BaseModel):
-    """创建分类"""
+class BuildingBlockCreate(BaseModel):
+    """创建积木"""
     name: str
-    display_name: str
-    description: str = ""
-    sort_order: int = 0
-
-
-class CategoryUpdate(BaseModel):
-    """更新分类"""
-    name: Optional[str] = None
-    display_name: Optional[str] = None
-    description: Optional[str] = None
-    sort_order: Optional[int] = None
-
-
-class OperatorCreate(BaseModel):
-    """创建算子"""
-    name: str
-    display_name: str
-    description: str = ""
+    kind: str = "atomic"  # atomic / composite
     category: str = "other"
+    description: str = ""
+    formula: list = []
     params_schema: dict = {}
-    input_shape_desc: str = ""
-    output_shape_desc: str = ""
-    vllm_code_refs: list = []
+    ports: dict = {"inputs": [], "outputs": []}
+    config: dict = {}
+    children: list = []
+    # 平铺实现字段（取代历史 vllm 嵌套层）
+    file: Optional[str] = None
+    weights: list = []
+    ops: list = []
+    edges: list = []
+    segments: list = []
+    forward_note: Optional[str] = None
+    weight_prefix_note: Optional[str] = None
+    note: Optional[str] = None
+    state: list = []
+    yaml: str = ""
+    checksum: str = ""
     tags: list[str] = []
-    user_id: Optional[int] = None  # 责任人
 
 
-class OperatorUpdate(BaseModel):
-    """更新算子（所有字段可选）"""
+class BuildingBlockUpdate(BaseModel):
+    """更新积木（所有字段可选）"""
     name: Optional[str] = None
-    display_name: Optional[str] = None
-    description: Optional[str] = None
+    kind: Optional[str] = None
     category: Optional[str] = None
+    description: Optional[str] = None
+    formula: Optional[list] = None
     params_schema: Optional[dict] = None
-    input_shape_desc: Optional[str] = None
-    output_shape_desc: Optional[str] = None
-    vllm_code_refs: Optional[list] = None
+    ports: Optional[dict] = None
+    config: Optional[dict] = None
+    children: Optional[list] = None
+    file: Optional[str] = None
+    weights: Optional[list] = None
+    ops: Optional[list] = None
+    edges: Optional[list] = None
+    segments: Optional[list] = None
+    forward_note: Optional[str] = None
+    weight_prefix_note: Optional[str] = None
+    note: Optional[str] = None
+    state: Optional[list] = None
+    yaml: Optional[str] = None
+    checksum: Optional[str] = None
     tags: Optional[list[str]] = None
-    user_id: Optional[int] = None  # 责任人
 
 
-class OperatorResponse(BaseModel):
-    """算子响应"""
+class BuildingBlockResponse(BaseModel):
+    """积木响应"""
     id: int
     name: str
-    display_name: str
-    description: str = ""
+    kind: str
     category: str
+    description: str = ""
+    formula: list = []
     params_schema: dict = {}
-    input_shape_desc: str = ""
-    output_shape_desc: str = ""
-    vllm_code_refs: list = []
+    ports: dict = {}
+    config: dict = {}
+    children: list = []
+    file: Optional[str] = None
+    weights: list = []
+    ops: list = []
+    edges: list = []
+    segments: list = []
+    forward_note: Optional[str] = None
+    weight_prefix_note: Optional[str] = None
+    note: Optional[str] = None
+    state: list = []
+    yaml: str = ""
+    checksum: str = ""
     tags: list[str] = []
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -304,46 +323,64 @@ class OperatorResponse(BaseModel):
         from_attributes = True
 
 
-class ModelAnatomyCreate(BaseModel):
-    """创建模型"""
+class ModelAssemblyCreate(BaseModel):
+    """创建模型组装"""
     name: str
-    display_name: str
-    description: str = ""
     category: str = "other"
-    architecture: list = []
-    params_summary: dict = {}
+    description: str = ""
+    definition: dict = {"steps": [], "edges": [], "ports": {}}
+    config: dict = {}
+    checksum: str = ""
     tags: list[str] = []
-    user_id: Optional[int] = None  # 责任人
 
 
-class ModelAnatomyUpdate(BaseModel):
-    """更新模型（所有字段可选）"""
+class ModelAssemblyUpdate(BaseModel):
+    """更新模型组装（所有字段可选）"""
     name: Optional[str] = None
-    display_name: Optional[str] = None
-    description: Optional[str] = None
     category: Optional[str] = None
-    architecture: Optional[list] = None
-    params_summary: Optional[dict] = None
+    description: Optional[str] = None
+    definition: Optional[dict] = None
+    config: Optional[dict] = None
+    checksum: Optional[str] = None
     tags: Optional[list[str]] = None
-    user_id: Optional[int] = None  # 责任人
 
 
-class ModelAnatomyResponse(BaseModel):
-    """模型响应"""
+class ModelAssemblyResponse(BaseModel):
+    """模型组装响应"""
     id: int
     name: str
-    display_name: str
+    kind: str = "assembly"
+    category: str
     description: str = ""
-    category: str = "other"
-    architecture: list = []
-    params_summary: dict = {}
-    operators_count: int = 0
+    definition: dict = {}
+    config: dict = {}
+    checksum: str = ""
     tags: list[str] = []
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class YAMLImportRequest(BaseModel):
+    """YAML 导入请求：yaml 文本或多文档 YAML"""
+    yaml: str
+    source: str = ""  # 可选文件名溯源
+
+
+class ValidationIssue(BaseModel):
+    path: str = ""
+    level: str = "error"  # error / warning / info
+    message: str = ""
+
+
+class AnatomyImportResult(BaseModel):
+    imported_blocks: int = 0
+    imported_assemblies: int = 0
+    skipped: int = 0
+    errors: list[ValidationIssue] = []
+    warnings: list[ValidationIssue] = []
 
 
 class QuickPromptCreate(BaseModel):

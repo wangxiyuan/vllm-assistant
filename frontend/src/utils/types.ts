@@ -166,16 +166,43 @@ export interface Operator {
   updated_at?: string
 }
 
-export interface Model {
+export interface AnatomyBlock {
   id: number
   name: string
-  display_name: string
-  description?: string
+  kind: 'atomic' | 'composite'
   category: string
-  architecture?: any[]
-  params_summary?: any
+  description?: string
+  formula?: string[]
+  params_schema?: any
+  ports?: { inputs?: any[]; outputs?: any[] }
+  config?: any
+  children?: any[]
+  file?: string
+  weights?: any[]
+  ops?: string[]
+  edges?: any[]
+  segments?: any[]
+  forward_note?: string
+  weight_prefix_note?: string
+  note?: string
+  state?: any[]
+  yaml?: string
+  checksum?: string
   tags?: string[]
-  user_id?: number | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ModelAssembly {
+  id: number
+  name: string
+  kind?: string
+  category: string
+  description?: string
+  definition?: any
+  config?: any
+  checksum?: string
+  tags?: string[]
   created_at?: string
   updated_at?: string
 }

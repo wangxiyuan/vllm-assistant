@@ -392,7 +392,7 @@ class IntelligenceReportTrace(Base):
     __tablename__ = "intelligence_report_traces"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    report_id = Column(Integer, ForeignKey("intelligence_reports.id"), nullable=False, index=True)
+    report_id = Column(Integer, ForeignKey("intelligence_reports.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # 阶段信息
     stage = Column(String(20), nullable=False)  # search / detail / report / fallback
@@ -627,82 +627,79 @@ class FileChangeHistory(Base):
 
 
 # ======================================================================
-# 模型拆解模块（docs/model_anatomy.md）
+# 模型拆解模块（building_block / model_assembly，YAML 为唯一数据源）
 # ======================================================================
 
 
-class OperatorCategory(Base):
-    """算子分类"""
-    __tablename__ = "operator_categories"
+class BuildingBlock(Base):
+    """积木（building_block）：atomic（原子）或 composite（组合）零件"""
+
+    __tablename__ = "building_block"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(50), unique=True, nullable=False)  # 如 'embedding'
-    display_name = Column(String(100), nullable=False)  # 如 'Embedding'
-    description = Column(Text)
-    sort_order = Column(Integer, default=0)
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "id": self.id,
-            "name": self.name,
-            "display_name": self.display_name,
-            "description": self.description or "",
-            "sort_order": self.sort_order or 0,
-        }
-
-
-class Operator(Base):
-    """算子（积木块）"""
-    __tablename__ = "operators"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), nullable=False, unique=True)
-    display_name = Column(String(100), nullable=False)
-    description = Column(Text)
+    name = Column(String(150), nullable=False, unique=True)
+    kind = Column(String(20), nullable=False, default="atomic")  # atomic / composite
     category = Column(String(50), nullable=False, default="other")
-    params_schema = Column(Text)  # JSON Schema
-    input_shape_desc = Column(String(200))
-    output_shape_desc = Column(String(200))
-    vllm_code_refs = Column(Text)  # JSON array
-    tags = Column(Text)  # JSON array
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 责任人
+    description = Column(Text)
+    formula = Column(Text)          # JSON（计算公式，list[string]；如 y = x·Wᵀ + b）
+    params_schema = Column(Text)  # JSON（JSON Schema）
+    ports = Column(Text)          # JSON（inputs/outputs 端口 + 形状表达式）
+    config = Column(Text)         # JSON（用户随 YAML 提供的模型 config，供 ${config.x} 解析）
+    children = Column(Text)       # JSON（composite 子积木列表 + edges + segments）
+    vllm = Column(Text)           # JSON（vllm 类/文件/权重映射）
+    state = Column(Text)          # JSON（含内状态积木，如 KDA conv_state/recurrent_state）
+    yaml = Column(Text)           # 该积木的原始 YAML 片段（round-trip 溯源）
+    checksum = Column(String(64)) # yaml 内容哈希
+    tags = Column(Text)           # JSON array
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        # vllm 列承载的平铺实现字段（file/weights/ops/edges/segments/notes）
+        extra = json.loads(self.vllm) if self.vllm else {}
+        d = {
             "id": self.id,
             "name": self.name,
-            "display_name": self.display_name,
-            "description": self.description or "",
+            "kind": self.kind,
             "category": self.category,
+            "description": self.description or "",
+            "formula": json.loads(self.formula) if self.formula else [],
             "params_schema": json.loads(self.params_schema) if self.params_schema else {},
-            "input_shape_desc": self.input_shape_desc or "",
-            "output_shape_desc": self.output_shape_desc or "",
-            "vllm_code_refs": json.loads(self.vllm_code_refs) if self.vllm_code_refs else [],
+            "ports": json.loads(self.ports) if self.ports else {"inputs": [], "outputs": []},
+            "config": json.loads(self.config) if self.config else {},
+            "children": json.loads(self.children) if self.children else [],
+            "state": json.loads(self.state) if self.state else [],
+            "yaml": self.yaml or "",
+            "checksum": self.checksum or "",
             "tags": json.loads(self.tags) if self.tags else [],
-            "user_id": self.user_id,
             "created_at": _iso_utc(self.created_at),
             "updated_at": _iso_utc(self.updated_at),
         }
+        # 平铺实现字段到顶层；只放行受支持的键（过滤历史遗留 class/base_class 等）
+        _flat_allow = {
+            "file", "weights", "ops", "edges", "segments",
+            "forward_note", "weight_prefix_note", "note",
+        }
+        for k, v in extra.items():
+            if k in _flat_allow and v:
+                d[k] = v
+        return d
 
 
-class ModelAnatomy(Base):
-    """模型（搭好的积木成品）"""
-    __tablename__ = "model_anatomy"
+class ModelAssembly(Base):
+    """模型组装（model_assembly）：把积木搭成模型成品"""
+
+    __tablename__ = "model_assembly"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), nullable=False, unique=True)
-    display_name = Column(String(100), nullable=False)
+    name = Column(String(150), nullable=False, unique=True)
+    kind = Column(String(20), nullable=False, default="assembly")
+    category = Column(String(50), nullable=False, default="other")
     description = Column(Text)
-    category = Column(String(50), nullable=False, default="other")  # moe / dense / hybrid / other
-    architecture = Column(Text)  # JSON 结构树
-    params_summary = Column(Text)  # JSON 参数汇总
-    operators_count = Column(Integer, default=0)
-    tags = Column(Text)  # JSON array
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 责任人
+    definition = Column(Text)  # JSON（steps + edges + ports）
+    config = Column(Text)      # JSON（用户随 YAML 提供的模型 config）
+    checksum = Column(String(64))
+    tags = Column(Text)        # JSON array
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
@@ -710,14 +707,13 @@ class ModelAnatomy(Base):
         return {
             "id": self.id,
             "name": self.name,
-            "display_name": self.display_name,
-            "description": self.description or "",
+            "kind": self.kind,
             "category": self.category,
-            "architecture": json.loads(self.architecture) if self.architecture else [],
-            "params_summary": json.loads(self.params_summary) if self.params_summary else {},
-            "operators_count": self.operators_count or 0,
+            "description": self.description or "",
+            "definition": json.loads(self.definition) if self.definition else {"steps": [], "edges": [], "ports": {}},
+            "config": json.loads(self.config) if self.config else {},
+            "checksum": self.checksum or "",
             "tags": json.loads(self.tags) if self.tags else [],
-            "user_id": self.user_id,
             "created_at": _iso_utc(self.created_at),
             "updated_at": _iso_utc(self.updated_at),
         }

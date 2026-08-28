@@ -1,672 +1,480 @@
-import { ref, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/api/client'
 import { useAppStore } from './app'
-import { categoryColor } from '@/utils/helpers'
-import type { Operator, Model } from '@/utils/types'
+import type { AnatomyBlock, ModelAssembly } from '@/utils/types'
+
+// 重构后的 anatomy store：算子(building_block) + 组装(model_assembly)，
+// YAML 为唯一数据源。支持算子构建（编辑/组合/循环）与组装预览。
+
+export interface BlockNode {
+  // 画布/编辑树上的一个算子实例节点
+  id: string
+  blockName: string          // 对应 building_block.name
+  kind?: string              // atomic / composite（由 block 决定）
+  params: Record<string, any>
+  label?: string
+  loop?: any                 // 循环配置
+  condition?: string
+  children: BlockNode[]      // composite 内层
+  layerIdx?: number
+}
 
 export const useAnatomyStore = defineStore('anatomy', () => {
-  const anatomyTab = ref<'operators' | 'models'>('operators')
+  const appStore = useAppStore()
 
-  // Operators
-  const operators = ref<Operator[]>([])
-  const allOperators = ref<Operator[]>([])
-  const operatorsLoading = ref(false)
-  const operatorFilterCategory = ref('')
-  const operatorSearch = ref('')
-  const showOperatorDetail = ref(false)
-  const selectedOperator = ref<Operator | null>(null)
-  const operatorDetailReadOnly = ref(false)
-  const showOperatorEditor = ref(false)
-  const operatorEditorMode = ref<'create' | 'edit'>('create')
-  const operatorForm = ref({
-    id: null as number | null, name: '', display_name: '', description: '',
-    category: 'other', params_schema: '{}', input_shape_desc: '', output_shape_desc: '',
-    vllm_code_refs: '[]', tags: [] as string[], user_id: null as number | null,
+  // ---- Blocks（算子库）----
+  const blocks = ref<AnatomyBlock[]>([])
+  const blocksLoading = ref(false)
+  const blockSearch = ref('')
+  const blockCategoryFilter = ref('')
+  const blockKindFilter = ref<'all' | 'atomic' | 'composite'>('all')
+
+  // ---- Assemblies（模型组装）----
+  const assemblies = ref<ModelAssembly[]>([])
+  const assembliesLoading = ref(false)
+  const assemblySearch = ref('')
+  const assemblyCategoryFilter = ref('')
+
+  const assemblyCategories = computed(() => {
+    const m = new Map<string, number>()
+    for (const a of assemblies.value) m.set(a.category, (m.get(a.category) || 0) + 1)
+    return [...m.entries()].map(([name, count]) => ({ name, count }))
   })
-  const operatorTagInput = ref('')
-  const operatorParamsSchemaValid = ref(true)
-  const operatorParamsSchemaError = ref('')
 
-  // Categories
-  const operatorCategoryOptions = ref<any[]>([])
-  const showCategoryManager = ref(false)
-  const categoryManagerLoading = ref(false)
-  const categoryList = ref<any[]>([])
-  const editingCategory = ref<any>(null)
-  const categoryForm = ref({ name: '', display_name: '', description: '' })
-  const categoryFormMode = ref<'create' | 'edit'>('create')
-  const showCategoryForm = ref(false)
-
-  // Models
-  const models = ref<Model[]>([])
-  const modelsLoading = ref(false)
-  const modelSearch = ref('')
-  const modelFilterCategory = ref('')
-  const selectedModel = ref<Model | null>(null)
-  const showModelDetail = ref(false)
-  const modelDetailLoading = ref(false)
-  const showModelEditor = ref(false)
-  const modelEditorMode = ref<'create' | 'edit'>('create')
-  const modelForm = ref({
-    id: null as number | null, name: '', display_name: '', description: '',
-    category: 'other', architecture: [] as any[], params_summary: '',
-    tags: [] as string[], user_id: null as number | null,
-  })
-  const editingArchitecture = ref<any[]>([])
-  const modelTagInput = ref('')
-  const modelFormSnapshot = ref<any>(null)
-
-  const modelCategoryOptions = [
-    { value: 'dense', label: 'Dense' },
-    { value: 'moe', label: 'MoE' },
-    { value: 'hybrid', label: 'Hybrid' },
-    { value: 'state_space', label: 'State Space' },
-    { value: 'other', label: 'Other' },
-  ]
-
-  const collapsedCategories = ref<Set<string>>(new Set(
-    JSON.parse(localStorage.getItem('anatomy-op-collapsed-cats') || '[]')
-  ))
-
-  function toggleCategoryCollapse(name: string) {
-    const next = new Set(collapsedCategories.value)
-    if (next.has(name)) {
-      next.delete(name)
-    } else {
-      next.add(name)
+  const filteredAssemblies = computed(() => {
+    let list = assemblies.value
+    if (assemblyCategoryFilter.value) list = list.filter(a => a.category === assemblyCategoryFilter.value)
+    if (assemblySearch.value) {
+      const q = assemblySearch.value.toLowerCase()
+      list = list.filter(a => a.name.toLowerCase().includes(q) || (a.description || '').toLowerCase().includes(q))
     }
-    collapsedCategories.value = next
-    localStorage.setItem('anatomy-op-collapsed-cats', JSON.stringify([...next]))
+    return list
+  })
+
+  // ---- 编辑状态 ----
+  const showBlockDetail = ref(false)
+  const selectedBlock = ref<AnatomyBlock | null>(null)
+  const showBlockEditor = ref(false)
+  const blockEditorMode = ref<'create' | 'edit'>('create')
+  const blockForm = ref<any>({})
+  const showAssemblyEditor = ref(false)
+  const selectedAssembly = ref<ModelAssembly | null>(null)
+  const showAssemblyDetail = ref(false)
+  const assemblyForm = ref<any>({})
+
+  // ---- YAML 导入状态 ----
+  const showYAMLImport = ref(false)
+  const yamlText = ref('')
+  const yamlImporting = ref(false)
+  const yamlResult = ref<any>(null)
+
+  const blockCategories = computed(() => {
+    const m = new Map<string, number>()
+    for (const b of blocks.value) m.set(b.category, (m.get(b.category) || 0) + 1)
+    return [...m.entries()].map(([name, count]) => ({ name, count }))
+  })
+
+  const filteredBlocks = computed(() => {
+    let list = blocks.value
+    if (blockCategoryFilter.value) list = list.filter(b => b.category === blockCategoryFilter.value)
+    if (blockKindFilter.value !== 'all') list = list.filter(b => b.kind === blockKindFilter.value)
+    if (blockSearch.value) {
+      const q = blockSearch.value.toLowerCase()
+      list = list.filter(b => b.name.toLowerCase().includes(q) || (b.description || '').toLowerCase().includes(q))
+    }
+    return list
+  })
+
+  function blockByName(name: string): AnatomyBlock | undefined {
+    return blocks.value.find(b => b.name === name)
   }
 
-  const modelListCollapsed = ref(localStorage.getItem('anatomy-model-list-collapsed') === '1')
-  function toggleModelListCollapse() {
-    modelListCollapsed.value = !modelListCollapsed.value
-    localStorage.setItem('anatomy-model-list-collapsed', modelListCollapsed.value ? '1' : '0')
-  }
-
-  // Auto-reload when filter or search changes (前端过滤)
-  watch([operatorFilterCategory, operatorSearch], () => {
-    applyOperatorFilters()
-  })
-
-  // Auto-reload models when filter or search changes
-  watch([modelFilterCategory, modelSearch], () => {
-    loadModels()
-  })
-
-  // 前端过滤算子
-  function applyOperatorFilters() {
-    let result = allOperators.value
-    if (operatorFilterCategory.value) {
-      result = result.filter(o => o.category === operatorFilterCategory.value)
-    }
-    if (operatorSearch.value) {
-      const q = operatorSearch.value.toLowerCase()
-      result = result.filter(o =>
-        (o.name && o.name.toLowerCase().includes(q)) ||
-        (o.display_name && o.display_name.toLowerCase().includes(q)) ||
-        (o.description && o.description.toLowerCase().includes(q))
-      )
-    }
-    operators.value = result
-  }
-
-  // Operator actions
-  async function loadOperators() {
-    operatorsLoading.value = true
+  // ===== 加载 =====
+  async function loadBlocks() {
+    blocksLoading.value = true
     try {
-      const data: any = await api('/api/anatomy/operators')
-      allOperators.value = data.operators || []
-      applyOperatorFilters()
+      const data = await api('/api/anatomy/blocks')
+      blocks.value = data.blocks || []
     } catch (e: any) {
-      useAppStore().showToast('加载算子失败', e.message, 'error')
+      appStore.showToast('加载算子失败', e.message, 'error')
     } finally {
-      operatorsLoading.value = false
+      blocksLoading.value = false
     }
   }
 
-  function operatorById(id: number): Operator | undefined {
-    return operators.value.find(o => o.id === id)
-  }
-
-  function viewOperatorDetail(op: Operator, readOnly = false) {
-    selectedOperator.value = op
-    operatorDetailReadOnly.value = readOnly
-    showOperatorDetail.value = true
-  }
-
-  function closeOperatorDetail() {
-    showOperatorDetail.value = false
-    selectedOperator.value = null
-    operatorDetailReadOnly.value = false
-  }
-
-  function editFromDetail() {
-    if (!selectedOperator.value) return
-    const op = selectedOperator.value
-    closeOperatorDetail()
-    setTimeout(() => openEditOperator(op), 50)
-  }
-
-  function openNewOperator() {
-    operatorEditorMode.value = 'create'
-    operatorForm.value = {
-      id: null, name: '', display_name: '', description: '',
-      category: 'other', params_schema: '{}', input_shape_desc: '', output_shape_desc: '',
-      vllm_code_refs: '[]', tags: [], user_id: null,
-    }
-    operatorTagInput.value = ''
-    operatorParamsSchemaValid.value = true
-    operatorParamsSchemaError.value = ''
-    showOperatorEditor.value = true
-  }
-
-  function openEditOperator(op: Operator) {
-    operatorEditorMode.value = 'edit'
-    operatorForm.value = {
-      id: op.id, name: op.name || '', display_name: op.display_name || '',
-      description: op.description || '', category: op.category || 'other',
-      params_schema: JSON.stringify(op.params_schema || {}, null, 2),
-      input_shape_desc: op.input_shape_desc || '', output_shape_desc: op.output_shape_desc || '',
-      vllm_code_refs: JSON.stringify(op.vllm_code_refs || [], null, 2),
-      tags: [...(op.tags || [])], user_id: op.user_id || null,
-    }
-    operatorTagInput.value = ''
-    operatorParamsSchemaValid.value = true
-    operatorParamsSchemaError.value = ''
-    showOperatorEditor.value = true
-  }
-
-  function closeOperatorEditor() {
-    showOperatorEditor.value = false
-  }
-
-  function addOperatorTag() {
-    const t = operatorTagInput.value.trim().toLowerCase()
-    if (t && !operatorForm.value.tags.includes(t)) operatorForm.value.tags.push(t)
-    operatorTagInput.value = ''
-  }
-
-  function removeOperatorTag(tag: string) {
-    operatorForm.value.tags = operatorForm.value.tags.filter(t => t !== tag)
-  }
-
-  function validateParamsSchema(): any {
+  async function loadAssemblies() {
+    assembliesLoading.value = true
     try {
-      const val = JSON.parse(operatorForm.value.params_schema)
-      operatorParamsSchemaValid.value = true
-      operatorParamsSchemaError.value = ''
-      return val
+      const data = await api('/api/anatomy/assemblies')
+      assemblies.value = data.assemblies || []
     } catch (e: any) {
-      operatorParamsSchemaValid.value = false
-      operatorParamsSchemaError.value = e.message || 'Invalid JSON'
+      appStore.showToast('加载模型失败', e.message, 'error')
+    } finally {
+      assembliesLoading.value = false
+    }
+  }
+
+  async function refresh() {
+    await Promise.all([loadBlocks(), loadAssemblies()])
+  }
+
+  // ===== 算子 CRUD =====
+  function openBlockDetail(block: AnatomyBlock) {
+    selectedBlock.value = block
+    showBlockDetail.value = true
+  }
+  function closeBlockDetail() {
+    showBlockDetail.value = false
+    selectedBlock.value = null
+  }
+  function openNewBlock(kind = 'atomic') {
+    blockEditorMode.value = 'create'
+    blockForm.value = {
+      name: '', kind, category: 'other', description: '',
+      formula: [],
+      params_schema: { type: 'object', properties: {} },
+      ports: { inputs: [], outputs: [] },
+      children: [], file: '', weights: [], ops: [], edges: [], segments: [],
+      forward_note: '', weight_prefix_note: '', note: '',
+      state: [], tags: [], yaml: '', config: {},
+    }
+    showBlockEditor.value = true
+  }
+  function openEditBlock(block: AnatomyBlock) {
+    blockEditorMode.value = 'edit'
+    blockForm.value = {
+      id: block.id, name: block.name, kind: block.kind, category: block.category,
+      description: block.description || '',
+      formula: [...(block.formula || [])],
+      params_schema: JSON.parse(JSON.stringify(block.params_schema || {})),
+      ports: JSON.parse(JSON.stringify(block.ports || { inputs: [], outputs: [] })),
+      children: JSON.parse(JSON.stringify(block.children || [])),
+      file: block.file || '',
+      weights: JSON.parse(JSON.stringify(block.weights || [])),
+      ops: JSON.parse(JSON.stringify(block.ops || [])),
+      edges: JSON.parse(JSON.stringify(block.edges || [])),
+      segments: JSON.parse(JSON.stringify(block.segments || [])),
+      forward_note: block.forward_note || '',
+      weight_prefix_note: block.weight_prefix_note || '',
+      note: block.note || '',
+      state: JSON.parse(JSON.stringify(block.state || [])),
+      tags: [...(block.tags || [])], yaml: '',
+      config: JSON.parse(JSON.stringify(block.config || {})),
+    }
+    showBlockEditor.value = true
+  }
+  function closeBlockEditor() {
+    showBlockEditor.value = false
+  }
+
+  async function saveBlock() {
+    if (!blockForm.value.name.trim()) {
+      appStore.showToast(blockForm.value.kind === 'composite' ? '层名称不能为空' : '算子名称不能为空', '', 'error')
+      return
+    }
+    if (!['atomic', 'composite'].includes(blockForm.value.kind)) {
+      appStore.showToast('kind 必须是 atomic 或 composite', '', 'error')
+      return
+    }
+    const body = {
+      name: blockForm.value.name, kind: blockForm.value.kind, category: blockForm.value.category,
+      description: blockForm.value.description, formula: blockForm.value.formula,
+      params_schema: blockForm.value.params_schema,
+      ports: blockForm.value.ports, children: blockForm.value.children,
+      file: blockForm.value.file, weights: blockForm.value.weights, ops: blockForm.value.ops,
+      edges: blockForm.value.edges, segments: blockForm.value.segments,
+      forward_note: blockForm.value.forward_note,
+      weight_prefix_note: blockForm.value.weight_prefix_note, note: blockForm.value.note,
+      state: blockForm.value.state, tags: blockForm.value.tags, yaml: blockForm.value.yaml,
+      config: blockForm.value.config,
+    }
+    const nn = blockForm.value.kind === 'composite' ? '层' : '算子'
+    try {
+      if (blockEditorMode.value === 'create') {
+        await api('/api/anatomy/blocks', { method: 'POST', body: JSON.stringify(body) })
+      } else {
+        await api(`/api/anatomy/blocks/${blockForm.value.id}`, { method: 'PUT', body: JSON.stringify(body) })
+      }
+      appStore.showToast(`${nn}已保存`, '', 'success')
+      showBlockEditor.value = false
+      await loadBlocks()
+    } catch (e: any) {
+      appStore.showToast('保存失败', e.message, 'error')
+    }
+  }
+
+  async function deleteBlock(block: AnatomyBlock) {
+    const nn = block.kind === 'composite' ? '层' : '算子'
+    const { confirmed } = await appStore.showConfirm({
+      title: `删除${nn}`,
+      message: `确定删除${nn}「${block.name}」？删除后不可恢复。`,
+      confirmText: '删除',
+      danger: true,
+    })
+    if (!confirmed) return
+    try {
+      await api(`/api/anatomy/blocks/${block.id}`, { method: 'DELETE' })
+      appStore.showToast(`${nn}已删除`, '', 'success')
+      closeBlockDetail()
+      await loadBlocks()
+    } catch (e: any) {
+      appStore.showToast('删除失败', e.message, 'error')
+    }
+  }
+
+  // ===== 组装 CRUD =====
+  function openNewAssembly() {
+    assemblyForm.value = {
+      name: '', category: 'other', description: '',
+      definition: { steps: [], edges: [], ports: { inputs: [], outputs: [] } },
+      config: {}, file: '', forward_note: '', weight_prefix_note: '', note: '',
+      formula: [],
+      tags: [],
+    }
+    showAssemblyEditor.value = true
+    showAssemblyDetail.value = false
+  }
+  function viewAssembly(asm: ModelAssembly) {
+    showAssemblyDetail.value = true
+    selectedAssembly.value = asm
+    showAssemblyEditor.value = false
+  }
+  function closeAssemblyDetail() {
+    showAssemblyDetail.value = false
+    selectedAssembly.value = null
+  }
+  function openEditAssembly(asm: ModelAssembly) {
+    const raw = asm.definition || { steps: [], edges: [], ports: {} }
+    const def = JSON.parse(JSON.stringify(raw))
+    assemblyForm.value = {
+      id: asm.id, name: asm.name, category: asm.category, description: asm.description || '',
+      definition: def,
+      config: JSON.parse(JSON.stringify(asm.config || {})),
+      file: raw.file || (asm as any).file || '',
+      forward_note: raw.forward_note || (asm as any).forward_note || '',
+      weight_prefix_note: raw.weight_prefix_note || (asm as any).weight_prefix_note || '',
+      note: raw.note || (asm as any).note || '',
+      formula: raw.formula || (asm as any).formula || [],
+      tags: [...(asm.tags || [])],
+    }
+    showAssemblyEditor.value = true
+    showAssemblyDetail.value = false
+  }
+  function closeAssemblyEditor() {
+    showAssemblyEditor.value = false
+  }
+
+  async function saveViaYaml(yamlText: string): Promise<{ ok: boolean; error?: string }> {
+    if (!yamlText.trim()) {
+      appStore.showToast('YAML 内容为空', '', 'error')
+      return { ok: false }
+    }
+    try {
+      const res = await api('/api/anatomy/apply-yaml', { method: 'POST', body: JSON.stringify({ yaml: yamlText }) })
+      appStore.showToast('已保存', '', 'success')
+      await refresh()
+      return { ok: true }
+    } catch (e: any) {
+      appStore.showToast('保存失败', e.message, 'error')
+      return { ok: false, error: e.message }
+    }
+  }
+
+  async function fetchBlockYaml(id: number): Promise<string> {
+    try {
+      const res = await api(`/api/anatomy/blocks/${id}/yaml`)
+      return res.yaml || ''
+    } catch (e: any) {
+      appStore.showToast('获取 YAML 失败', e.message, 'error')
+      return ''
+    }
+  }
+
+  async function fetchAssemblyYaml(id: number): Promise<string> {
+    try {
+      const res = await api(`/api/anatomy/assemblies/${id}/yaml`)
+      return res.yaml || ''
+    } catch (e: any) {
+      appStore.showToast('获取 YAML 失败', e.message, 'error')
+      return ''
+    }
+  }
+
+  async function fetchYamlTemplate(kind: string): Promise<string> {
+    try {
+      const res = await api(`/api/anatomy/yaml/template?kind=${encodeURIComponent(kind)}`)
+      return res.yaml || ''
+    } catch (e: any) {
+      appStore.showToast('获取模板失败', e.message, 'error')
+      return ''
+    }
+  }
+
+  async function saveAssembly() {
+    if (!assemblyForm.value.name.trim()) {
+      appStore.showToast('模型名称不能为空', '', 'error')
+      return
+    }
+    // 把 file/formula/notes 存入 definition（definition 为自由 JSON，随定义持久化）
+    const def = { ...JSON.parse(JSON.stringify(assemblyForm.value.definition || {})), }
+    def.file = assemblyForm.value.file || undefined
+    def.formula = assemblyForm.value.formula || undefined
+    def.forward_note = assemblyForm.value.forward_note || undefined
+    def.weight_prefix_note = assemblyForm.value.weight_prefix_note || undefined
+    def.note = assemblyForm.value.note || undefined
+    const body = {
+      name: assemblyForm.value.name, category: assemblyForm.value.category,
+      description: assemblyForm.value.description,
+      definition: def, config: assemblyForm.value.config,
+      tags: assemblyForm.value.tags,
+    }
+    try {
+      if (assemblyForm.value.id) {
+        await api(`/api/anatomy/assemblies/${assemblyForm.value.id}`, { method: 'PUT', body: JSON.stringify(body) })
+      } else {
+        await api('/api/anatomy/assemblies', { method: 'POST', body: JSON.stringify(body) })
+      }
+      appStore.showToast('模型已保存', '', 'success')
+      showAssemblyEditor.value = false
+      await loadAssemblies()
+    } catch (e: any) {
+      appStore.showToast('保存失败', e.message, 'error')
+    }
+  }
+
+  async function deleteAssembly(asm: ModelAssembly) {
+    const { confirmed } = await appStore.showConfirm({
+      title: '删除模型',
+      message: `确定删除模型「${asm.name}」？删除后不可恢复。`,
+      confirmText: '删除',
+      danger: true,
+    })
+    if (!confirmed) return
+    try {
+      await api(`/api/anatomy/assemblies/${asm.id}`, { method: 'DELETE' })
+      appStore.showToast('模型已删除', '', 'success')
+      if (selectedAssembly.value?.id === asm.id) closeAssemblyDetail()
+      await loadAssemblies()
+    } catch (e: any) {
+      appStore.showToast('删除失败', e.message, 'error')
+    }
+  }
+
+  // ===== YAML 导入 =====
+  function openYAMLImport() {
+    yamlText.value = ''
+    yamlResult.value = null
+    showYAMLImport.value = true
+  }
+  function closeYAMLImport() {
+    showYAMLImport.value = false
+    yamlResult.value = null
+  }
+  async function doImport() {
+    if (!yamlText.value.trim()) {
+      appStore.showToast('请输入 YAML 内容', '', 'error')
+      return
+    }
+    yamlImporting.value = true
+    yamlResult.value = null
+    try {
+      const res = await api('/api/anatomy/import', { method: 'POST', body: JSON.stringify({ yaml: yamlText.value }) })
+      yamlResult.value = res
+      appStore.showToast(`导入完成：算子 ${res.imported_blocks || 0} 个，模型 ${res.imported_assemblies || 0} 个`, '', 'success')
+      await refresh()
+    } catch (e: any) {
+      appStore.showToast('导入失败', e.message, 'error')
+    } finally {
+      yamlImporting.value = false
+    }
+  }
+
+  async function validateAll() {
+    try {
+      const res = await api('/api/anatomy/validate')
+      const errs = (res.errors || []).length
+      const warns = (res.warnings || []).length
+      appStore.showToast(`校验完成：${errs} 错误，${warns} 警告`, '', 'success')
+      return res
+    } catch (e: any) {
+      appStore.showToast('校验失败', e.message, 'error')
       return null
     }
   }
 
-  async function saveOperator() {
-    if (!operatorForm.value.name.trim()) {
-      useAppStore().showToast('算子名称不能为空', '', 'error')
-      return
-    }
-    if (!operatorForm.value.display_name.trim()) {
-      useAppStore().showToast('显示名称不能为空', '', 'error')
-      return
-    }
-    let parsedSchema = {}
-    if (operatorForm.value.params_schema.trim()) {
-      const result = validateParamsSchema()
-      if (!result) return
-      parsedSchema = result
-    }
-    let parsedRefs: any[] = []
-    if (operatorForm.value.vllm_code_refs.trim()) {
-      try {
-        parsedRefs = JSON.parse(operatorForm.value.vllm_code_refs)
-      } catch (e: any) {
-        useAppStore().showToast('代码引用 JSON 格式错误', e.message, 'error')
-        return
-      }
-    }
-    const body = {
-      name: operatorForm.value.name, display_name: operatorForm.value.display_name,
-      description: operatorForm.value.description, category: operatorForm.value.category,
-      params_schema: parsedSchema, input_shape_desc: operatorForm.value.input_shape_desc,
-      output_shape_desc: operatorForm.value.output_shape_desc, vllm_code_refs: parsedRefs,
-      tags: operatorForm.value.tags, user_id: operatorForm.value.user_id,
-    }
+  async function exportYAML(): Promise<string> {
     try {
-      if (operatorEditorMode.value === 'create') {
-        await api('/api/anatomy/operators', { method: 'POST', body: JSON.stringify(body) })
-        useAppStore().showToast('算子已创建', '', 'success')
-      } else {
-        await api(`/api/anatomy/operators/${operatorForm.value.id}`, { method: 'PUT', body: JSON.stringify(body) })
-        useAppStore().showToast('算子已更新', '', 'success')
-      }
-      showOperatorEditor.value = false
-      await loadOperators()
+      const res = await api('/api/anatomy/export')
+      return res.yaml || ''
     } catch (e: any) {
-      useAppStore().showToast('保存失败', e.message, 'error')
+      appStore.showToast('导出失败', e.message, 'error')
+      return ''
     }
   }
 
-  async function deleteOperator(op: Operator) {
-    if (!confirm(`确定删除算子「${op.display_name}」？此操作不可撤销。`)) return
-    try {
-      await api(`/api/anatomy/operators/${op.id}`, { method: 'DELETE' })
-      useAppStore().showToast('算子已删除', '', 'success')
-      closeOperatorDetail()
-      await loadOperators()
-    } catch (e: any) {
-      useAppStore().showToast('删除失败', e.message, 'error')
-    }
-  }
-
-  // Category actions
-  async function loadCategories() {
-    try {
-      const data: any = await api('/api/anatomy/operators/categories')
-      operatorCategoryOptions.value = (data.categories || []).map((c: any) => ({
-        value: c.name, label: c.display_name, color: categoryColor(c.name),
-      }))
-    } catch (_) {}
-  }
-
-  function openCategoryManager() {
-    showCategoryManager.value = true
-    showCategoryForm.value = false
-    loadCategoryList()
-  }
-
-  async function loadCategoryList() {
-    categoryManagerLoading.value = true
-    try {
-      const data: any = await api('/api/anatomy/operators/categories')
-      categoryList.value = data.categories || []
-    } catch (_) {
-      useAppStore().showToast('加载分类失败', '', 'error')
-    } finally {
-      categoryManagerLoading.value = false
-    }
-  }
-
-  function openEditCategory(cat: any) {
-    categoryFormMode.value = 'edit'
-    categoryForm.value = { name: cat.name, display_name: cat.display_name, description: cat.description || '' }
-    editingCategory.value = cat
-    showCategoryForm.value = true
-  }
-
-  function openNewCategory() {
-    categoryForm.value = { name: '', display_name: '', description: '' }
-    categoryFormMode.value = 'create'
-    editingCategory.value = null
-    showCategoryForm.value = true
-  }
-
-  function cancelEditCategory() {
-    categoryForm.value = { name: '', display_name: '', description: '' }
-    categoryFormMode.value = 'create'
-    editingCategory.value = null
-    showCategoryForm.value = false
-  }
-
-  async function saveCategory() {
-    if (!categoryForm.value.name.trim() || !categoryForm.value.display_name.trim()) return
-    try {
-      if (categoryFormMode.value === 'create') {
-        await api('/api/anatomy/operators/categories', { method: 'POST', body: JSON.stringify(categoryForm.value) })
-      } else if (editingCategory.value) {
-        await api(`/api/anatomy/operators/categories/${editingCategory.value.id}`, {
-          method: 'PUT', body: JSON.stringify(categoryForm.value),
-        })
-      }
-      await loadCategoryList()
-      await loadCategories()
-      categoryForm.value = { name: '', display_name: '', description: '' }
-      categoryFormMode.value = 'create'
-      editingCategory.value = null
-      showCategoryForm.value = false
-    } catch (e: any) {
-      useAppStore().showToast('保存分类失败', e.message, 'error')
-    }
-  }
-
-  async function moveCategory(cat: any, direction: 'up' | 'down') {
-    const newOrder = cat.sort_order + (direction === 'up' ? -1 : 1)
-    try {
-      await api(`/api/anatomy/operators/categories/${cat.id}`, {
-        method: 'PUT', body: JSON.stringify({ sort_order: newOrder }),
-      })
-      await loadCategoryList()
-      await loadCategories()
-    } catch (e: any) {
-      useAppStore().showToast('调整排序失败', e.message, 'error')
-    }
-  }
-
-  async function reorderCategories(fromIdx: number, toIdx: number) {
-    const list = [...categoryList.value]
-    const [moved] = list.splice(fromIdx, 1)
-    list.splice(toIdx, 0, moved)
-    categoryList.value = list
-    const updates = list.map((c, i) => ({ id: c.id, sort_order: i + 1 }))
-    try {
-      for (const u of updates) {
-        await api(`/api/anatomy/operators/categories/${u.id}`, {
-          method: 'PUT', body: JSON.stringify({ sort_order: u.sort_order }),
-        })
-      }
-      await loadCategories()
-    } catch (e: any) {
-      useAppStore().showToast('排序失败', e.message, 'error')
-      await loadCategoryList()
-    }
-  }
-
-  async function deleteCategory(cat: any) {
-    if (!confirm(`确定删除分类「${cat.display_name}」？`)) return
-    try {
-      await api(`/api/anatomy/operators/categories/${cat.id}`, { method: 'DELETE' })
-      await loadCategoryList()
-      await loadCategories()
-    } catch (e: any) {
-      useAppStore().showToast('删除分类失败', e.message, 'error')
-    }
-  }
-
-  // Model actions
-  async function loadModels() {
-    modelsLoading.value = true
-    try {
-      const params = new URLSearchParams()
-      if (modelSearch.value) params.set('search', modelSearch.value)
-      if (modelFilterCategory.value) params.set('category', modelFilterCategory.value)
-      const qs = params.toString()
-      const data: any = await api(`/api/anatomy/models${qs ? '?' + qs : ''}`)
-      models.value = data.models || []
-    } catch (e: any) {
-      useAppStore().showToast('加载模型失败', e.message, 'error')
-    } finally {
-      modelsLoading.value = false
-    }
-  }
-
-  async function viewModel(model: Model) {
-    modelDetailLoading.value = true
-    showModelDetail.value = true
-    selectedModel.value = null
-    showModelEditor.value = false
-    try {
-      const data = await api(`/api/anatomy/models/${model.id}`)
-      selectedModel.value = data
-    } catch (e: any) {
-      useAppStore().showToast('加载模型详情失败', e.message, 'error')
-      showModelDetail.value = false
-    } finally {
-      modelDetailLoading.value = false
-    }
-  }
-
-  function closeModelDetail() {
-    showModelDetail.value = false
-    selectedModel.value = null
-  }
-
-  function openNewModel() {
-    modelEditorMode.value = 'create'
-    modelForm.value = {
-      id: null, name: '', display_name: '', description: '',
-      category: 'other', architecture: [], params_summary: '', tags: [], user_id: null,
-    }
-    editingArchitecture.value = []
-    modelTagInput.value = ''
-    modelFormSnapshot.value = null
-    showModelEditor.value = true
-    showModelDetail.value = false
-  }
-
-  function openEditModel() {
-    if (!selectedModel.value) return
-    modelEditorMode.value = 'edit'
-    const arch = selectedModel.value.architecture || []
-    modelForm.value = {
-      id: selectedModel.value.id, name: selectedModel.value.name || '',
-      display_name: selectedModel.value.display_name || '',
-      description: selectedModel.value.description || '',
-      category: selectedModel.value.category || 'other',
-      architecture: JSON.parse(JSON.stringify(arch)),
-      params_summary: selectedModel.value.params_summary
-        ? JSON.stringify(selectedModel.value.params_summary, null, 2) : '',
-      tags: [...(selectedModel.value.tags || [])],
-      user_id: selectedModel.value.user_id || null,
-    }
-    editingArchitecture.value = JSON.parse(JSON.stringify(arch))
-    modelTagInput.value = ''
-    _takeModelFormSnapshot()
-    showModelEditor.value = true
-    showModelDetail.value = false
-  }
-
-  function closeModelEditor() {
-    showModelEditor.value = false
-    modelFormSnapshot.value = null
-  }
-
-  function _takeModelFormSnapshot() {
-    modelFormSnapshot.value = {
-      name: modelForm.value.name, display_name: modelForm.value.display_name,
-      description: modelForm.value.description, tags: [...modelForm.value.tags],
-      architecture: JSON.parse(JSON.stringify(editingArchitecture.value)),
-    }
-  }
-
-  function addModelTag() {
-    const t = modelTagInput.value.trim().toLowerCase()
-    if (t && !modelForm.value.tags.includes(t)) modelForm.value.tags.push(t)
-    modelTagInput.value = ''
-  }
-
-  function removeModelTag(tag: string) {
-    modelForm.value.tags = modelForm.value.tags.filter(t => t !== tag)
-  }
-
-  function addStage() {
-    editingArchitecture.value.push({
-      type: 'operator', operator_id: null, operator_name: '',
-      params: {}, label: '', children: [], order: editingArchitecture.value.length,
+  // ===== 组装编辑器（画布数据操作）=====
+  function addStep() {
+    const def = assemblyForm.value.definition
+    if (!def.steps) def.steps = []
+    def.steps.push({
+      id: `step${Date.now()}`, block: '', as: '', port_bind: {},
+      params: {}, label: '',
     })
   }
-
-  function addRepeatBlock() {
-    editingArchitecture.value.push({
-      type: 'repeat_block', label: '', repeat_count: 1,
-      contents: [[]], order: editingArchitecture.value.length,
+  function removeStep(idx: number) {
+    const def = assemblyForm.value.definition
+    if (!def?.steps) return
+    appStore.showConfirm({
+      title: '删除步骤',
+      message: '确定删除此步骤？',
+      confirmText: '删除',
+      danger: true,
+    }).then(({ confirmed }) => {
+      if (confirmed) def.steps.splice(idx, 1)
     })
   }
-
-  function removeStage(index: number) {
-    if (!confirm('确定删除这个阶段？')) return
-    editingArchitecture.value.splice(index, 1)
-    _reorderStages()
+  function moveStepUp(idx: number) {
+    const steps = assemblyForm.value.definition.steps
+    if (!steps || idx <= 0) return
+    const tmp = steps[idx - 1]
+    steps[idx - 1] = steps[idx]
+    steps[idx] = tmp
   }
-
-  function addStageBefore(index: number) {
-    editingArchitecture.value.splice(index, 0, {
-      type: 'operator', operator_id: null, operator_name: '',
-      params: {}, label: '', children: [], order: editingArchitecture.value.length,
-    })
-    _reorderStages()
+  function moveStepDown(idx: number) {
+    const steps = assemblyForm.value.definition.steps
+    if (!steps || idx >= steps.length - 1) return
+    const tmp = steps[idx + 1]
+    steps[idx + 1] = steps[idx]
+    steps[idx] = tmp
   }
-
-  function addRepeatBlockBefore(index: number) {
-    editingArchitecture.value.splice(index, 0, {
-      type: 'repeat_block', label: '', repeat_count: 1,
-      contents: [[]], order: editingArchitecture.value.length,
-    })
-    _reorderStages()
-  }
-
-  function moveStageUp(index: number) {
-    if (index <= 0) return
-    const tmp = editingArchitecture.value[index]
-    editingArchitecture.value[index] = editingArchitecture.value[index - 1]
-    editingArchitecture.value[index - 1] = tmp
-    _reorderStages()
-  }
-
-  function moveStageDown(index: number) {
-    if (index >= editingArchitecture.value.length - 1) return
-    const tmp = editingArchitecture.value[index]
-    editingArchitecture.value[index] = editingArchitecture.value[index + 1]
-    editingArchitecture.value[index + 1] = tmp
-    _reorderStages()
-  }
-
-  function _reorderStages() {
-    editingArchitecture.value.forEach((s: any, i: number) => { s.order = i })
-  }
-
-  function onStageOperatorChange(stage: any) {
-    const op = operatorById(stage.operator_id)
-    if (op) {
-      stage.operator_name = op.name
-      const schema = op.params_schema
-      if (schema && schema.properties) {
+  function onStepBlockChange(step: any) {
+    const blk = blockByName(step.block)
+    if (blk) {
+      step.port_bind = {}
+      if (blk.params_schema?.properties) {
         const defaults: Record<string, any> = {}
-        for (const [key, prop] of Object.entries(schema.properties as Record<string, { default?: any }>)) {
-          if ((prop as any).default !== undefined) defaults[key] = (prop as any).default
+        for (const [k, p] of Object.entries(blk.params_schema.properties as Record<string, any>)) {
+          if (p.default !== undefined) defaults[k] = p.default
         }
-        stage.params = defaults
-      } else {
-        stage.params = {}
+        step.port_bind = defaults
       }
-    } else {
-      stage.operator_name = ''
-      stage.params = {}
-    }
-  }
-
-  function addRepeatBlockContent(repeatBlock: any) {
-    repeatBlock.contents.push([])
-  }
-
-  function removeRepeatBlockContent(repeatBlock: any, contentIndex: number) {
-    if (repeatBlock.contents.length <= 1) return
-    if (!confirm('确定删除这套内容？')) return
-    repeatBlock.contents.splice(contentIndex, 1)
-  }
-
-  function addStageToContent(repeatBlock: any, contentIndex: number) {
-    repeatBlock.contents[contentIndex].push({
-      type: 'operator', operator_id: null, operator_name: '',
-      params: {}, label: '', children: [], order: repeatBlock.contents[contentIndex].length,
-    })
-  }
-
-  function removeStageFromContent(repeatBlock: any, contentIndex: number, stageIndex: number) {
-    if (!confirm('确定删除这个算子？')) return
-    repeatBlock.contents[contentIndex].splice(stageIndex, 1)
-  }
-
-  async function saveModel() {
-    if (!modelForm.value.name.trim()) {
-      useAppStore().showToast('模型名称不能为空', '', 'error')
-      return
-    }
-    if (!modelForm.value.display_name.trim()) {
-      useAppStore().showToast('显示名称不能为空', '', 'error')
-      return
-    }
-    if (editingArchitecture.value.length === 0) {
-      useAppStore().showToast('请至少添加一个阶段', '', 'error')
-      return
-    }
-    let parsedSummary = {}
-    if (modelForm.value.params_summary?.trim()) {
-      try {
-        parsedSummary = JSON.parse(modelForm.value.params_summary)
-      } catch (e: any) {
-        useAppStore().showToast('参数汇总 JSON 格式错误', e.message, 'error')
-        return
-      }
-    }
-    const body = {
-      name: modelForm.value.name, display_name: modelForm.value.display_name,
-      description: modelForm.value.description, category: modelForm.value.category || 'other',
-      architecture: editingArchitecture.value, params_summary: parsedSummary,
-      tags: modelForm.value.tags, user_id: modelForm.value.user_id,
-    }
-    try {
-      if (modelEditorMode.value === 'create') {
-        await api('/api/anatomy/models', { method: 'POST', body: JSON.stringify(body) })
-        useAppStore().showToast('模型已创建', '', 'success')
-      } else {
-        await api(`/api/anatomy/models/${modelForm.value.id}`, { method: 'PUT', body: JSON.stringify(body) })
-        useAppStore().showToast('模型已更新', '', 'success')
-      }
-      showModelEditor.value = false
-      modelFormSnapshot.value = null
-      await loadModels()
-      if (selectedModel.value && selectedModel.value.id === modelForm.value.id) {
-        await viewModel(selectedModel.value)
-      }
-    } catch (e: any) {
-      useAppStore().showToast('保存失败', e.message, 'error')
-    }
-  }
-
-  async function deleteModel(model: Model) {
-    if (!confirm(`确定删除模型「${model.display_name}」？此操作不可撤销。`)) return
-    try {
-      await api(`/api/anatomy/models/${model.id}`, { method: 'DELETE' })
-      useAppStore().showToast('模型已删除', '', 'success')
-      if (selectedModel.value?.id === model.id) closeModelDetail()
-      await loadModels()
-    } catch (e: any) {
-      useAppStore().showToast('删除失败', e.message, 'error')
-    }
-  }
-
-  function switchAnatomyTab(tab: 'operators' | 'models') {
-    anatomyTab.value = tab
-    if (tab === 'operators') {
-      loadOperators()
-      loadCategories()
-    } else {
-      loadModels()
     }
   }
 
   return {
-    anatomyTab,
-    operators, allOperators, operatorsLoading, operatorFilterCategory, operatorSearch,
-    showOperatorDetail, selectedOperator, operatorDetailReadOnly, showOperatorEditor,
-    operatorEditorMode, operatorForm, operatorTagInput,
-    operatorParamsSchemaValid, operatorParamsSchemaError,
-    operatorCategoryOptions, showCategoryManager, categoryManagerLoading,
-    categoryList, editingCategory, categoryForm, categoryFormMode,
-    models, modelsLoading, modelSearch, modelFilterCategory,
-    selectedModel, showModelDetail, modelDetailLoading,
-    showModelEditor, modelEditorMode, modelForm, editingArchitecture,
-    modelTagInput, modelFormSnapshot, modelCategoryOptions,
-    collapsedCategories, toggleCategoryCollapse,
-    modelListCollapsed, toggleModelListCollapse,
-    loadOperators, operatorById, viewOperatorDetail, closeOperatorDetail,
-    editFromDetail, openNewOperator, openEditOperator, closeOperatorEditor,
-    addOperatorTag, removeOperatorTag, validateParamsSchema, saveOperator, deleteOperator,
-    loadCategories, openCategoryManager, loadCategoryList, openEditCategory, cancelEditCategory, openNewCategory,
-    showCategoryForm,
-    saveCategory, moveCategory, reorderCategories, deleteCategory,
-    loadModels, viewModel, closeModelDetail,
-    openNewModel, openEditModel, closeModelEditor,
-    addModelTag, removeModelTag,
-    addStage, addRepeatBlock, removeStage, addStageBefore, addRepeatBlockBefore,
-    moveStageUp, moveStageDown, onStageOperatorChange,
-    addRepeatBlockContent, removeRepeatBlockContent,
-    addStageToContent, removeStageFromContent,
-    saveModel, deleteModel, switchAnatomyTab,
+    blocks, blocksLoading, blockSearch, blockCategoryFilter, blockKindFilter,
+    assemblies, assembliesLoading, assemblySearch, assemblyCategoryFilter,
+    assemblyCategories, filteredAssemblies,
+    showBlockDetail, selectedBlock, showBlockEditor, blockEditorMode, blockForm,
+    showAssemblyEditor, selectedAssembly, showAssemblyDetail,
+    assemblyForm, showYAMLImport, yamlText, yamlImporting, yamlResult,
+    blockCategories, filteredBlocks, blockByName,
+    loadBlocks, loadAssemblies, refresh,
+    openBlockDetail, closeBlockDetail, openNewBlock, openEditBlock, closeBlockEditor, saveBlock, deleteBlock,
+    openNewAssembly, viewAssembly, closeAssemblyDetail, openEditAssembly, closeAssemblyEditor, saveAssembly, deleteAssembly,
+    saveViaYaml, fetchBlockYaml, fetchAssemblyYaml, fetchYamlTemplate,
+    openYAMLImport, closeYAMLImport, doImport, validateAll, exportYAML,
+    addStep, removeStep, moveStepUp, moveStepDown, onStepBlockChange,
   }
 })
