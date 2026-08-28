@@ -16,7 +16,7 @@ from app.services.local_code_sync import LocalCodeSyncService
 
 
 def _preprocess_math(content: str) -> str:
-    """将 $$...$$、$...$、\[...\] 数学公式包裹为 HTML，避免 markdown 引擎破坏内容"""
+    r"""将 $$...$$、$...$、\[...\] 数学公式包裹为 HTML，避免 markdown 引擎破坏内容"""
     # 用 HTML 实体 &#92; 代替反斜杠，避免 markdown 引擎吃掉 \ 字符
     BS = '&#92;'
 
