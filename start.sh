@@ -62,15 +62,18 @@ print_info "检查依赖..."
 pip install -q -r requirements.txt
 
 # 验证所有依赖是否已安装（用临时文件传递缺失列表，避免 subshell 变量为空）
+# 注意：Python 3.12+ 的 venv 不再自带 setuptools，pkg_resources 不可用，改用标准库 importlib.metadata
 python3 -c "
-import pkg_resources, sys
+import re, sys
+from importlib.metadata import version, PackageNotFoundError
 with open('requirements.txt') as f:
     reqs = [line.strip() for line in f if line.strip() and not line.startswith('#')]
 missing = []
 for req in reqs:
+    name = re.split(r'[!<>=~;\[\s]', req, maxsplit=1)[0]
     try:
-        pkg_resources.require(req)
-    except (pkg_resources.DistributionNotFound, pkg_resources.VersionConflict):
+        version(name)
+    except PackageNotFoundError:
         missing.append(req)
 if missing:
     print(' '.join(missing))
