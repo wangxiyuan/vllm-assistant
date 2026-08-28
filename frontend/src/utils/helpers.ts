@@ -27,7 +27,7 @@ export function exactTime(dateStr: string | null | undefined): string {
   })
 }
 
-export function issueTypePrefix(issue: { title: string }): string | null {
+function issueTypePrefix(issue: { title: string }): string | null {
   const title = (issue.title || '').trim()
   const m = title.match(/^\[([^\]]+)\]/i)
   if (m) return m[1].toLowerCase()
@@ -105,20 +105,6 @@ export function ghUrl(repo: string | undefined, number: number, type: 'pr' | 'is
   return `https://github.com/${full}/${seg}/${number}`
 }
 
-const _categoryColorPalette = [
-  'var(--signal-blue)', 'var(--signal-green)', 'var(--signal-purple)',
-  'var(--signal-cyan)', 'var(--amber)', 'var(--signal-red)',
-  'var(--signal-yellow)', 'var(--text-tertiary)',
-]
-
-export function categoryColor(name: string): string {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) {
-    hash = (hash * 31 + name.charCodeAt(i)) >>> 0
-  }
-  return _categoryColorPalette[hash % _categoryColorPalette.length]
-}
-
 /* ── Dynamic source badge colors ──
    Report sources come from a dynamically growing repo list (vllm, sglang,
    vllm-omni, ...). Instead of a hardcoded CSS class per repo, unknown sources
@@ -192,12 +178,4 @@ export function sourceBadgeVars(source: string): SourceBadgeVars {
     '--src-glow': `hsla(${hue}, ${s}%, ${l}%, 0.16)`,
     '--src-border': `hsla(${hue}, ${s}%, ${l}%, 0.34)`,
   }
-}
-
-export function modelCategoryLabel(value: string): string {
-  const map: Record<string, string> = {
-    dense: 'Dense', moe: 'MoE', hybrid: 'Hybrid',
-    state_space: 'State Space', other: 'Other',
-  }
-  return map[value] || value
 }

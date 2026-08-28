@@ -107,26 +107,6 @@ def get_tool_schemas(names: Optional[List[str]] = None) -> List[dict]:
     return schemas
 
 
-def list_tools() -> List[Dict[str, Any]]:
-    """列出所有已注册工具的元信息（不含 schema 详情）"""
-    return [
-        {
-            "name": t["name"],
-            "description": t["schema"].get("function", {}).get("description", ""),
-            "parameters": t["schema"].get("function", {}).get("parameters", {}),
-        }
-        for t in _tools.values()
-    ]
-
-
-def list_categories() -> List[Dict[str, Any]]:
-    """列出所有工具类别及其包含的工具名"""
-    return [
-        {"name": name, "tools": list(tool_names)}
-        for name, tool_names in CATEGORY_TOOLS.items()
-    ]
-
-
 async def execute_tool(name: str, args: dict) -> dict:
     """执行指定名称的 tool。
 

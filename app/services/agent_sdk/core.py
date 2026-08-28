@@ -66,12 +66,6 @@ def _run_config() -> RunConfig:
     return RunConfig(model=build_chat_model())
 
 
-async def run_stage_nonstream(stage: AgentStage, ctx: ToolRunContext, input) -> str:
-    """非流式跑单个阶段，返回最终输出文本。"""
-    res = await run_stage_with_meta(stage, ctx, input)
-    return res["final_output"]
-
-
 async def run_stage_with_meta(stage: AgentStage, ctx: ToolRunContext, input) -> dict:
     """非流式跑单个阶段，返回含痕迹元信息的完整结果。
 

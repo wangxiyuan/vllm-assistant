@@ -13,7 +13,7 @@ const TEMPLATE_RE = /\$\{([^}]+)\}/g
  * 求值一个 ${expr} 字符串。ctx 为 config 扁平化映射 + 循环变量。
  * 支持 config.x.y、约束算术（+ - * / 括号）与基础内建。
  */
-export function evalExpr(expr: string, ctx: Record<string, any>): any {
+function evalExpr(expr: string, ctx: Record<string, any>): any {
   const s = expr.trim()
   // 纯 config 引用
   if (/^config\.[A-Za-z_][A-Za-z0-9_]*$/.test(s)) {
@@ -40,7 +40,7 @@ export function evalExpr(expr: string, ctx: Record<string, any>): any {
 /**
  * 解析 ${...} 模板。config 对照表 + 可选 loop 变量。
  */
-export function resolveTemplate(
+function resolveTemplate(
   value: any,
   config?: Record<string, any>,
   loopVars?: Record<string, any>,

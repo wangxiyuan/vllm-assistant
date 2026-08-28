@@ -16,18 +16,6 @@ from app.services.prompt_utils import render_prompt
 
 logger = logging.getLogger(__name__)
 
-# Agent 各阶段轮次预算
-MAX_TOOL_ROUNDS = 30
-
-
-def _execute_tool_sync(tool_name: str, tool_args: dict) -> dict:
-    """同步执行单个工具（用于 single-shot 兜底，无 agent 循环）。"""
-    from app.services.agent_sdk.tools import _filter_tool_args
-    from app.services.tools import registry as tool_registry
-    import asyncio, json
-    args = _filter_tool_args(tool_name, tool_args)
-    return asyncio.run(tool_registry.execute_tool(tool_name, args))
-
 # ======================================================================
 # 模版渲染
 # ======================================================================

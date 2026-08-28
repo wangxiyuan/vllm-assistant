@@ -3,26 +3,7 @@ Pydantic数据模型（API请求/响应）
 """
 from typing import List, Optional
 from datetime import datetime, date
-from pydantic import BaseModel, field_validator, Field
-
-
-class ItemResponse(BaseModel):
-    """Issue/PR响应"""
-    type: str
-    number: int
-    title: str
-    state: str
-    labels: List[str] = []
-    area: Optional[str] = None
-    author: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    comments: int = 0
-    url: Optional[str] = None
-    is_new: bool = False  # DESIGN.md 67 行：2 小时内创建高亮
-
-    class Config:
-        from_attributes = True
+from pydantic import BaseModel, field_validator
 
 
 class MyPRResponse(BaseModel):
@@ -43,43 +24,6 @@ class MyPRResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class AIChatSessionResponse(BaseModel):
-    """AI 对话会话响应"""
-    id: str
-    title: str
-    message_count: int
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-
-class AIChatMessageResponse(BaseModel):
-    """AI 对话消息响应"""
-    id: int
-    session_id: str
-    role: str
-    content: str
-    created_at: Optional[str] = None
-    steps: Optional[list] = None
-    usage: Optional[dict] = None
-    duration_s: Optional[float] = None
-
-    class Config:
-        from_attributes = True
-
-
-class AIChatSessionCreateRequest(BaseModel):
-    """创建会话请求"""
-    title: str = "新对话"
-
-
-class AIChatSessionTitleRequest(BaseModel):
-    """更新会话标题请求"""
-    title: str
 
 
 class AIReviewRequest(BaseModel):
@@ -292,37 +236,6 @@ class BuildingBlockUpdate(BaseModel):
     tags: Optional[list[str]] = None
 
 
-class BuildingBlockResponse(BaseModel):
-    """积木响应"""
-    id: int
-    name: str
-    kind: str
-    category: str
-    description: str = ""
-    formula: list = []
-    params_schema: dict = {}
-    ports: dict = {}
-    config: dict = {}
-    children: list = []
-    file: Optional[str] = None
-    weights: list = []
-    ops: list = []
-    edges: list = []
-    segments: list = []
-    forward_note: Optional[str] = None
-    weight_prefix_note: Optional[str] = None
-    note: Optional[str] = None
-    state: list = []
-    yaml: str = ""
-    checksum: str = ""
-    tags: list[str] = []
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-
 class ModelAssemblyCreate(BaseModel):
     """创建模型组装"""
     name: str
@@ -343,24 +256,6 @@ class ModelAssemblyUpdate(BaseModel):
     config: Optional[dict] = None
     checksum: Optional[str] = None
     tags: Optional[list[str]] = None
-
-
-class ModelAssemblyResponse(BaseModel):
-    """模型组装响应"""
-    id: int
-    name: str
-    kind: str = "assembly"
-    category: str
-    description: str = ""
-    definition: dict = {}
-    config: dict = {}
-    checksum: str = ""
-    tags: list[str] = []
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 class YAMLImportRequest(BaseModel):

@@ -110,41 +110,6 @@ def _build_detail_instructions(
     return "\n".join(parts)
 
 
-def _build_report_instructions(
-    task_title: str, task_description: str, extra_prompt: str, is_daily: bool,
-) -> str:
-    parts = [
-        "你是 vLLM 项目深度调研报告撰写专家。根据下面调研得到的信息，围绕主题生成一份有洞察的分析报告。",
-        f"报告主题：{task_title}",
-        f"主题说明/背景：{task_description}",
-    ]
-    if extra_prompt:
-        parts.append(f"用户补充信息：{extra_prompt}")
-    if is_daily:
-        parts.append(
-            "报告要求：使用中文，内容要有实质价值，直接输出 Markdown，不要包裹在代码块中。"
-            "不要编造版本号、论文标题、新闻、事件、会议或演讲信息。"
-            "所有新闻必须有上面调研数据中提供的真实 URL 来源；没有 URL 来源的信息一律不写。"
-        )
-        from app.services.prompt_utils import render_prompt
-        from datetime import datetime, timezone
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        tpl = render_prompt("daily_report", "template.md", today=today)
-        parts.append(f"\n请严格遵循以下报告模板组织和呈现内容：\n\n{tpl}")
-    else:
-        parts.append(
-            "报告要求：使用中文，直接输出 Markdown，不要包裹在代码块中；不要编造版本号、论文标题、新闻、"
-            "事件、会议或演讲信息；所有新闻必须有调研数据中提供的真实 URL 来源。"
-            "【核心：报告结构与逻辑必须由主题主导，而不是套固定的社区扫描模板。】"
-            "请先分析主题本身（它要回答什么问题、面向谁、期望的产出形态），据此决定章节结构。"
-            "例如主题是'Q3 roadmap解析'，报告应围绕 roadmap：梳理 Q3 规划的目标与优先事项、"
-            "关键里程碑与对应 issue/PR、当前进展(已合并/进行中/计划)、风险与依赖、对社区的启示等。"
-            "除摘要外不强制固定章节；请设计能最好地诠释该主题的章节结构。"
-            "引用 issue/PR 时带编号与链接，没有直接证据的观点要明确标注为推断。"
-        )
-    return "\n".join(parts)
-
-
 # ======================================================================
 # 执行入口
 # ======================================================================
