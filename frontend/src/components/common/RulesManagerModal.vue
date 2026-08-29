@@ -60,7 +60,7 @@ function timeLabel(iso: string | null): string {
                 <span class="item-title">{{ rule.name }}</span>
                 <span class="badge">{{ rule.match_count ?? 0 }} 命中</span>
                 <span class="badge" :class="rule.item_type === 'both' ? '' : 'badge-area'">
-                  {{ rule.item_type === 'both' ? 'PR+Issue' : rule.item_type === 'pr' ? '仅 PR' : '仅 Issue' }}
+                  {{ (rule.item_type === 'both' ? 'PR+Issue' : rule.item_type === 'pr' ? '仅 PR' : '仅 Issue') + (rule.include_commits !== false ? '+Commit' : '') }}
                 </span>
                 <span style="margin-left:auto;font-size:11px;color:var(--text-tertiary);flex-shrink:0;">
                   {{ timeLabel(rule.last_run_at) }}
@@ -113,6 +113,9 @@ function timeLabel(iso: string | null): string {
               <button class="tab tab-sm" :class="{ active: rulesStore.ruleForm.item_type === 'pr' }" @click="rulesStore.ruleForm.item_type = 'pr'">仅 PR</button>
               <button class="tab tab-sm" :class="{ active: rulesStore.ruleForm.item_type === 'issue' }" @click="rulesStore.ruleForm.item_type = 'issue'">仅 Issue</button>
             </div>
+            <label class="checkbox-label" style="margin-top:6px;">
+              <input type="checkbox" v-model="rulesStore.ruleForm.include_commits" /> 同时分析已合入的 Commits
+            </label>
           </div>
           <div class="form-group" v-if="trackedRepoOptions().length > 0">
             <label class="form-label">限定仓库（不选 = 全部）</label>

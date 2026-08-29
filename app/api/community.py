@@ -78,6 +78,47 @@ async def get_community_items(
     return payload
 
 
+@router.get("/commits")
+async def get_community_commits(
+    repo: Optional[str] = Query(None, description="按仓库过滤（owner/name 全名）"),
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """读取本地缓存 git 仓库的最近 commit（已合入代码）。
+
+    repo 传 owner/name 全名（与 items.repo 同格式），为空则聚合所有 active 仓库。
+    """
+    from app.services.repo_manager import RepoManager
+
+    manager = RepoManager()
+    short_to_full = manager.short_to_full_map(db)
+    if repo:
+        target_shorts = [s for s, full in short_to_full.items() if full == repo]
+        if not target_shorts:
+            return {"commits": []}
+    else:
+        target_shorts = list(short_to_full.keys())
+
+    manager = RepoManager()
+    commits = []
+    for short in target_shorts:
+        for c in manager.get_recent_commits(short, since_days=days, limit=limit):
+            committed_at = c.get("committed_at")
+            if isinstance(committed_at, str):
+                try:
+                    committed_at = datetime.fromisoformat(committed_at)
+                except ValueError:
+                    committed_at = None
+            commits.append({
+                **c,
+                "repo": short_to_full[short],
+                "is_new": _is_recent(committed_at),
+            })
+    commits.sort(key=lambda c: c.get("committed_at") or "", reverse=True)
+    return {"commits": commits[:limit]}
+
+
 @router.get("/areas")
 async def get_areas(db: Session = Depends(get_db)):
     """从缓存读取领域列表"""

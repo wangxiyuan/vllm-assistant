@@ -12,7 +12,7 @@ from typing import Optional
 
 from app.config import Config
 from app.database import SessionLocal
-from app.models import AIRule, AIRuleMatch, Item
+from app.models import AIRule, AIRuleCommitMatch, AIRuleMatch, Item
 from app.services.llm import LLMClient
 from app.services.prompt_utils import render_prompt
 
@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 
 # 单条 prompt 里条目正文的截断长度
 _ITEM_BODY_LIMIT = 500
-# 单次 LLM 输出上限（每条命中一段 reason，对 100 条候选足够）
-_TRIAGE_MAX_TOKENS = 4096
+# 单仓库参与分诊的 commit 候选上限
+_COMMIT_PER_REPO_LIMIT = 100# 单次 LLM 输出上限（每条命中一段 reason，候选多、命中多时 JSON 很长，需留足余量避免截断）
+_TRIAGE_MAX_TOKENS = Config.AI_TRIAGE_MAX_TOKENS
 
 _llm_client: Optional[LLMClient] = None
 
@@ -67,24 +68,87 @@ def _candidate_items(db, rule: AIRule, watermark: Optional[datetime]) -> list:
     return q.order_by(Item.created_at.desc()).limit(Config.AI_TRIAGE_CANDIDATE_LIMIT).all()
 
 
+def _parse_commit_datetime(value) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    else:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _candidate_commits(db, rule: AIRule, watermark: Optional[datetime]) -> list:
+    """从本地缓存 git 仓库取最近 commit 作为候选（committed_at 倒序，总量受 AI_TRIAGE_CANDIDATE_LIMIT 限制）"""
+    if rule.include_commits is False:
+        return []
+    from app.services.repo_manager import RepoManager
+
+    repos, _areas = _load_rule_filters(rule)
+    short_to_full = RepoManager().short_to_full_map(db)
+    if repos:
+        target = {s: f for s, f in short_to_full.items() if f in repos}
+    else:
+        target = short_to_full
+    if not target:
+        return []
+
+    candidates = []
+    for short, full in target.items():
+        commits = RepoManager().get_recent_commits(
+            short, since_days=Config.AI_TRIAGE_RERUN_WINDOW_DAYS,
+            limit=_COMMIT_PER_REPO_LIMIT,
+        )
+        for c in commits:
+            committed = _parse_commit_datetime(c.get("committed_at"))
+            if watermark and (committed is None or committed <= watermark):
+                continue
+            candidates.append({
+                "repo": full, "type": "commit", "number": 0,
+                "sha": c["sha"], "short_sha": c["short_sha"],
+                "author": c["author"], "committed_at": c["committed_at"],
+                "title": c["subject"], "body": "",
+            })
+    candidates.sort(key=lambda c: c.get("committed_at") or "", reverse=True)
+    return candidates[:Config.AI_TRIAGE_CANDIDATE_LIMIT]
+
+
 def _build_prompt(rule_name: str, rule_prompt: str, candidates: list) -> str:
     entries = []
     for i, c in enumerate(candidates, start=1):
-        try:
-            labels = ", ".join(json.loads(c["labels"])) if c["labels"] else "无"
-        except (ValueError, TypeError):
-            labels = c["labels"] or "无"
-        entries.append({
+        entry = {
             "index": i,
             "repo": c["repo"],
-            "number": c["number"],
             "type": c["type"],
-            "state": c["state"] or "unknown",
             "title": c["title"],
-            "labels": labels,
-            "area": c["area"] or "无",
-            "body": (c["body"] or "（无正文）")[:_ITEM_BODY_LIMIT],
-        })
+            "body": (c.get("body") or "（无正文）")[:_ITEM_BODY_LIMIT],
+        }
+        if c["type"] == "commit":
+            entry.update({
+                "number": 0,
+                "short_sha": c["short_sha"],
+                "author": c["author"],
+                "committed_at": c["committed_at"],
+                "state": "", "labels": "", "area": "",
+            })
+        else:
+            try:
+                labels = ", ".join(json.loads(c["labels"])) if c["labels"] else "无"
+            except (ValueError, TypeError):
+                labels = c["labels"] or "无"
+            entry.update({
+                "number": c["number"],
+                "state": c["state"] or "unknown",
+                "labels": labels,
+                "area": c["area"] or "无",
+                "short_sha": "", "author": "", "committed_at": "",
+            })
+        entries.append(entry)
     return render_prompt("triage", "triage.j2", rule_name=rule_name, rule_prompt=rule_prompt, items=entries)
 
 
@@ -107,33 +171,62 @@ def _update_rule_meta(rule_id: int, run_at: Optional[datetime] = None,
         db.close()
 
 
-def _persist_result(rule_id: int, cand_keys: list, matched_keys: set,
-                    matches: dict, run_at: datetime):
-    """把一轮分诊结果写入/清理 matches，并推进水位线（独立短事务）"""
+def _persist_result(rule_id: int, candidates: list, matches: dict, run_at: datetime):
+    """把一轮分诊结果写入/清理 matches（items 与 commit 两张表），并推进水位线（独立短事务）
+
+    matches 的 key：普通条目为 (item_type, repo, number)，commit 为 ("commit", repo, sha)。
+    """
     db = SessionLocal()
     try:
         rule = db.query(AIRule).filter(AIRule.id == rule_id).first()
         if not rule:
             return
-        cand_set = set(cand_keys)
+        item_cand_keys = {(c["repo"], c["type"], c["number"]) for c in candidates if c["type"] != "commit"}
+        commit_cand_keys = {(c["repo"], c["sha"]) for c in candidates if c["type"] == "commit"}
+        matched_item_keys = {k for k in matches if k[0] != "commit"}
+        matched_commit_keys = {(k[1], k[2]) for k in matches if k[0] == "commit"}
+
         # 本轮候选中曾经命中、这轮重新评估后不再命中的旧 match 要清掉
         for row in db.query(AIRuleMatch).filter(AIRuleMatch.rule_id == rule_id).all():
             key = (row.repo, row.item_type, row.number)
-            if key in cand_set and key not in matched_keys:
+            if key in item_cand_keys and key not in matched_item_keys:
                 db.delete(row)
+        for row in db.query(AIRuleCommitMatch).filter(AIRuleCommitMatch.rule_id == rule_id).all():
+            key = (row.repo, row.sha)
+            if key in commit_cand_keys and key not in matched_commit_keys:
+                db.delete(row)
+
         for key, reason in matches.items():
-            repo, item_type, number = key
-            row = db.query(AIRuleMatch).filter_by(
-                rule_id=rule_id, repo=repo, item_type=item_type, number=number
-            ).first()
-            if row:
-                row.reason = reason
-                row.matched_at = run_at
+            match_type, repo, ident = key
+            if match_type == "commit":
+                cand = next(c for c in candidates if c["type"] == "commit" and c["repo"] == repo and c["sha"] == ident)
+                row = db.query(AIRuleCommitMatch).filter_by(
+                    rule_id=rule_id, repo=repo, sha=ident
+                ).first()
+                if row:
+                    row.reason = reason
+                    row.matched_at = run_at
+                else:
+                    db.add(AIRuleCommitMatch(
+                        rule_id=rule_id, repo=repo, sha=ident,
+                        short_sha=cand["short_sha"], title=cand["title"],
+                        author=cand["author"],
+                        committed_at=_parse_commit_datetime(cand["committed_at"]),
+                        reason=reason, matched_at=run_at,
+                    ))
             else:
-                db.add(AIRuleMatch(
-                    rule_id=rule_id, repo=repo, item_type=item_type,
-                    number=number, reason=reason, matched_at=run_at,
-                ))
+                number = ident
+                row = db.query(AIRuleMatch).filter_by(
+                    rule_id=rule_id, repo=repo, item_type=match_type, number=number
+                ).first()
+                if row:
+                    row.reason = reason
+                    row.matched_at = run_at
+                else:
+                    db.add(AIRuleMatch(
+                        rule_id=rule_id, repo=repo, item_type=match_type,
+                        number=number, reason=reason, matched_at=run_at,
+                    ))
         rule.last_triage_at = run_at
         rule.last_run_at = run_at
         rule.last_error = None
@@ -156,6 +249,7 @@ def run_triage(rule_id: int, rerun: bool = False) -> dict:
         if rerun:
             # 手动重跑：清空旧命中，水位线回拨 N 天覆盖近期条目
             db.query(AIRuleMatch).filter(AIRuleMatch.rule_id == rule_id).delete()
+            db.query(AIRuleCommitMatch).filter(AIRuleCommitMatch.rule_id == rule_id).delete()
             rule.last_triage_at = _utcnow() - timedelta(days=Config.AI_TRIAGE_RERUN_WINDOW_DAYS)
             rule.last_error = None
             db.commit()
@@ -171,6 +265,7 @@ def run_triage(rule_id: int, rerun: bool = False) -> dict:
             }
             for it in _candidate_items(db, rule, rule.last_triage_at)
         ]
+        candidates += _candidate_commits(db, rule, rule.last_triage_at)
     finally:
         db.close()
 
@@ -182,15 +277,35 @@ def run_triage(rule_id: int, rerun: bool = False) -> dict:
 
     run_at = _utcnow()
 
-    # 2) LLM 调用（不持有 DB session）
+    # 2) LLM 调用（不持有 DB session）；空输出/不可解析时重试并反馈，避免一次失败丢整轮
     try:
         prompt = _build_prompt(rule_name, rule_prompt, candidates)
-        content = _get_llm_client().chat_sync(
-            prompt, max_tokens=_TRIAGE_MAX_TOKENS, temperature=0.2,
-        )
-        data = LLMClient.safe_json(content, default=None)
+        data = None
+        content = ""
+        last_err = "empty content"
+        for attempt in range(3):
+            content = _get_llm_client().chat_sync(
+                prompt, max_tokens=_TRIAGE_MAX_TOKENS, temperature=0.2,
+            )
+            data = LLMClient.safe_json(content, default=None)
+            if isinstance(data, dict) and "matches" in data:
+                break
+            if not content:
+                last_err = "AI 返回了空内容"
+            else:
+                last_err = f"LLM 返回内容无法解析为 JSON: {(content or '')[:200]}"
+            if attempt < 2:
+                logger.warning(
+                    "AI triage parse failed for rule %s (attempt %d/3): %s — 重试",
+                    rule_id, attempt + 1, last_err,
+                )
+                prompt = (
+                    f"{prompt}\n\n上一个回答不符合要求的 JSON 格式"
+                    f"（你回答的是：{(content or '')[:200]}）。"
+                    f"请只输出 JSON，不要输出任何其他文字或问题。"
+                )
         if not isinstance(data, dict):
-            raise ValueError(f"LLM 返回内容无法解析为 JSON: {(content or '')[:200]}")
+            raise ValueError(last_err)
         raw_matches = data.get("matches") or []
         if not isinstance(raw_matches, list):
             raw_matches = []
@@ -212,11 +327,13 @@ def run_triage(rule_id: int, rerun: bool = False) -> dict:
         cand = index_map.get(idx)
         if not cand:
             continue
-        key = (cand["repo"], cand["type"], cand["number"])
+        if cand["type"] == "commit":
+            key = ("commit", cand["repo"], cand["sha"])
+        else:
+            key = (cand["type"], cand["repo"], cand["number"])
         matches[key] = (m.get("reason") or "").strip()[:500]
 
-    cand_keys = [(c["repo"], c["type"], c["number"]) for c in candidates]
-    _persist_result(rule_id, cand_keys, set(matches), matches, run_at)
+    _persist_result(rule_id, candidates, matches, run_at)
     return {"ok": True, "candidates": len(candidates), "matched": len(matches)}
 
 

@@ -61,3 +61,6 @@ node_modules/
 static/dist/
 .agents
 skills-lock.json
+
+# ZCode workspace
+.zcode/

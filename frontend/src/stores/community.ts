@@ -17,8 +17,9 @@ function repoFullNameFromCloneUrl(cloneUrl: string): string {
 export const useCommunityStore = defineStore('community', () => {
   const issues = ref<Issue[]>([])
   const prs = ref<PR[]>([])
+  const commits = ref<any[]>([])
   const sortBy = ref('created')
-  const communityTab = ref<'issues' | 'prs'>('prs')
+  const communityTab = ref<'commits' | 'issues' | 'prs'>('commits')
   const communityPage = ref(1)
   const communityIssueType = ref('all')
   const communityIssueArea = ref('')
@@ -82,21 +83,45 @@ export const useCommunityStore = defineStore('community', () => {
     return list
   })
 
+  const filteredCommits = computed(() => {
+    const appStore = useAppStore()
+    const q = (appStore.searchQuery || '').toLowerCase().trim()
+    let list = commits.value
+    if (q) {
+      list = list.filter(c =>
+        (c.subject || '').toLowerCase().includes(q) ||
+        (c.short_sha || '').toLowerCase().includes(q) ||
+        String(c.sha || '').toLowerCase().includes(q) ||
+        (c.author || '').toLowerCase().includes(q),
+      )
+    }
+    return list
+  })
+
   const pagedFilteredIssues = computed(() => {
-    if (communityTab.value === 'prs') return []
+    if (communityTab.value === 'prs' || communityTab.value === 'commits') return []
     const limit = communityPage.value * 25
     return filteredIssues.value.slice(0, limit)
   })
 
   const pagedFilteredPRs = computed(() => {
-    if (communityTab.value === 'issues') return []
+    if (communityTab.value === 'issues' || communityTab.value === 'commits') return []
     const limit = communityPage.value * 25
     return filteredPRs.value.slice(0, limit)
+  })
+
+  const pagedFilteredCommits = computed(() => {
+    if (communityTab.value !== 'commits') return []
+    const limit = communityPage.value * 25
+    return filteredCommits.value.slice(0, limit)
   })
 
   const hasMoreCommunity = computed(() => {
     if (communityTab.value === 'prs') {
       return pagedFilteredPRs.value.length < filteredPRs.value.length
+    }
+    if (communityTab.value === 'commits') {
+      return pagedFilteredCommits.value.length < filteredCommits.value.length
     }
     return pagedFilteredIssues.value.length < filteredIssues.value.length
   })
@@ -122,10 +147,14 @@ export const useCommunityStore = defineStore('community', () => {
       params.set('sort_by', sortBy.value)
       params.set('limit', '200')
       if (communityRepo.value) params.set('repo', communityRepo.value)
-      const data: any = await api('/api/community/items?' + params)
-      const items = data.items || data
+      const [itemsData, commitsData] = await Promise.all([
+        api('/api/community/items?' + params),
+        api('/api/community/commits?limit=200' + (communityRepo.value ? '&repo=' + encodeURIComponent(communityRepo.value) : '')),
+      ])
+      const items = itemsData.items || itemsData
       issues.value = items.filter((x: any) => x.type === 'issue')
       prs.value = items.filter((x: any) => x.type === 'pr')
+      commits.value = commitsData.commits || []
     } catch (e: any) {
       useAppStore().showToast('加载社区动态失败', e.message, 'error')
     }
@@ -142,10 +171,11 @@ export const useCommunityStore = defineStore('community', () => {
   }
 
   return {
-    issues, prs, sortBy, communityTab, communityPage,
+    issues, prs, commits, sortBy, communityTab, communityPage,
     communityIssueType, communityIssueArea, communityPRArea,
     communityRepo, trackedRepos,
-    filteredIssues, filteredPRs, pagedFilteredIssues, pagedFilteredPRs,
+    filteredIssues, filteredPRs, filteredCommits,
+    pagedFilteredIssues, pagedFilteredPRs, pagedFilteredCommits,
     hasMoreCommunity,
     loadAreas, loadCommunityData, forceRefresh,
   }

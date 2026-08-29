@@ -8,6 +8,7 @@ export interface AIRule {
   name: string
   prompt: string
   item_type: 'pr' | 'issue' | 'both'
+  include_commits: boolean
   repos: string[]
   areas: string[]
   enabled: boolean
@@ -30,6 +31,7 @@ export const useRulesStore = defineStore('rules', () => {
     name: '',
     prompt: '',
     item_type: 'both' as 'pr' | 'issue' | 'both',
+    include_commits: true,
     repos: [] as string[],
     areas: [] as string[],
     enabled: true,
@@ -184,7 +186,7 @@ export const useRulesStore = defineStore('rules', () => {
   function openCreate() {
     editingMode.value = 'edit'
     editingRuleId.value = null
-    ruleForm.value = { name: '', prompt: '', item_type: 'both', repos: [], areas: [], enabled: true }
+    ruleForm.value = { name: '', prompt: '', item_type: 'both', include_commits: true, repos: [], areas: [], enabled: true }
   }
 
   function openEdit(rule: AIRule) {
@@ -194,6 +196,7 @@ export const useRulesStore = defineStore('rules', () => {
       name: rule.name,
       prompt: rule.prompt,
       item_type: rule.item_type || 'both',
+      include_commits: rule.include_commits !== false,
       repos: [...(rule.repos || [])],
       areas: [...(rule.areas || [])],
       enabled: rule.enabled,

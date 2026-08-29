@@ -8,7 +8,7 @@ import { useRulesStore } from '@/stores/rules'
 import { useUsersStore } from '@/stores/users'
 import { useReposStore } from '@/stores/repos'
 import { useTodoStore } from '@/stores/todo'
-import { issueType, issueTypeLabel, issueStateLabel, prStateLabel, timeAgo, exactTime, ghUrl, ciLabel, ciBadgeClass } from '@/utils/helpers'
+import { issueType, issueTypeLabel, issueStateLabel, prStateLabel, timeAgo, exactTime, ghUrl, ghCommitUrl, ciLabel, ciBadgeClass } from '@/utils/helpers'
 import type { Issue, PR } from '@/utils/types'
 import Icon from '@/components/common/Icon.vue'
 import FilterRow from '@/components/common/FilterRow.vue'
@@ -70,6 +70,27 @@ const activeMatches = computed(() => {
   const ruleId = parseInt(activeTab.value.slice(5), 10)
   return rulesStore.matches[ruleId] || []
 })
+
+// 规则命中子 tab（全部/PR/Issue/Commit），切换规则时重置
+const ruleMatchFilter = ref<'all' | 'pr' | 'issue' | 'commit'>('all')
+
+watch(activeTab, () => {
+  ruleMatchFilter.value = 'all'
+})
+
+const activeMatchCounts = computed(() => {
+  const counts = { all: activeMatches.value.length, pr: 0, issue: 0, commit: 0 }
+  for (const m of activeMatches.value) {
+    const t = m.type as 'pr' | 'issue' | 'commit'
+    if (t === 'pr' || t === 'issue' || t === 'commit') counts[t]++
+  }
+  return counts
+})
+
+const activeMatchesFiltered = computed(() => {
+  if (ruleMatchFilter.value === 'all') return activeMatches.value
+  return activeMatches.value.filter(m => m.type === ruleMatchFilter.value)
+})
 const activeRuleRunning = computed(() => {
   if (!activeTab.value.startsWith('rule:')) return false
   const ruleId = parseInt(activeTab.value.slice(5), 10)
@@ -82,11 +103,23 @@ const activeRule = computed(() => {
 })
 
 function openMatchedItem(item: any) {
-  if (item.type === 'pr') {
+  if (item.type === 'commit') {
+    window.open(ghCommitUrl(item.repo, item.sha), '_blank')
+  } else if (item.type === 'pr') {
     prStore.openPR({ ...item, pr_number: item.number })
   } else {
     prStore.openIssue(item)
   }
+}
+
+function openCommit(commit: any) {
+  window.open(ghCommitUrl(commit.repo, commit.sha), '_blank')
+}
+
+/** 从 commit 标题尾缀 "(#1234)" 解析关联 PR 号（GitHub merge commit 约定） */
+function commitPrNumber(item: any): number | null {
+  const m = /\(#(\d+)\)\s*$/.exec(item.title || item.subject || '')
+  return m ? parseInt(m[1], 10) : null
 }
 
 function rerunActiveRule() {
@@ -96,6 +129,7 @@ function rerunActiveRule() {
 // ================= 左列：社区动态 tab（原社区动态页能力） =================
 const displayedItems = computed(() => {
   if (communityStore.communityTab === 'prs') return communityStore.pagedFilteredPRs
+  if (communityStore.communityTab === 'commits') return communityStore.pagedFilteredCommits
   return communityStore.pagedFilteredIssues
 })
 
@@ -134,7 +168,7 @@ const prCardMode = ref<'pending' | 'all'>('pending')
 const pendingPRs = computed(() =>
   prStore.myPrs.filter(p =>
     p.state === 'open' &&
-    (p.conflict_detected || p.ci_status === 'fail' || (p.conflict_commits || 0) > 0),
+    (p.conflict_detected || p.ci_status === 'fail'),
   ),
 )
 
@@ -232,50 +266,92 @@ function watchlistChangeHint(w: any): string {
               {{ activeRuleRunning ? 'AI 筛选中…' : '⟲ 重新评估' }}
             </button>
           </div>
-          <div v-for="item in activeMatches" :key="item.type + '-' + item.number"
-               class="community-item" :class="{ 'is-new': item.is_new }" @click="openMatchedItem(item)">
-            <div class="item-header">
-              <span class="item-type-badge" :class="item.type === 'pr' ? 'badge-pr' : 'badge-issue'">
-                {{ item.type === 'pr' ? 'PR' : 'ISSUE' }}
-              </span>
-              <span class="item-number">#{{ item.number }}</span>
-              <span class="item-state" :class="'state-' + item.state">
-                {{ item.type === 'pr' ? prStateLabel(item.state) : issueStateLabel(item.state) }}
-              </span>
-              <span v-if="item.type === 'issue'" class="item-issue-type">{{ issueTypeLabel(issueType(item)) }}</span>
-              <span v-if="item.is_new" class="badge badge-new">新</span>
-            </div>
-            <div class="item-title-row">
-              <h3 class="item-title">{{ item.title }}</h3>
-              <button class="btn btn-xs watchlist-star-btn"
-                      :class="watchlistStore.findWatchlistItem(item.number, item.type, item.repo) ? 'btn-starred' : 'btn-ghost'"
-                      @click.stop="toggleWatchlist(item.number, item.type, item.title, ghUrl(item.repo, item.number, item.type), { repo: item.repo })"
-                      :title="watchlistStore.findWatchlistItem(item.number, item.type, item.repo) ? '取消特别关注' : '加入特别关注'">
-                <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(item.number, item.type, item.repo) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                </svg>
+          <FilterRow label="类型">
+            <div class="tab-bar">
+              <button class="tab" :class="{ active: ruleMatchFilter === 'all' }" @click="ruleMatchFilter = 'all'">
+                全部 <span class="badge">{{ activeMatchCounts.all }}</span>
+              </button>
+              <button class="tab" :class="{ active: ruleMatchFilter === 'commit' }" @click="ruleMatchFilter = 'commit'">
+                Commits <span class="badge">{{ activeMatchCounts.commit }}</span>
+              </button>
+              <button class="tab" :class="{ active: ruleMatchFilter === 'pr' }" @click="ruleMatchFilter = 'pr'">
+                PRs <span class="badge">{{ activeMatchCounts.pr }}</span>
+              </button>
+              <button class="tab" :class="{ active: ruleMatchFilter === 'issue' }" @click="ruleMatchFilter = 'issue'">
+                Issues <span class="badge">{{ activeMatchCounts.issue }}</span>
               </button>
             </div>
-            <div v-if="item.reason" class="match-reason">⚡ {{ item.reason }}</div>
-            <div class="item-meta">
-              <span class="meta-item">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
-                {{ item.author }}
-              </span>
-              <span v-if="item.repo" class="badge badge-area" style="font-size:9px;">{{ item.repo.split('/').pop() }}</span>
-              <span v-if="item.area" class="badge badge-area">{{ appStore.areaName(item.area) }}</span>
-              <span class="meta-item tt-host">
-                {{ timeAgo(item.created_at) }}
-                <span class="tt">{{ exactTime(item.created_at) }}</span>
-              </span>
-              <span v-if="item.comments > 0" class="meta-item">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                {{ item.comments }}
-              </span>
+          </FilterRow>
+          <template v-for="item in activeMatchesFiltered" :key="item.type + '-' + (item.number || item.sha || '')">
+            <!-- commit 命中项 -->
+            <div v-if="item.type === 'commit'" class="community-item" :class="{ 'is-new': item.is_new }" @click="openMatchedItem(item)">
+              <div class="item-header">
+                <span class="item-type-badge badge-commit">COMMIT</span>
+                <span class="item-number">{{ item.short_sha || item.sha?.slice(0, 7) }}</span>
+                <span v-if="commitPrNumber(item)" class="item-state">关联 #{{ commitPrNumber(item) }}</span>
+                <span v-if="item.is_new" class="badge badge-new">新</span>
+              </div>
+              <div class="item-title-row">
+                <h3 class="item-title">{{ item.title }}</h3>
+              </div>
+              <div v-if="item.reason" class="match-reason">⚡ {{ item.reason }}</div>
+              <div class="item-meta">
+                <span class="meta-item">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+                  {{ item.author }}
+                </span>
+                <span v-if="item.repo" class="badge badge-area" style="font-size:9px;">{{ item.repo.split('/').pop() }}</span>
+                <span class="meta-item tt-host">
+                  {{ timeAgo(item.committed_at) }}
+                  <span class="tt">{{ exactTime(item.committed_at) }}</span>
+                </span>
+              </div>
             </div>
-          </div>
+            <!-- PR / Issue 命中项 -->
+            <div v-else class="community-item" :class="{ 'is-new': item.is_new }" @click="openMatchedItem(item)">
+              <div class="item-header">
+                <span class="item-type-badge" :class="item.type === 'pr' ? 'badge-pr' : 'badge-issue'">
+                  {{ item.type === 'pr' ? 'PR' : 'ISSUE' }}
+                </span>
+                <span class="item-number">#{{ item.number }}</span>
+                <span class="item-state" :class="'state-' + item.state">
+                  {{ item.type === 'pr' ? prStateLabel(item.state) : issueStateLabel(item.state) }}
+                </span>
+                <span v-if="item.type === 'issue'" class="item-issue-type">{{ issueTypeLabel(issueType(item)) }}</span>
+                <span v-if="item.is_new" class="badge badge-new">新</span>
+              </div>
+              <div class="item-title-row">
+                <h3 class="item-title">{{ item.title }}</h3>
+                <button class="btn btn-xs watchlist-star-btn"
+                        :class="watchlistStore.findWatchlistItem(item.number, item.type, item.repo) ? 'btn-starred' : 'btn-ghost'"
+                        @click.stop="toggleWatchlist(item.number, item.type, item.title, ghUrl(item.repo, item.number, item.type), { repo: item.repo })"
+                        :title="watchlistStore.findWatchlistItem(item.number, item.type, item.repo) ? '取消特别关注' : '加入特别关注'">
+                  <svg width="14" height="14" viewBox="0 0 24 24" :fill="watchlistStore.findWatchlistItem(item.number, item.type, item.repo) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                </button>
+              </div>
+              <div v-if="item.reason" class="match-reason">⚡ {{ item.reason }}</div>
+              <div class="item-meta">
+                <span class="meta-item">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+                  {{ item.author }}
+                </span>
+                <span v-if="item.repo" class="badge badge-area" style="font-size:9px;">{{ item.repo.split('/').pop() }}</span>
+                <span v-if="item.area" class="badge badge-area">{{ appStore.areaName(item.area) }}</span>
+                <span class="meta-item tt-host">
+                  {{ timeAgo(item.created_at) }}
+                  <span class="tt">{{ exactTime(item.created_at) }}</span>
+                </span>
+                <span v-if="item.comments > 0" class="meta-item">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                  {{ item.comments }}
+                </span>
+              </div>
+            </div>
+          </template>
           <div v-if="rulesStore.matchesLoading[parseInt(activeTab.slice(5))] " class="detail-loading">加载中…</div>
-          <div v-else-if="activeMatches.length === 0" class="empty-state">
+          <div v-else-if="activeMatchesFiltered.length === 0" class="empty-state">
             <div class="empty-icon">∅</div>
             <div class="empty-title">{{ activeRuleRunning ? 'AI 筛选中，完成后自动刷新' : '暂无命中条目' }}</div>
             <div class="empty-desc">规则定时自动运行（约每 30 分钟），也可点击右上角「重新评估」立即执行</div>
@@ -296,6 +372,10 @@ function watchlistChangeHint(w: any): string {
 
           <FilterRow label="类型">
             <div class="tab-bar">
+              <button class="tab" :class="{ active: communityStore.communityTab === 'commits' }"
+                      @click="communityStore.communityTab = 'commits'">
+                Commits <span class="badge">{{ communityStore.commits.length }}</span>
+              </button>
               <button class="tab" :class="{ active: communityStore.communityTab === 'prs' }"
                       @click="communityStore.communityTab = 'prs'">
                 PRs <span class="badge">{{ communityStore.prs.length }}</span>
@@ -307,7 +387,7 @@ function watchlistChangeHint(w: any): string {
             </div>
           </FilterRow>
 
-          <FilterRow label="筛选">
+          <FilterRow v-if="communityStore.communityTab !== 'commits'" label="筛选">
             <template v-if="communityStore.communityTab === 'issues'">
               <select class="select select-sm" v-model="communityStore.communityIssueType">
                 <option value="all">全部类型</option>
@@ -335,52 +415,77 @@ function watchlistChangeHint(w: any): string {
           </FilterRow>
 
           <div class="community-list">
-            <div v-for="item in displayedItems" :key="item.type + '-' + (item.number || item.pr_number)"
-                 class="community-item" :class="{ 'is-new': item.is_new }" @click="item.type === 'pr' ? openPR(item) : openIssue(item as Issue)">
-              <div class="item-header">
-                <span class="item-type-badge" :class="item.type === 'pr' ? 'badge-pr' : 'badge-issue'">
-                  {{ item.type === 'pr' ? 'PR' : 'ISSUE' }}
-                </span>
-                <span class="item-number">#{{ item.number || item.pr_number }}</span>
-                <span class="item-state" :class="'state-' + item.state">
-                  {{ item.type === 'pr' ? prStateLabel(item.state) : issueStateLabel(item.state) }}
-                </span>
-                <span v-if="item.type === 'issue'" class="item-issue-type">{{ issueTypeLabel(issueType(item)) }}</span>
-                <span v-if="item.is_new" class="badge badge-new">新</span>
+            <template v-for="item in displayedItems" :key="item.type + '-' + (item.number || item.pr_number || item.sha || '')">
+              <!-- commit 项 -->
+              <div v-if="item.type === 'commit' || item.sha" class="community-item" :class="{ 'is-new': item.is_new }" @click="openCommit(item)">
+                <div class="item-header">
+                  <span class="item-type-badge badge-commit">COMMIT</span>
+                  <span class="item-number">{{ item.short_sha || item.sha?.slice(0, 7) }}</span>
+                  <span v-if="commitPrNumber(item)" class="item-state">关联 #{{ commitPrNumber(item) }}</span>
+                  <span v-if="item.is_new" class="badge badge-new">新</span>
+                </div>
+                <div class="item-title-row">
+                  <h3 class="item-title">{{ item.subject || item.title }}</h3>
+                </div>
+                <div class="item-meta">
+                  <span class="meta-item">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+                    {{ item.author }}
+                  </span>
+                  <span v-if="!communityStore.communityRepo && item.repo" class="badge badge-area" style="font-size:9px;">{{ item.repo.split('/').pop() }}</span>
+                  <span class="meta-item tt-host">
+                    {{ timeAgo(item.committed_at) }}
+                    <span class="tt">{{ exactTime(item.committed_at) }}</span>
+                  </span>
+                </div>
               </div>
-              <div class="item-title-row">
-                <h3 class="item-title">{{ item.title }}</h3>
-                <button class="btn btn-xs watchlist-star-btn" :class="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr', item.repo) : watchlistStore.findWatchlistItem(item.number, 'issue', item.repo)) ? 'btn-starred' : 'btn-ghost'"
-                        @click.stop="item.type === 'pr'
-                          ? toggleWatchlist(item.number || item.pr_number, 'pr', item.title, ghUrl(item.repo, item.number || item.pr_number, 'pr'), { repo: item.repo })
-                          : toggleWatchlist(item.number, 'issue', item.title, ghUrl(item.repo, item.number, 'issue'), { repo: item.repo })"
-                        :title="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr', item.repo) : watchlistStore.findWatchlistItem(item.number, 'issue', item.repo)) ? '取消特别关注' : '加入特别关注'">
-                  <svg width="14" height="14" viewBox="0 0 24 24" :fill="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr', item.repo) : watchlistStore.findWatchlistItem(item.number, 'issue', item.repo)) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
-                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                  </svg>
-                </button>
+              <!-- PR / Issue 项 -->
+              <div v-else class="community-item" :class="{ 'is-new': item.is_new }" @click="item.type === 'pr' ? openPR(item) : openIssue(item as Issue)">
+                <div class="item-header">
+                  <span class="item-type-badge" :class="item.type === 'pr' ? 'badge-pr' : 'badge-issue'">
+                    {{ item.type === 'pr' ? 'PR' : 'ISSUE' }}
+                  </span>
+                  <span class="item-number">#{{ item.number || item.pr_number }}</span>
+                  <span class="item-state" :class="'state-' + item.state">
+                    {{ item.type === 'pr' ? prStateLabel(item.state) : issueStateLabel(item.state) }}
+                  </span>
+                  <span v-if="item.type === 'issue'" class="item-issue-type">{{ issueTypeLabel(issueType(item)) }}</span>
+                  <span v-if="item.is_new" class="badge badge-new">新</span>
+                </div>
+                <div class="item-title-row">
+                  <h3 class="item-title">{{ item.title }}</h3>
+                  <button class="btn btn-xs watchlist-star-btn" :class="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr', item.repo) : watchlistStore.findWatchlistItem(item.number, 'issue', item.repo)) ? 'btn-starred' : 'btn-ghost'"
+                          @click.stop="item.type === 'pr'
+                            ? toggleWatchlist(item.number || item.pr_number, 'pr', item.title, ghUrl(item.repo, item.number || item.pr_number, 'pr'), { repo: item.repo })
+                            : toggleWatchlist(item.number, 'issue', item.title, ghUrl(item.repo, item.number, 'issue'), { repo: item.repo })"
+                          :title="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr', item.repo) : watchlistStore.findWatchlistItem(item.number, 'issue', item.repo)) ? '取消特别关注' : '加入特别关注'">
+                    <svg width="14" height="14" viewBox="0 0 24 24" :fill="(item.type === 'pr' ? watchlistStore.findWatchlistItem(item.number || item.pr_number, 'pr', item.repo) : watchlistStore.findWatchlistItem(item.number, 'issue', item.repo)) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="item-meta">
+                  <span class="meta-item">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+                    {{ item.author }}
+                  </span>
+                  <span v-if="!communityStore.communityRepo && item.repo" class="badge badge-area" style="font-size:9px;">{{ item.repo.split('/').pop() }}</span>
+                  <span v-if="item.area" class="badge badge-area">{{ appStore.areaName(item.area) }}</span>
+                  <span class="meta-item tt-host">
+                    {{ timeAgo(item.created_at) }}
+                    <span class="tt">{{ exactTime(item.created_at) }}</span>
+                  </span>
+                  <span v-if="item.comments > 0" class="meta-item">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    {{ item.comments }}
+                  </span>
+                  <span v-if="item.type === 'pr' && (item.additions || item.deletions)" class="diffstat">
+                    <span class="add">+{{ item.additions || 0 }}</span>
+                    <span class="del">-{{ item.deletions || 0 }}</span>
+                  </span>
+                </div>
               </div>
-              <div class="item-meta">
-                <span class="meta-item">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
-                  {{ item.author }}
-                </span>
-                <span v-if="!communityStore.communityRepo && item.repo" class="badge badge-area" style="font-size:9px;">{{ item.repo.split('/').pop() }}</span>
-                <span v-if="item.area" class="badge badge-area">{{ appStore.areaName(item.area) }}</span>
-                <span class="meta-item tt-host">
-                  {{ timeAgo(item.created_at) }}
-                  <span class="tt">{{ exactTime(item.created_at) }}</span>
-                </span>
-                <span v-if="item.comments > 0" class="meta-item">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                  {{ item.comments }}
-                </span>
-                <span v-if="item.type === 'pr' && (item.additions || item.deletions)" class="diffstat">
-                  <span class="add">+{{ item.additions || 0 }}</span>
-                  <span class="del">-{{ item.deletions || 0 }}</span>
-                </span>
-              </div>
-            </div>
+            </template>
             <div v-if="displayedItems.length === 0" class="empty-state">
               <div class="empty-icon">∅</div>
               <div class="empty-title">{{ appStore.searchQuery.trim() ? '无匹配结果' : '暂无动态' }}</div>
@@ -417,17 +522,16 @@ function watchlistChangeHint(w: any): string {
             <div v-for="pr in pendingPRs" :key="(pr.repo || '') + '-' + pr.pr_number" class="aside-item aside-item-pending" @click="prStore.openPR(pr)">
               <div class="aside-item-header">
                 <span class="pr-number">#{{ pr.pr_number }}</span>
-                <span v-if="pr.conflict_detected" class="badge badge-conflict">冲突</span>
-                <span v-if="pr.ci_status === 'fail'" class="badge" :class="ciBadgeClass(pr.ci_status)">{{ ciLabel(pr.ci_status) }}</span>
-                <span v-if="!pr.conflict_detected && (pr.conflict_commits || 0) > 0" class="badge badge-warning">落后 {{ pr.conflict_commits }}</span>
-              </div>
-              <div class="aside-item-title">{{ pr.title }}</div>
-              <div class="aside-item-meta">
-                <span v-if="pr.repo" class="badge badge-area" style="font-size:9px;">{{ pr.repo.split('/').pop() }}</span>
-                <span>{{ timeAgo(pr.created_at) }}</span>
-              </div>
+              <span v-if="pr.conflict_detected" class="badge badge-conflict">冲突</span>
+              <span v-if="pr.ci_status === 'fail'" class="badge" :class="ciBadgeClass(pr.ci_status)">{{ ciLabel(pr.ci_status) }}</span>
             </div>
-            <div v-if="pendingPRs.length === 0" class="empty-state is-compact">
+            <div class="aside-item-title">{{ pr.title }}</div>
+            <div class="aside-item-meta">
+              <span v-if="pr.repo" class="badge badge-area" style="font-size:9px;">{{ pr.repo.split('/').pop() }}</span>
+              <span>{{ timeAgo(pr.created_at) }}</span>
+            </div>
+          </div>
+          <div v-if="pendingPRs.length === 0" class="empty-state is-compact">
               <p>✓ 没有待处理的 PR</p>
             </div>
           </div>
@@ -503,10 +607,10 @@ function watchlistChangeHint(w: any): string {
           </div>
         </div>
 
-        <!-- 我的关注 -->
+        <!-- 重点关注 -->
         <div class="aside-card">
           <div class="aside-card-header">
-            <h3 class="aside-card-title">我的关注 <span class="badge">{{ watchlistStore.watchlist.length }}</span></h3>
+            <h3 class="aside-card-title">重点关注 <span class="badge">{{ watchlistStore.watchlist.length }}</span></h3>
             <button class="btn btn-primary btn-sm" @click="watchlistStore.openAddModal()">+ 添加</button>
           </div>
           <div class="aside-card-body">

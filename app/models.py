@@ -879,6 +879,7 @@ class AIRule(Base):
     name = Column(String(100), nullable=False)  # tab 显示名
     prompt = Column(Text, nullable=False)  # 自然语言筛选要求
     item_type = Column(String(10), nullable=False, default="both")  # 'pr' / 'issue' / 'both'
+    include_commits = Column(Boolean, default=True)  # 是否同时分析已合入 commit
     repos = Column(Text)  # JSON array，完整仓库名（与 items.repo 同格式），空 = 全部
     areas = Column(Text)  # JSON array，领域 ID（areas.id），空 = 全部
     enabled = Column(Boolean, nullable=False, default=True)
@@ -896,6 +897,7 @@ class AIRule(Base):
             "name": self.name,
             "prompt": self.prompt,
             "item_type": self.item_type or "both",
+            "include_commits": self.include_commits if self.include_commits is not None else True,
             "repos": json.loads(self.repos) if self.repos else [],
             "areas": json.loads(self.areas) if self.areas else [],
             "enabled": bool(self.enabled),
@@ -930,4 +932,30 @@ class AIRuleMatch(Base):
 
     __table_args__ = (
         UniqueConstraint("rule_id", "repo", "item_type", "number", name="uq_ai_rule_match"),
+    )
+
+
+class AIRuleCommitMatch(Base):
+    """AI 筛选规则的 commit 命中结果
+
+    commit 没有 number，无法复用 AIRuleMatch（number 为非空 Integer），
+    单独成表；repo 存全名（与 items.repo 同格式），冗余展示字段
+    （title/author/committed_at）避免依赖本地 git 仓库存活。
+    """
+
+    __tablename__ = "ai_triage_commit_matches"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rule_id = Column(Integer, ForeignKey("ai_triage_rules.id", ondelete="CASCADE"), nullable=False, index=True)
+    repo = Column(String(100), nullable=False)  # owner/name 全名
+    sha = Column(String(40), nullable=False)
+    short_sha = Column(String(10))
+    title = Column(Text)  # commit subject
+    author = Column(String(200))
+    committed_at = Column(DateTime)
+    reason = Column(Text)  # AI 给出的一句话命中理由
+    matched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    __table_args__ = (
+        UniqueConstraint("rule_id", "repo", "sha", name="uq_ai_rule_commit_match"),
     )

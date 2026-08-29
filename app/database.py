@@ -538,6 +538,27 @@ def _ensure_watchlist_state_change_column():
                 logger.warning(f"Failed to add last_state_change_at column to watchlist: {e}")
 
 
+def _ensure_ai_rules_include_commits_column():
+    """确保 ai_triage_rules 表包含 include_commits 列（向后兼容迁移）"""
+    from sqlalchemy import inspect, DDL
+
+    with engine.connect() as conn:
+        try:
+            existing_cols = {c["name"] for c in inspect(conn).get_columns("ai_triage_rules")}
+        except Exception:
+            return
+
+        if "include_commits" not in existing_cols:
+            try:
+                conn.execute(DDL(
+                    "ALTER TABLE ai_triage_rules ADD COLUMN include_commits BOOLEAN NOT NULL DEFAULT 1"
+                ))
+                conn.commit()
+                logger.info("Added include_commits column to ai_triage_rules table")
+            except Exception as e:
+                logger.warning(f"Failed to add include_commits column to ai_triage_rules: {e}")
+
+
 def _cleanup_obsolete_schema():
     """清理已废弃的表和字段（dedup_check_result, task_dedup_cache）"""
     from sqlalchemy import inspect, DDL, text
@@ -611,6 +632,7 @@ _ensure_intelligence_reports_category()
 _ensure_intelligence_report_traces()
 _ensure_ai_chat_messages_proc_columns()
 _ensure_watchlist_state_change_column()
+_ensure_ai_rules_include_commits_column()
 _cleanup_obsolete_schema()
 # 重建表会丢失索引，迁移后重新补建
 _ensure_indexes()

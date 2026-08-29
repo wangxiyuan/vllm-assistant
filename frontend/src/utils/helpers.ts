@@ -105,6 +105,12 @@ export function ghUrl(repo: string | undefined, number: number, type: 'pr' | 'is
   return `https://github.com/${full}/${seg}/${number}`
 }
 
+/** 从 commit 的 repo 全名和 sha 生成 GitHub commit URL */
+export function ghCommitUrl(repo: string | undefined, sha: string): string {
+  const full = repo || 'vllm-project/vllm'
+  return `https://github.com/${full}/commit/${sha}`
+}
+
 /* ── Dynamic source badge colors ──
    Report sources come from a dynamically growing repo list (vllm, sglang,
    vllm-omni, ...). Instead of a hardcoded CSS class per repo, unknown sources

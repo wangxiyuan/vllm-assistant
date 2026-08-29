@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import AIRule, AIRuleMatch, Item
+from app.models import AIRule, AIRuleCommitMatch, AIRuleMatch, Item
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -54,6 +54,8 @@ def _clean_rule_fields(payload: dict, partial: bool = False) -> dict:
         if item_type not in ("pr", "issue", "both"):
             raise HTTPException(status_code=400, detail="item_type 必须是 pr/issue/both")
         fields["item_type"] = item_type
+    if has("include_commits"):
+        fields["include_commits"] = bool(payload.get("include_commits", True))
     if has("repos"):
         fields["repos"] = json.dumps(_parse_str_list(payload.get("repos")), ensure_ascii=False)
     if has("areas"):
@@ -68,17 +70,39 @@ def _clean_rule_fields(payload: dict, partial: bool = False) -> dict:
     return fields
 
 
+def _commit_match_counts(db, rule_ids: list) -> dict:
+    """按 rule_id 统计 commit 命中数"""
+    if not rule_ids:
+        return {}
+    rows = (
+        db.query(AIRuleCommitMatch.rule_id, func.count(AIRuleCommitMatch.id))
+        .filter(AIRuleCommitMatch.rule_id.in_(rule_ids))
+        .group_by(AIRuleCommitMatch.rule_id)
+        .all()
+    )
+    return dict(rows)
+
+
 @router.get("")
 async def list_rules(db: Session = Depends(get_db)):
-    """规则列表（带各自命中数），按 sort_order 排序"""
-    rows = (
-        db.query(AIRule, func.count(AIRuleMatch.id))
-        .outerjoin(AIRuleMatch, AIRuleMatch.rule_id == AIRule.id)
-        .group_by(AIRule.id)
+    """规则列表（带各自命中数：条目 + commit），按 sort_order 排序"""
+    rules = (
+        db.query(AIRule)
         .order_by(AIRule.sort_order, AIRule.id)
         .all()
     )
-    return {"rules": [rule.to_dict(match_count=count or 0) for rule, count in rows]}
+    item_counts = dict(
+        db.query(AIRuleMatch.rule_id, func.count(AIRuleMatch.id))
+        .group_by(AIRuleMatch.rule_id)
+        .all()
+    )
+    commit_counts = _commit_match_counts(db, [r.id for r in rules])
+    return {
+        "rules": [
+            rule.to_dict(match_count=(item_counts.get(rule.id, 0) + commit_counts.get(rule.id, 0)))
+            for rule in rules
+        ]
+    }
 
 
 @router.post("")
@@ -100,7 +124,10 @@ async def update_rule(rule_id: int, payload: dict, db: Session = Depends(get_db)
         setattr(rule, key, value)
     db.commit()
     db.refresh(rule)
-    count = db.query(AIRuleMatch).filter(AIRuleMatch.rule_id == rule_id).count()
+    count = (
+        db.query(AIRuleMatch).filter(AIRuleMatch.rule_id == rule_id).count()
+        + db.query(AIRuleCommitMatch).filter(AIRuleCommitMatch.rule_id == rule_id).count()
+    )
     return rule.to_dict(match_count=count)
 
 
@@ -110,6 +137,7 @@ async def delete_rule(rule_id: int, db: Session = Depends(get_db)):
     if not rule:
         raise HTTPException(status_code=404, detail="rule not found")
     db.query(AIRuleMatch).filter(AIRuleMatch.rule_id == rule_id).delete()
+    db.query(AIRuleCommitMatch).filter(AIRuleCommitMatch.rule_id == rule_id).delete()
     db.delete(rule)
     db.commit()
     return {"deleted": rule_id}
@@ -189,4 +217,34 @@ async def get_rule_matches(
         d["reason"] = match.reason or ""
         d["matched_at"] = match.matched_at.isoformat() + "Z" if match.matched_at else None
         items.append(d)
+
+    # commit 命中（无 number/sha 无法 join items，冗余字段直接从命中表返回）
+    commit_rows = (
+        db.query(AIRuleCommitMatch)
+        .filter(AIRuleCommitMatch.rule_id == rule_id)
+        .order_by(AIRuleCommitMatch.matched_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    from app.api.community import _is_recent
+
+    for match in commit_rows:
+        items.append({
+            "repo": match.repo,
+            "type": "commit",
+            "number": 0,
+            "sha": match.sha,
+            "short_sha": match.short_sha or (match.sha[:7] if match.sha else ""),
+            "title": match.title,
+            "state": "merged",
+            "author": match.author,
+            "committed_at": match.committed_at.isoformat() + "Z" if match.committed_at else None,
+            "created_at": match.committed_at.isoformat() + "Z" if match.committed_at else None,
+            "labels": [], "area": None, "comments": 0,
+            "is_new": _is_recent(match.committed_at),
+            "rule_id": rule_id,
+            "reason": match.reason or "",
+            "matched_at": match.matched_at.isoformat() + "Z" if match.matched_at else None,
+        })
     return {"items": items}

@@ -45,6 +45,8 @@ class Config:
     # ===== AI 筛选规则（总览页）=====
     # 分诊定时任务间隔（分钟）；仅当有新增条目时才会实际调用 LLM
     AI_TRIAGE_INTERVAL: int = int(os.getenv("AI_TRIAGE_INTERVAL", "30"))
+    # 单轮分诊 LLM 输出上限；命中多时 JSON 会被截断导致解析重试，默认给足余量
+    AI_TRIAGE_MAX_TOKENS: int = int(os.getenv("AI_TRIAGE_MAX_TOKENS", "8192"))
     # 单条规则单轮分诊的候选条目上限
     AI_TRIAGE_CANDIDATE_LIMIT: int = int(os.getenv("AI_TRIAGE_CANDIDATE_LIMIT", "100"))
     # 手动"重新筛选"时回看的天数窗口

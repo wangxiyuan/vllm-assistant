@@ -277,6 +277,12 @@
     color: var(--signal-blue);
     border-color: rgba(132, 203, 255, 0.3);
 }
+.badge-commit {
+    background: color-mix(in srgb, var(--signal-purple, #b48eff) 14%, transparent);
+    color: var(--signal-purple, #b48eff);
+    border-color: color-mix(in srgb, var(--signal-purple, #b48eff) 35%, transparent);
+    font-family: var(--font-mono);
+}
 .item-state {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
