@@ -152,20 +152,22 @@ class RepoManager:
                            limit: int = 200) -> list:
         """读取本地仓库最近 N 天的 commit（默认分支）。
 
-        返回 [{sha, short_sha, author, committed_at(iso), subject, pr_number}]，
-        pr_number 从 merge commit 的 "(#1234)" 尾缀提取，取不到为 None。
+        返回 [{sha, short_sha, author, committed_at, subject, body, diff_stat, pr_number}]，
+        body 为 commit message 正文（规范化空白，截断），diff_stat 为变更文件摘要
+        （由 --numstat 聚合），pr_number 从 merge commit 的 "(#1234)" 尾缀提取。
         仓库未 clone 时返回空列表。
         """
         local_path = self.get_local_path(repo_name)
         if not local_path.exists():
             return []
         sep, rec_sep = "\x1f", "\x1e"
-        fmt = sep.join(["%H", "%h", "%an", "%aI", "%s"]) + rec_sep
+        # 记录格式：@@ + 字段(sep 分隔，body 多行) + rec_sep，其后跟该 commit 的 --numstat 行
+        fmt = "@@" + sep.join(["%H", "%h", "%an", "%aI", "%s", "%b"]) + rec_sep
         try:
             result = _subprocess.run(
                 ["git", "log", f"--since={since_days} days ago",
-                 "--pretty=format:" + fmt, "-n", str(limit)],
-                cwd=str(local_path), capture_output=True, text=True, timeout=30,
+                 "--numstat", "--pretty=format:" + fmt, "-n", str(limit)],
+                cwd=str(local_path), capture_output=True, text=True, timeout=60,
             )
             if result.returncode != 0:
                 logger.warning(f"git log failed for {repo_name}: {result.stderr[:200]}")
@@ -174,27 +176,51 @@ class RepoManager:
             logger.exception(f"git log failed for {repo_name}")
             return []
 
-        commits = []
-        for line in result.stdout.split(rec_sep):
-            line = line.strip("\n")
-            if not line.strip():
-                continue
-            parts = line.split(sep)
-            if len(parts) < 5:
-                continue
-            sha, short_sha, author, committed_at, subject = parts[:5]
+        commits: list = []
+        cur: dict | None = None
+
+        def _attach_numstat(text: str, target: dict | None):
+            if not target:
+                return
+            for line in text.split("\n"):
+                cols = line.split("\t")
+                if len(cols) >= 3 and cols[2].strip():
+                    target["files"].append((cols[0], cols[1], cols[2]))
+
+        # 按 rec_sep 切分：每个 chunk = 上一个 commit 的 numstat 行 + 下一个 @@meta
+        for chunk in result.stdout.split(rec_sep):
+            if "@@" in chunk:
+                pre, meta = chunk.split("@@", 1)
+                _attach_numstat(pre, cur)
+                fields = meta.split(sep)
+                if len(fields) >= 5:
+                    body = re.sub(r"\s+", " ", fields[5] or "").strip()[:600] if len(fields) > 5 else ""
+                    cur = {
+                        "sha": fields[0], "short_sha": fields[1], "author": fields[2],
+                        "committed_at": fields[3], "subject": fields[4],
+                        "body": body, "files": [],
+                    }
+                    commits.append(cur)
+                else:
+                    cur = None
+            else:
+                _attach_numstat(chunk, cur)
+
+        for c in commits:
             pr_number = None
-            m = re.search(r"\(#(\d+)\)\s*$", subject)
+            m = re.search(r"\(#(\d+)\)\s*$", c["subject"])
             if m:
                 pr_number = int(m.group(1))
-            commits.append({
-                "sha": sha,
-                "short_sha": short_sha,
-                "author": author,
-                "committed_at": committed_at,
-                "subject": subject,
-                "pr_number": pr_number,
-            })
+            c["pr_number"] = pr_number
+            adds = sum(int(a) for a, d, _ in c["files"] if a.isdigit())
+            dels = sum(int(d) for a, d, _ in c["files"] if d.isdigit())
+            names = [p for _, _, p in c["files"]]
+            stat = f"{len(names)} 个文件，+{adds}/-{dels}"
+            if names:
+                shown = "、".join(names[:6])
+                stat += f"：{shown}" + (f" 等 {len(names)} 个" if len(names) > 6 else "")
+            c["diff_stat"] = stat
+            del c["files"]
         return commits
 
     def pull_and_sync(self, repo_name: str) -> Dict:

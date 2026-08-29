@@ -111,7 +111,10 @@ async def get_community_commits(
                 except ValueError:
                     committed_at = None
             commits.append({
-                **c,
+                # body/diff_stat 体积大且前端用不到，仅分诊 prompt 使用，这里剔除
+                "sha": c["sha"], "short_sha": c["short_sha"],
+                "author": c["author"], "committed_at": c["committed_at"],
+                "subject": c["subject"], "pr_number": c.get("pr_number"),
                 "repo": short_to_full[short],
                 "is_new": _is_recent(committed_at),
             })

@@ -112,7 +112,8 @@ def _candidate_commits(db, rule: AIRule, watermark: Optional[datetime]) -> list:
                 "repo": full, "type": "commit", "number": 0,
                 "sha": c["sha"], "short_sha": c["short_sha"],
                 "author": c["author"], "committed_at": c["committed_at"],
-                "title": c["subject"], "body": "",
+                "title": c["subject"], "body": c.get("body") or "",
+                "diff_stat": c.get("diff_stat") or "",
             })
     candidates.sort(key=lambda c: c.get("committed_at") or "", reverse=True)
     return candidates[:Config.AI_TRIAGE_CANDIDATE_LIMIT]
@@ -134,6 +135,7 @@ def _build_prompt(rule_name: str, rule_prompt: str, candidates: list) -> str:
                 "short_sha": c["short_sha"],
                 "author": c["author"],
                 "committed_at": c["committed_at"],
+                "diff_stat": c.get("diff_stat") or "无",
                 "state": "", "labels": "", "area": "",
             })
         else:
@@ -149,7 +151,7 @@ def _build_prompt(rule_name: str, rule_prompt: str, candidates: list) -> str:
                 "short_sha": "", "author": "", "committed_at": "",
             })
         entries.append(entry)
-    return render_prompt("triage", "triage.j2", rule_name=rule_name, rule_prompt=rule_prompt, items=entries)
+    return render_prompt("triage", "triage.md", rule_name=rule_name, rule_prompt=rule_prompt, items=entries)
 
 
 def _update_rule_meta(rule_id: int, run_at: Optional[datetime] = None,
@@ -333,8 +335,55 @@ def run_triage(rule_id: int, rerun: bool = False) -> dict:
             key = (cand["type"], cand["repo"], cand["number"])
         matches[key] = (m.get("reason") or "").strip()[:500]
 
+    # 3.5) 第二段 agent 复核：对粗筛命中的候选带工具复核，剔除误报
+    _apply_agent_review(rule_name, rule_prompt, candidates, matches)
+
     _persist_result(rule_id, candidates, matches, run_at)
     return {"ok": True, "candidates": len(candidates), "matched": len(matches)}
+
+
+def _apply_agent_review(rule_name: str, rule_prompt: str,
+                        candidates: list, matches: dict):
+    """对粗筛命中做 agent 复核（原字典原地修改）。
+
+    复核范围截断到 AI_TRIAGE_AGENT_MAX_CANDIDATES，范围外的命中保留粗筛结论。
+    复核失败（返回 None）时整体回退粗筛结果。
+    """
+    if not Config.AI_TRIAGE_AGENT_REVIEW or not matches:
+        return
+    from app.services.ai_triage_agent import review_matches
+
+    index_map = {i + 1: c for i, c in enumerate(candidates)}
+    key_to_index = {}
+    for i, c in enumerate(candidates, start=1):
+        if c["type"] == "commit":
+            key_to_index[("commit", c["repo"], c["sha"])] = i
+        else:
+            key_to_index[(c["type"], c["repo"], c["number"])] = i
+
+    matched_for_review = []
+    for key, reason in matches.items():
+        idx = key_to_index.get(key)
+        if idx is not None:
+            matched_for_review.append(dict(candidates[idx - 1], index=idx, reason=reason))
+    matched_for_review = matched_for_review[:Config.AI_TRIAGE_AGENT_MAX_CANDIDATES]
+    if not matched_for_review:
+        return
+
+    reviewed = review_matches(rule_name, rule_prompt, matched_for_review)
+    if reviewed is None:
+        return
+    review_scope = {c["index"] for c in matched_for_review}
+    for key in list(matches):
+        idx = key_to_index.get(key)
+        if idx not in review_scope:
+            continue
+        if idx in reviewed:
+            matches[key] = reviewed[idx]
+        else:
+            del matches[key]  # agent 复核剔除
+    logger.info("agent review for rule %s: %s candidates, %s kept",
+                rule_name, len(matched_for_review), len(reviewed))
 
 
 def run_all_rules() -> dict:

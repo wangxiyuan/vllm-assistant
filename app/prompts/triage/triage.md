@@ -8,6 +8,8 @@
 {% if item.type == 'commit' %}
 [{{ item.index }}] {{ item.repo }} commit {{ item.short_sha }}（Commit，作者 {{ item.author }}，时间 {{ item.committed_at }}）
 标题：{{ item.title }}
+变更摘要：{{ item.diff_stat }}
+正文摘要：{{ item.body or '（无正文）' }}
 {% else %}
 [{{ item.index }}] {{ item.repo }}#{{ item.number }}（{{ 'PR' if item.type == 'pr' else 'Issue' }}，状态 {{ item.state }}）
 标题：{{ item.title }}

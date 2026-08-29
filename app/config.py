@@ -51,6 +51,13 @@ class Config:
     AI_TRIAGE_CANDIDATE_LIMIT: int = int(os.getenv("AI_TRIAGE_CANDIDATE_LIMIT", "100"))
     # 手动"重新筛选"时回看的天数窗口
     AI_TRIAGE_RERUN_WINDOW_DAYS: int = int(os.getenv("AI_TRIAGE_RERUN_WINDOW_DAYS", "7"))
+    # ===== 第二段 agent 复核 =====
+    # 批量粗筛后，对命中候选起一个带工具的 agent 复核（查知识库/issue 详情/本地代码）
+    AI_TRIAGE_AGENT_REVIEW: bool = os.getenv("AI_TRIAGE_AGENT_REVIEW", "true").lower() in ("1", "true", "yes")
+    # 单条规则一轮复核的候选上限（超出部分保留粗筛结论不复核）
+    AI_TRIAGE_AGENT_MAX_CANDIDATES: int = int(os.getenv("AI_TRIAGE_AGENT_MAX_CANDIDATES", "20"))
+    # 复核 agent 的最大交互轮数
+    AI_TRIAGE_AGENT_MAX_TURNS: int = int(os.getenv("AI_TRIAGE_AGENT_MAX_TURNS", "12"))
 
     # Tavily 兼容 Web Search API（用于 web 搜索工具）
     # 默认使用公益服务 https://tavily.claude-code-best.win，无需 API Key
