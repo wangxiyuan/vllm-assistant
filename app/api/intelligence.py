@@ -307,7 +307,7 @@ async def delete_report(report_id: int, db: Session = Depends(get_db)):
 
     from app.services.memory_service import MemoryService
     mem = MemoryService()
-    mem.forget_by_source_ref_prefix(f"intelligence_report#{report_id}", hard_delete=True)
+    mem.forget_by_source_ref_prefix(f"intelligence_report#{report_id}", hard_delete=True, db=db)
 
     db.query(Comment).filter(
         Comment.target_type == "report",

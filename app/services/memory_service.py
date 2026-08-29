@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import AIMemory
@@ -218,17 +219,19 @@ class MemoryService:
         finally:
             db.close()
 
-    def forget_by_source_ref_prefix(self, source_ref_prefix: str, hard_delete: bool = False) -> int:
+    def forget_by_source_ref_prefix(self, source_ref_prefix: str, hard_delete: bool = False, db: Optional[Session] = None) -> int:
         """按 source_ref 前缀批量删除或标记知识条目。
 
         Args:
             source_ref_prefix: source_ref 前缀，如 "article123" 或 "conv/session-id/"
             hard_delete: True 则物理删除，False 则标记为 stale
+            db: 复用调用方已有的会话（避免 SQLite 双写连接互锁），缺省时自建
 
         Returns:
             处理的条目数
         """
-        db = SessionLocal()
+        own_db = db is None
+        db = db or SessionLocal()
         try:
             base_query = db.query(AIMemory).filter(
                 AIMemory.source_ref.like(f"{source_ref_prefix}%"),
@@ -254,7 +257,8 @@ class MemoryService:
             db.rollback()
             return 0
         finally:
-            db.close()
+            if own_db:
+                db.close()
 
     def update(self, memory_id: int, **kwargs) -> bool:
         """更新知识条目的字段
