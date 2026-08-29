@@ -290,7 +290,7 @@ function watchlistChangeHint(w: any): string {
 
         <!-- 引导：还没有规则 -->
         <div v-if="ruleTabs.length === 0" class="overview-hint">
-          <span>💡 创建 AI 筛选规则，让 AI 按你的要求从社区 issue/PR 流中筛出值得关注的条目</span>
+          <span>💡 创建 AI 筛选规则，让 AI 按你的要求从社区 issue/PR/commit 流中筛出值得关注的条目</span>
           <button class="btn btn-primary btn-sm" @click="rulesStore.openManager()">创建规则</button>
         </div>
 

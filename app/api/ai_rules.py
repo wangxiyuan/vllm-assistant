@@ -52,8 +52,8 @@ def _clean_rule_fields(payload: dict, partial: bool = False) -> dict:
         fields["prompt"] = prompt
     if has("item_type"):
         item_type = payload.get("item_type") or "both"
-        if item_type not in ("pr", "issue", "both"):
-            raise HTTPException(status_code=400, detail="item_type 必须是 pr/issue/both")
+        if item_type not in ("pr", "issue", "both", "commit"):
+            raise HTTPException(status_code=400, detail="item_type 必须是 pr/issue/both/commit")
         fields["item_type"] = item_type
     if has("include_commits"):
         fields["include_commits"] = bool(payload.get("include_commits", True))

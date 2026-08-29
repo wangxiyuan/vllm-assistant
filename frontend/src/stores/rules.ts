@@ -7,7 +7,7 @@ export interface AIRule {
   id: number
   name: string
   prompt: string
-  item_type: 'pr' | 'issue' | 'both'
+  item_type: 'pr' | 'issue' | 'both' | 'commit'
   include_commits: boolean
   repos: string[]
   areas: string[]
@@ -17,6 +17,26 @@ export interface AIRule {
   last_run_at: string | null
   last_error: string | null
   match_count?: number
+}
+
+/** 表单三开关 → 后端 item_type + include_commits */
+export function deriveItemTypes(t: { pr: boolean; issue: boolean; commit: boolean }):
+  { item_type: 'pr' | 'issue' | 'both' | 'commit'; include_commits: boolean } {
+  if (!t.pr && !t.issue) {
+    // PR/Issue 都不选 = 仅 Commit 规则
+    return { item_type: 'commit', include_commits: true }
+  }
+  const item_type = t.pr && t.issue ? 'both' : t.pr ? 'pr' : 'issue'
+  return { item_type, include_commits: t.commit }
+}
+
+/** 已存规则 → 类型徽章文案（PR / Issue / Commit 的启用组合） */
+export function ruleTypeLabel(rule: Pick<AIRule, 'item_type' | 'include_commits'>): string {
+  const parts: string[] = []
+  if (rule.item_type === 'pr' || rule.item_type === 'both') parts.push('PR')
+  if (rule.item_type === 'issue' || rule.item_type === 'both') parts.push('Issue')
+  if (rule.item_type === 'commit' || rule.include_commits !== false) parts.push('Commit')
+  return parts.join('+') || 'PR+Issue'
 }
 
 export const useRulesStore = defineStore('rules', () => {
@@ -30,8 +50,8 @@ export const useRulesStore = defineStore('rules', () => {
   const ruleForm = ref({
     name: '',
     prompt: '',
-    item_type: 'both' as 'pr' | 'issue' | 'both',
-    include_commits: true,
+    // 条目类型三开关；保存时推导为后端的 item_type + include_commits
+    types: { pr: true, issue: true, commit: true },
     repos: [] as string[],
     areas: [] as string[],
     enabled: true,
@@ -135,7 +155,8 @@ export const useRulesStore = defineStore('rules', () => {
     }
     ruleSaving.value = true
     try {
-      const payload = JSON.stringify({ ...ruleForm.value })
+      const { types, ...rest } = ruleForm.value
+      const payload = JSON.stringify({ ...rest, ...deriveItemTypes(types) })
       if (editingRuleId.value !== null) {
         await api(`/api/rules/${editingRuleId.value}`, { method: 'PUT', body: payload })
       } else {
@@ -186,7 +207,7 @@ export const useRulesStore = defineStore('rules', () => {
   function openCreate() {
     editingMode.value = 'edit'
     editingRuleId.value = null
-    ruleForm.value = { name: '', prompt: '', item_type: 'both', include_commits: true, repos: [], areas: [], enabled: true }
+    ruleForm.value = { name: '', prompt: '', types: { pr: true, issue: true, commit: true }, repos: [], areas: [], enabled: true }
   }
 
   function openEdit(rule: AIRule) {
@@ -195,8 +216,11 @@ export const useRulesStore = defineStore('rules', () => {
     ruleForm.value = {
       name: rule.name,
       prompt: rule.prompt,
-      item_type: rule.item_type || 'both',
-      include_commits: rule.include_commits !== false,
+      types: {
+        pr: rule.item_type === 'pr' || rule.item_type === 'both',
+        issue: rule.item_type === 'issue' || rule.item_type === 'both',
+        commit: rule.item_type === 'commit' || rule.include_commits !== false,
+      },
       repos: [...(rule.repos || [])],
       areas: [...(rule.areas || [])],
       enabled: rule.enabled,

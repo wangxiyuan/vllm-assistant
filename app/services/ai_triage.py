@@ -53,6 +53,9 @@ def _load_rule_filters(rule: AIRule) -> tuple[list, list]:
 
 def _candidate_items(db, rule: AIRule, watermark: Optional[datetime]) -> list:
     """按规则预过滤 + 水位线取候选条目（created_at 倒序，上限 AI_TRIAGE_CANDIDATE_LIMIT）"""
+    if rule.item_type == "commit":
+        # 仅 Commit 规则不评 items（commit 来自本地 git 仓库，不是 Item 表）
+        return []
     q = db.query(Item)
     if rule.item_type in ("pr", "issue"):
         q = q.filter(Item.type == rule.item_type)
@@ -256,6 +259,11 @@ def run_triage(rule_id: int, rerun: bool = False) -> dict:
     return _run_group([rule], rerun_rule_ids={rule_id} if rerun else set())
 
 
+def _effective_include_commits(rule) -> bool:
+    """有效 include_commits：仅 Commit 规则恒为 True（commit 就是其全部候选）。"""
+    return rule.item_type == "commit" or rule.include_commits is not False
+
+
 def _group_key(rule: AIRule) -> tuple:
     """规则分组键：候选集完全一致的规则才能共享一次 LLM 调用。"""
     repos, areas = _load_rule_filters(rule)
@@ -263,7 +271,7 @@ def _group_key(rule: AIRule) -> tuple:
         rule.item_type or "both",
         tuple(sorted(repos)),
         tuple(sorted(areas)),
-        rule.include_commits is not False,
+        _effective_include_commits(rule),
     )
 
 
@@ -295,7 +303,7 @@ def _run_group(rules: list, rerun_rule_ids: set) -> dict:
                 "item_type": rule.item_type or "both",
                 "repos": rule.repos,
                 "areas": rule.areas,
-                "include_commits": rule.include_commits is not False,
+                "include_commits": _effective_include_commits(rule),
             })
         db.commit()
         if not rule_infos:
