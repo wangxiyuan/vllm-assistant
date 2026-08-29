@@ -298,15 +298,15 @@ async def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
 # ===== YAML 导入（核心：YAML 为唯一数据源）=====
 
 
-@router.post("/import", response_model=AnatomyImportResult)
-async def import_yaml(req: YAMLImportRequest, db: Session = Depends(get_db)):
+def run_yaml_import(db: Session, yaml_text: str) -> AnatomyImportResult:
     """导入一份 YAML（单列表或多文档）。
 
     对每个 atomic/composite 写入 building_block；assembly 写入 model_assembly。
     导入前做引用完整性校验，不合法则跳过该对象（保留错误信息）。
+    幂等：块/模型已存在则跳过。供 /import 路由与 AI agent 写类工具共用。
     """
     try:
-        docs = parse_yaml(req.yaml)
+        docs = parse_yaml(yaml_text)
     except AnatomyYAMLError as e:
         return AnatomyImportResult(errors=[ValidationIssue(message=str(e))])
 
@@ -392,6 +392,11 @@ async def import_yaml(req: YAMLImportRequest, db: Session = Depends(get_db)):
 
     db.commit()
     return result
+
+
+@router.post("/import", response_model=AnatomyImportResult)
+async def import_yaml(req: YAMLImportRequest, db: Session = Depends(get_db)):
+    return run_yaml_import(db, req.yaml)
 
 
 # ===== 单块 YAML 视图（供前端编辑）=====

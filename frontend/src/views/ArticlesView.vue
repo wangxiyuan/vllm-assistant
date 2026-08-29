@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, nextTick, computed, watch } from 'vue'
+import ChatDrawer from '@/components/ai/ChatDrawer.vue'
 import { useArticlesStore } from '@/stores/articles'
 import { useAppStore } from '@/stores/app'
 import { useUsersStore } from '@/stores/users'
@@ -53,6 +54,14 @@ watch(
     nextTick(() => updateActiveHeading())
   },
 )
+
+// ── AI 助手抽屉（AI 帮我建）──
+const aiChatOpen = ref(false)
+const aiChatIntent = ref('')
+function openAIChat(intent: string) {
+  aiChatIntent.value = intent
+  aiChatOpen.value = true
+}
 </script>
 
 <template>
@@ -62,6 +71,7 @@ watch(
       <div class="view-header">
         <h2 class="view-title">技术Blog</h2>
         <div class="view-actions">
+          <button class="btn btn-sm" @click="openAIChat('article')">✨ AI 帮我写</button>
           <button class="btn btn-primary btn-sm" @click="articlesStore.openNewArticle()">+ 写文章</button>
           <span class="view-stats">{{ articlesStore.articleStatsText }}</span>
         </div>
@@ -318,5 +328,6 @@ watch(
         <CommentSection v-if="articlesStore.selectedArticle" target-type="article" :target-id="articlesStore.selectedArticle.id" />
       </div>
     </template>
+    <ChatDrawer :open="aiChatOpen" :intent="aiChatIntent" @close="aiChatOpen = false" />
   </div>
 </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import ChatDrawer from '@/components/ai/ChatDrawer.vue'
 import { useCommunityStore } from '@/stores/community'
 import { useAppStore } from '@/stores/app'
 import { usePRCenterStore } from '@/stores/prCenter'
@@ -263,6 +264,14 @@ function watchlistChangeHint(w: any): string {
   const changed = new Date(w.last_state_change_at).getTime()
   return Date.now() - changed < 48 * 3600 * 1000 ? '变化' : ''
 }
+
+// ── AI 助手抽屉（AI 帮我建）──
+const aiChatOpen = ref(false)
+const aiChatIntent = ref('')
+function openAIChat(intent: string) {
+  aiChatIntent.value = intent
+  aiChatOpen.value = true
+}
 </script>
 
 <template>
@@ -282,6 +291,10 @@ function watchlistChangeHint(w: any): string {
           <button class="tab overview-tab" :class="{ active: activeTab === 'community' }"
                   @click="selectTab('community')">
             社区动态
+          </button>
+          <button class="tab overview-tab" @click="openAIChat('rule')" title="AI 帮我建规则">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.4L22 18l-2.1.6L19 21l-.9-2.4L16 18l2.1-.6z"/></svg>
+            AI 建规则
           </button>
           <button class="tab overview-tab overview-tab-gear" @click="rulesStore.openManager()" title="管理筛选规则">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -555,18 +568,19 @@ function watchlistChangeHint(w: any): string {
 
           <!-- 待处理视图：冲突 / CI 失败 / 落后 main -->
           <div v-if="prCardMode === 'pending'" class="aside-card-body">
-            <div v-for="pr in pendingPRs" :key="(pr.repo || '') + '-' + pr.pr_number" class="aside-item aside-item-pending" @click="prStore.openPR(pr)">
+            <div v-for="pr in pendingPRs" :key="(pr.repo || '') + '-' + pr.pr_number" class="aside-item" @click="prStore.openPR(pr)">
               <div class="aside-item-header">
                 <span class="pr-number">#{{ pr.pr_number }}</span>
-              <span v-if="pr.conflict_detected" class="badge badge-conflict">冲突</span>
-              <span v-if="pr.ci_status === 'fail'" class="badge" :class="ciBadgeClass(pr.ci_status)">{{ ciLabel(pr.ci_status) }}</span>
+                <span v-if="pr.conflict_detected" class="badge badge-conflict">冲突</span>
+                <span v-if="pr.ci_status === 'fail'" class="badge" :class="ciBadgeClass(pr.ci_status)">{{ ciLabel(pr.ci_status) }}</span>
+              </div>
+              <div class="aside-item-title">{{ pr.title }}</div>
+              <div class="aside-item-meta">
+                <span>{{ pr.author }}</span>
+                <span v-if="pr.repo" class="badge badge-area" style="font-size:9px;">{{ pr.repo.split('/').pop() }}</span>
+                <span>{{ timeAgo(pr.created_at) }}</span>
+              </div>
             </div>
-            <div class="aside-item-title">{{ pr.title }}</div>
-            <div class="aside-item-meta">
-              <span v-if="pr.repo" class="badge badge-area" style="font-size:9px;">{{ pr.repo.split('/').pop() }}</span>
-              <span>{{ timeAgo(pr.created_at) }}</span>
-            </div>
-          </div>
           <div v-if="pendingPRs.length === 0" class="empty-state is-compact">
               <p>✓ 没有待处理的 PR</p>
             </div>
@@ -691,6 +705,7 @@ function watchlistChangeHint(w: any): string {
     <IssueDrawer />
     <TaskDrawer />
     <WatchlistModals />
+    <ChatDrawer :open="aiChatOpen" :intent="aiChatIntent" @close="aiChatOpen = false" />
   </div>
 </template>
 
@@ -835,9 +850,6 @@ function watchlistChangeHint(w: any): string {
 }
 .aside-item:hover {
   background: var(--hover-bg);
-}
-.aside-item-pending {
-  border-left: 3px solid var(--signal-red, var(--accent));
 }
 .aside-item-header {
   display: flex;

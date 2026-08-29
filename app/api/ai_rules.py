@@ -4,7 +4,6 @@ AI 筛选规则 API（总览页）
 规则 CRUD + 手动触发分诊 + 命中结果查询。
 规则是全局的（无用户维度）；命中结果 join items 返回展示字段。
 """
-import json
 import logging
 import threading
 from datetime import datetime, timedelta, timezone
@@ -16,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import AIRule, AIRuleCommitMatch, AIRuleMatch, Item
+from app.services import entity_writer
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,52 +23,6 @@ router = APIRouter()
 # 防止同一规则并发跑多个分诊（API 手动触发 vs scheduler 周期任务）
 _running_rules: set = set()
 _running_lock = threading.Lock()
-
-
-def _parse_str_list(value) -> list:
-    if not value:
-        return []
-    if isinstance(value, list):
-        return [str(v).strip() for v in value if str(v).strip()]
-    return []
-
-
-def _clean_rule_fields(payload: dict, partial: bool = False) -> dict:
-    """校验并提取规则字段。partial=True 时只处理 payload 里出现的键。"""
-    fields = {}
-
-    def has(key: str) -> bool:
-        return not partial or key in payload
-
-    if has("name"):
-        name = (payload.get("name") or "").strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="规则名称不能为空")
-        fields["name"] = name[:100]
-    if has("prompt"):
-        prompt = (payload.get("prompt") or "").strip()
-        if not prompt:
-            raise HTTPException(status_code=400, detail="筛选要求不能为空")
-        fields["prompt"] = prompt
-    if has("item_type"):
-        item_type = payload.get("item_type") or "both"
-        if item_type not in ("pr", "issue", "both", "commit"):
-            raise HTTPException(status_code=400, detail="item_type 必须是 pr/issue/both/commit")
-        fields["item_type"] = item_type
-    if has("include_commits"):
-        fields["include_commits"] = bool(payload.get("include_commits", True))
-    if has("repos"):
-        fields["repos"] = json.dumps(_parse_str_list(payload.get("repos")), ensure_ascii=False)
-    if has("areas"):
-        fields["areas"] = json.dumps(_parse_str_list(payload.get("areas")), ensure_ascii=False)
-    if has("enabled"):
-        fields["enabled"] = bool(payload.get("enabled", True))
-    if has("sort_order"):
-        try:
-            fields["sort_order"] = int(payload.get("sort_order") or 0)
-        except (TypeError, ValueError):
-            fields["sort_order"] = 0
-    return fields
 
 
 def _commit_match_counts(db, rule_ids: list) -> dict:
@@ -117,40 +71,17 @@ async def list_rules(db: Session = Depends(get_db)):
 
 @router.post("")
 async def create_rule(payload: dict, db: Session = Depends(get_db)):
-    fields = _clean_rule_fields(payload)
-    rule = AIRule(**fields)
-    db.add(rule)
-    db.commit()
-    db.refresh(rule)
-    return rule.to_dict(match_count=0)
+    return entity_writer.create_rule(db, payload)
 
 
 @router.put("/{rule_id}")
 async def update_rule(rule_id: int, payload: dict, db: Session = Depends(get_db)):
-    rule = db.query(AIRule).filter(AIRule.id == rule_id).first()
-    if not rule:
-        raise HTTPException(status_code=404, detail="rule not found")
-    for key, value in _clean_rule_fields(payload, partial=True).items():
-        setattr(rule, key, value)
-    db.commit()
-    db.refresh(rule)
-    count = (
-        db.query(AIRuleMatch).filter(AIRuleMatch.rule_id == rule_id).count()
-        + db.query(AIRuleCommitMatch).filter(AIRuleCommitMatch.rule_id == rule_id).count()
-    )
-    return rule.to_dict(match_count=count)
+    return entity_writer.update_rule(db, rule_id, payload)
 
 
 @router.delete("/{rule_id}")
 async def delete_rule(rule_id: int, db: Session = Depends(get_db)):
-    rule = db.query(AIRule).filter(AIRule.id == rule_id).first()
-    if not rule:
-        raise HTTPException(status_code=404, detail="rule not found")
-    db.query(AIRuleMatch).filter(AIRuleMatch.rule_id == rule_id).delete()
-    db.query(AIRuleCommitMatch).filter(AIRuleCommitMatch.rule_id == rule_id).delete()
-    db.delete(rule)
-    db.commit()
-    return {"deleted": rule_id}
+    return entity_writer.delete_rule(db, rule_id)
 
 
 @router.post("/{rule_id}/run")

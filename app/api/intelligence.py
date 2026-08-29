@@ -4,7 +4,6 @@ Intelligence Reports API - 情报面板洞察报告
 
 完整的报告 CRUD：列表/详情/生成/删除/每日触发
 """
-import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -12,9 +11,9 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.config import Config
 from app.database import get_db, SessionLocal
 from app.models import IntelligenceReport, PersonalTask
+from app.services import entity_writer
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,81 +30,32 @@ async def generate_report(request: Request):
 
     立即创建 status=generating 的报告记录，后台线程执行生成。
     """
-    if not Config.OPENAI_API_KEY:
-        raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
-
     from app.schemas import IntelligenceGenerateRequest
-    from datetime import datetime, timezone
 
     body = await request.json()
     req = IntelligenceGenerateRequest(**body)
 
-    db = SessionLocal()
     try:
-        task = None
-        task_title = ""
-        task_description = ""
-        if req.task_id:
-            task = db.query(PersonalTask).filter(PersonalTask.id == req.task_id).first()
-            if not task:
-                raise HTTPException(status_code=404, detail="Task not found")
-            task_title = task.title
-            task_description = task.description or ""
-
-        title = req.title or (f"{task_title} 相关动态洞察" if req.task_id else "洞察报告")
-
-        if req.report_id:
-            report = db.query(IntelligenceReport).filter(IntelligenceReport.id == req.report_id).first()
-            if not report:
-                raise HTTPException(status_code=404, detail="Report not found")
-            report.title = title
-            report.content = ""
-            report.sources = json.dumps(req.sources, ensure_ascii=False)
-            report.excluded_sources = json.dumps(req.excluded_sources, ensure_ascii=False) if req.excluded_sources else None
-            report.extra_prompt = req.extra_prompt or None
-            report.status = "generating"
-            report.error_message = None
-            report.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            db.commit()
-            db.refresh(report)
-        else:
-            report = IntelligenceReport(
-                title=title,
-                content="",
-                task_id=req.task_id,
-                user_id=req.user_id,
-                sources=json.dumps(req.sources, ensure_ascii=False),
-                excluded_sources=json.dumps(req.excluded_sources, ensure_ascii=False) if req.excluded_sources else None,
-                extra_prompt=req.extra_prompt or None,
-                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                status="generating",
-            )
-            db.add(report)
-            db.commit()
-            db.refresh(report)
-
-        import threading
-        thread = threading.Thread(
-            target=_generate_report_background,
-            args=(report.id, task_title, task_description, req.sources, req.excluded_sources, req.extra_prompt),
-            daemon=True,
+        result = entity_writer.start_intelligence_report(
+            title=req.title,
+            sources=req.sources,
+            excluded_sources=req.excluded_sources,
+            extra_prompt=req.extra_prompt,
+            task_id=req.task_id,
+            user_id=req.user_id,
+            report_id=req.report_id,
         )
-        thread.start()
-
-        return {
-            "report_id": report.id,
-            "task_id": req.task_id,
-            "title": title,
-            "status": "generating",
-            "message": "洞察报告正在生成中，AI 将多轮搜索 GitHub 并分析，预计需要 2-5 分钟",
-        }
     except HTTPException:
         raise
     except Exception:
         logger.exception("Failed to generate report")
         raise HTTPException(status_code=500, detail="Failed to generate report")
-    finally:
-        db.close()
+
+    return {
+        **result,
+        "task_id": req.task_id,
+        "message": "洞察报告正在生成中，AI 将多轮搜索 GitHub 并分析，预计需要 2-5 分钟",
+    }
 
 
 def _generate_report_background(

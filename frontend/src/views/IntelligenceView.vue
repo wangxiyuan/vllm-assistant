@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import ChatDrawer from '@/components/ai/ChatDrawer.vue'
 import { useRoute } from 'vue-router'
 import { useIntelStore } from '@/stores/intel'
 import { useReposStore } from '@/stores/repos'
@@ -135,6 +136,14 @@ async function openTraceModal(reportId: number) {
 function closeTraceModal() {
   showTraceModal.value = false
 }
+
+// ── AI 助手抽屉（AI 帮我建）──
+const aiChatOpen = ref(false)
+const aiChatIntent = ref('')
+function openAIChat(intent: string) {
+  aiChatIntent.value = intent
+  aiChatOpen.value = true
+}
 </script>
 
 <template>
@@ -153,6 +162,7 @@ function closeTraceModal() {
           </button>
         </div>
         <div class="view-actions">
+          <button class="btn btn-sm" @click="openAIChat('report')">✨ AI 帮我建</button>
           <button v-if="activeTab === 'daily'" class="btn btn-primary btn-sm" :disabled="intelStore.dailyGenLoading" @click="intelStore.triggerDailyReport()">
             <svg v-if="intelStore.dailyGenLoading" class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
             {{ intelStore.dailyGenLoading ? '生成中…' : '生成每日报告' }}
@@ -399,5 +409,6 @@ function closeTraceModal() {
         </div>
       </div>
     </Teleport>
+    <ChatDrawer :open="aiChatOpen" :intent="aiChatIntent" @close="aiChatOpen = false" />
   </div>
 </template>

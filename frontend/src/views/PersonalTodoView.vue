@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import ChatDrawer from '@/components/ai/ChatDrawer.vue'
 import { useTodoStore } from '@/stores/todo'
 import { useUsersStore } from '@/stores/users'
 import { useReposStore } from '@/stores/repos'
@@ -165,6 +166,14 @@ async function generateInsight(task: any) {
 function onSubtaskClick(e: Event) {
   e.stopPropagation()
 }
+
+// ── AI 助手抽屉（AI 帮我建）──
+const aiChatOpen = ref(false)
+const aiChatIntent = ref('')
+function openAIChat(intent: string) {
+  aiChatIntent.value = intent
+  aiChatOpen.value = true
+}
 </script>
 
 <template>
@@ -172,6 +181,7 @@ function onSubtaskClick(e: Event) {
     <div class="view-header">
       <h2 class="view-title">任务面板</h2>
       <div class="view-actions">
+        <button class="btn btn-sm" @click="openAIChat('task')">✨ AI 帮我建</button>
         <button class="btn btn-primary btn-sm" @click="todoStore.showAddModal = true">+ 新建任务</button>
       </div>
     </div>
@@ -764,6 +774,7 @@ function onSubtaskClick(e: Event) {
         </div>
       </div>
     </Teleport>
+    <ChatDrawer :open="aiChatOpen" :intent="aiChatIntent" @close="aiChatOpen = false" />
   </div>
 </template>
 

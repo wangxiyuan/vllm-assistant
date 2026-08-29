@@ -44,6 +44,22 @@ CATEGORY_TOOLS: Dict[str, List[str]] = {
         "search_web",
         "extract_web_content",
     ],
+    # 写类工具：AI 可创建/更新/删除项目实体（删除带 confirm 守卫）。
+    # 不挂限流器（rate_limiter 对未知名返回 None）。
+    "write": [
+        "create_rule",
+        "update_rule",
+        "delete_rule",
+        "create_task",
+        "update_task",
+        "delete_task",
+        "create_article",
+        "update_article",
+        "delete_article",
+        "import_anatomy_yaml",
+        "generate_intelligence_report",
+        "list_entities",
+    ],
 }
 
 

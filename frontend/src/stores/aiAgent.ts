@@ -72,7 +72,16 @@ export const KNOWLEDGE_TYPE_ORDER = [
   'docs', 'code_structure', 'issue', 'pr', 'article', 'report', 'conversation', 'slack', 'manual',
 ]
 
-export const useAIAgentStore = defineStore('aiAgent', () => {
+export const useAIAgentStore = defineStore('aiAgent', agentStoreSetup)
+
+// 抽屉用独立会话上下文：与 /ai-agent 页互不干扰（在 AI 页切历史会话不会串台到抽屉）。
+// 同一个 setup 工厂注册两个 store id，状态完全隔离，行为一致。
+export const useChatDrawerStore = defineStore('aiAgentDrawer', agentStoreSetup)
+
+// 页面 store 与抽屉 store 形状相同，仅 id 不同，故用联合类型
+export type AIAgentStore = ReturnType<typeof useAIAgentStore> | ReturnType<typeof useChatDrawerStore>
+
+function agentStoreSetup() {
   const messages = ref<ChatMessage[]>([])
   const sessions = ref<Session[]>([])
   const currentSessionId = ref<string | null>(null)
@@ -282,7 +291,7 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
         body: JSON.stringify({
           messages: pendingMessages.map(m => ({ role: m.role, content: m.content })),
           session_id: sessionId,
-          tools: ['github', 'knowledge', 'code', 'web'],
+          // 不传 tools = 后端使用全部已注册工具（含 write 类），避免前后端工具列表不同步
           stream: true,
         }),
       })
@@ -529,4 +538,4 @@ export const useAIAgentStore = defineStore('aiAgent', () => {
     // Export
     exportSessionAsMarkdown, downloadAsMarkdown,
   }
-})
+}

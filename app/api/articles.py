@@ -4,9 +4,7 @@
 
 所有端点受 AuthMiddleware 保护（全局配置）。
 """
-import json
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,11 +13,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Article
-from app.services.code_ref_parser import CodeRefParser
+from app.services import entity_writer
 from app.services.local_code_sync import LocalCodeSyncService
 from app.services.article_renderer import ArticleRenderer
 from app.services.article_validator import ArticleValidator
-from app.services.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -54,10 +51,6 @@ class ValidateRequest(BaseModel):
 
 
 # ===== 助手函数 =====
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
 
 def _article_to_response(a: Article) -> dict:
     """Article ORM → JSON dict"""
@@ -110,107 +103,19 @@ async def list_articles(
 @router.post("")
 async def create_article(req: ArticleCreate, db: Session = Depends(get_db)):
     """创建新文章"""
-    now = _utcnow()
-    article = Article(
-        title=req.title,
-        content=req.content,
-        area=req.area or None,
-        tags=json.dumps(req.tags, ensure_ascii=False) if req.tags else None,
-        user_id=req.user_id,
-        status=req.status or "draft",
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(article)
-    db.commit()
-    db.refresh(article)
-
-    # 解析代码引用
-    parser = CodeRefParser()
-    refs_result = parser.save_article_refs(article.id, article.content, db)
-
-    # 同步到知识库（仅 published 文章会被索引）
-    if article.status == "published":
-        try:
-            mem = MemoryService()
-            mem._build_from_articles()
-            logger.info(f"Knowledge base synced after article create: id={article.id}")
-        except Exception:
-            logger.exception(f"Failed to sync knowledge base after article create: id={article.id}")
-
-    return {
-        "id": article.id,
-        "title": article.title,
-        "status": article.status,
-        "created_at": article.created_at.isoformat(),
-        "refs_count": refs_result["total_refs"],
-    }
+    return entity_writer.create_article(db, req.model_dump())
 
 
 @router.put("/{article_id}")
 async def update_article(article_id: int, req: ArticleUpdate, db: Session = Depends(get_db)):
     """更新文章"""
-    article = db.query(Article).filter(Article.id == article_id).first()
-    if not article:
-        raise HTTPException(status_code=404, detail="Article not found")
-
-    if req.title is not None:
-        article.title = req.title
-    if req.content is not None:
-        article.content = req.content
-    if req.area is not None:
-        article.area = req.area or None
-    if req.tags is not None:
-        article.tags = json.dumps(req.tags, ensure_ascii=False)
-    if req.status is not None:
-        article.status = req.status
-    if req.user_id is not None:
-        article.user_id = req.user_id
-
-    article.updated_at = _utcnow()
-
-    # 重新解析代码引用
-    parser = CodeRefParser()
-    refs_result = parser.save_article_refs(article.id, article.content, db)
-
-    # 清除渲染缓存
-    article.rendered_html = None
-
-    db.commit()
-    db.refresh(article)
-
-    # 同步到知识库（仅 published 文章会被索引）
-    if article.status == "published":
-        try:
-            mem = MemoryService()
-            mem._build_from_articles()
-            logger.info(f"Knowledge base synced after article update: id={article.id}")
-        except Exception:
-            logger.exception(f"Failed to sync knowledge base after article update: id={article.id}")
-
-    return _article_to_response(article)
+    return entity_writer.update_article(db, article_id, req.model_dump(exclude_unset=True))
 
 
 @router.delete("/{article_id}")
 async def delete_article(article_id: int, db: Session = Depends(get_db)):
     """删除文章（级联删除 CodeReference、评论和知识库内容）"""
-    article = db.query(Article).filter(Article.id == article_id).first()
-    if not article:
-        raise HTTPException(status_code=404, detail="Article not found")
-
-    from app.services.memory_service import MemoryService
-    from app.models import Comment
-    mem = MemoryService()
-    mem.forget_by_source_ref_prefix(f"article#{article_id}", hard_delete=True)
-
-    db.query(Comment).filter(
-        Comment.target_type == "article",
-        Comment.target_id == article_id,
-    ).delete()
-
-    db.delete(article)
-    db.commit()
-    return {"deleted": True, "id": article_id}
+    return entity_writer.delete_article(db, article_id)
 
 
 @router.get("/{article_id}")

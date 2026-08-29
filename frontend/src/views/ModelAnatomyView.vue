@@ -7,6 +7,7 @@
  * Tab「模型」：组装列表（左）+ 详情/新建/编辑（右）+ YAML 导入/导出/校验。
  */
 import { onMounted, ref, computed } from 'vue'
+import ChatDrawer from '@/components/ai/ChatDrawer.vue'
 import { useAnatomyStore } from '@/stores/anatomy'
 import BlockLibrary from '@/components/anatomy/BlockLibrary.vue'
 import BlockInspector from '@/components/anatomy/BlockInspector.vue'
@@ -65,6 +66,14 @@ async function doExport() {
 async function doValidate() {
   await store.validateAll()
 }
+
+// ── AI 助手抽屉（AI 帮我建）──
+const aiChatOpen = ref(false)
+const aiChatIntent = ref('')
+function openAIChat(intent: string) {
+  aiChatIntent.value = intent
+  aiChatOpen.value = true
+}
 </script>
 
 <template>
@@ -74,6 +83,7 @@ async function doValidate() {
       <div class="view-header-actions">
         <button class="btn btn-sm" @click="doValidate()">校验</button>
         <button class="btn btn-sm" @click="doExport()">导出 YAML</button>
+        <button class="btn btn-sm" @click="openAIChat('anatomy')">✨ AI 拆解</button>
         <button class="btn btn-primary btn-sm" @click="store.openYAMLImport()">导入 YAML</button>
       </div>
     </div>
@@ -260,6 +270,7 @@ async function doValidate() {
       @update:yamlText="store.yamlText = $event"
       @close="store.closeYAMLImport()"
       @doImport="store.doImport()" />
+    <ChatDrawer :open="aiChatOpen" :intent="aiChatIntent" @close="aiChatOpen = false" />
   </div>
 </template>
 

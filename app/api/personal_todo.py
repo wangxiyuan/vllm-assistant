@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.config import Config
 from app.database import get_db
 from app.models import PersonalTask, IntelligenceReport, User, _iso_utc
+from app.services import entity_writer
 from app.schemas import (
     PersonalTaskCreate,
     PersonalTaskUpdate,
@@ -224,79 +225,22 @@ async def list_tasks(
 @router.post("/tasks")
 async def create_task(req: PersonalTaskCreate, db: Session = Depends(get_db)):
     """创建新任务（DESIGN-PERSONAL-TODO.md 3.1 POST）"""
-    now = _utcnow()
-    task = PersonalTask(
-        title=req.title,
-        description=req.description,
-        source=req.source,
-        priority=req.priority,
-        status="todo",
-        area=req.area or None,
-        assignee_id=req.assignee_id,
-        tags=json.dumps(req.tags, ensure_ascii=False) if req.tags else None,
-        due_date=req.due_date,
-        related_refs=req.related_refs if req.related_refs else None,
-        parent_id=req.parent_id,
-        subtask_order=req.subtask_order or 0,
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
-
-    result = task.to_dict()
-
-    return result
+    return entity_writer.create_task(db, req.model_dump())
 
 
 @router.put("/tasks/{task_id}")
 async def update_task(task_id: int, req: PersonalTaskUpdate, db: Session = Depends(get_db)):
     """更新任务（DESIGN-PERSONAL-TODO.md 3.1 PUT）"""
-    task = db.query(PersonalTask).filter(PersonalTask.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    update_data = req.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        if key == "tags":
-            task.tags = json.dumps(value, ensure_ascii=False) if value else None
-        elif key == "related_refs":
-            task.related_refs = value if value else None
-        elif key == "status":
-            if value == "done" and task.status != "done":
-                task.completed_at = _utcnow()
-            elif value != "done":
-                task.completed_at = None
-            task.status = value
-        elif key in ("area", "due_date"):
-            # 空字符串归一为 None，与 create 逻辑一致
-            setattr(task, key, value if value else None)
-        else:
-            setattr(task, key, value)
-    task.updated_at = _utcnow()
-
-    db.commit()
-    db.refresh(task)
-    return task.to_dict()
+    return entity_writer.update_task(db, task_id, req.model_dump(exclude_unset=True))
 
 
 @router.delete("/tasks/{task_id}")
 async def delete_task(task_id: int, db: Session = Depends(get_db)):
     """删除任务（DESIGN-PERSONAL-TODO.md 3.1 DELETE）
 
-    级联清理：子任务 + 去重缓存 + 关联的洞察报告
+    级联清理：子任务 + 关联的洞察报告
     """
-    task = db.query(PersonalTask).filter(PersonalTask.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    # 级联删除子任务
-    db.query(PersonalTask).filter(PersonalTask.parent_id == task_id).delete()
-    # 级联清理关联的洞察报告
-    db.query(IntelligenceReport).filter(IntelligenceReport.task_id == task_id).delete()
-    db.delete(task)
-    db.commit()
-    return {"deleted": True}
+    return entity_writer.delete_task(db, task_id)
 
 
 @router.get("/tasks/{task_id}/subtasks")
