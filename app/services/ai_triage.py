@@ -8,6 +8,7 @@ AI 分诊服务（总览页）：按用户自定义规则对社区条目（items
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Optional
 
 from app.config import Config
@@ -119,7 +120,8 @@ def _candidate_commits(db, rule: AIRule, watermark: Optional[datetime]) -> list:
     return candidates[:Config.AI_TRIAGE_CANDIDATE_LIMIT]
 
 
-def _build_prompt(rule_name: str, rule_prompt: str, candidates: list) -> str:
+def _build_group_prompt(rule_infos: list, candidates: list) -> str:
+    """联合分诊 prompt：候选块在前（多规则共享且利于 provider 前缀缓存），规则段在后。"""
     entries = []
     for i, c in enumerate(candidates, start=1):
         entry = {
@@ -151,7 +153,9 @@ def _build_prompt(rule_name: str, rule_prompt: str, candidates: list) -> str:
                 "short_sha": "", "author": "", "committed_at": "",
             })
         entries.append(entry)
-    return render_prompt("triage", "triage.md", rule_name=rule_name, rule_prompt=rule_prompt, items=entries)
+    return render_prompt(
+        "triage", "triage.md", rules=rule_infos, items=entries,
+    )
 
 
 def _update_rule_meta(rule_id: int, run_at: Optional[datetime] = None,
@@ -238,26 +242,75 @@ def _persist_result(rule_id: int, candidates: list, matches: dict, run_at: datet
 
 
 def run_triage(rule_id: int, rerun: bool = False) -> dict:
-    """对单条规则执行一轮分诊。
+    """对单条规则执行一轮分诊（单元素分组，统一走 _run_group）。
 
     返回 {"ok": True, "candidates": n, "matched": m} 或 {"ok": False, "error": ...}。
     """
-    # 1) 短事务：读规则与候选，转成纯数据后立刻释放连接
     db = SessionLocal()
     try:
         rule = db.query(AIRule).filter(AIRule.id == rule_id).first()
         if not rule:
             return {"ok": False, "error": "rule not found"}
-        if rerun:
-            # 手动重跑：清空旧命中，水位线回拨 N 天覆盖近期条目
-            db.query(AIRuleMatch).filter(AIRuleMatch.rule_id == rule_id).delete()
-            db.query(AIRuleCommitMatch).filter(AIRuleCommitMatch.rule_id == rule_id).delete()
-            rule.last_triage_at = _utcnow() - timedelta(days=Config.AI_TRIAGE_RERUN_WINDOW_DAYS)
-            rule.last_error = None
-            db.commit()
-            db.refresh(rule)
-        rule_name = rule.name
-        rule_prompt = rule.prompt
+    finally:
+        db.close()
+    return _run_group([rule], rerun_rule_ids={rule_id} if rerun else set())
+
+
+def _group_key(rule: AIRule) -> tuple:
+    """规则分组键：候选集完全一致的规则才能共享一次 LLM 调用。"""
+    repos, areas = _load_rule_filters(rule)
+    return (
+        rule.item_type or "both",
+        tuple(sorted(repos)),
+        tuple(sorted(areas)),
+        rule.include_commits is not False,
+    )
+
+
+def _run_group(rules: list, rerun_rule_ids: set) -> dict:
+    """对一组候选集相同的规则执行一轮联合分诊：候选只渲染/发送一次。
+
+    LLM 一次调用按规则分组输出；agent 复核也按组去重候选后一次执行。
+    返回 {str(rule_id): {"ok", "candidates", "matched"}}。
+    """
+    # 1) 短事务：处理 rerun 重置、读取规则信息，取组内最小水位线查一次候选
+    db = SessionLocal()
+    try:
+        ids = [r.id for r in rules]
+        db_rules = db.query(AIRule).filter(AIRule.id.in_(ids)).all()
+        rule_infos = []
+        for rule in db_rules:
+            if rule.id in rerun_rule_ids:
+                # 手动重跑：清空旧命中，水位线回拨 N 天覆盖近期条目
+                db.query(AIRuleMatch).filter(AIRuleMatch.rule_id == rule.id).delete()
+                db.query(AIRuleCommitMatch).filter(AIRuleCommitMatch.rule_id == rule.id).delete()
+                rule.last_triage_at = _utcnow() - timedelta(days=Config.AI_TRIAGE_RERUN_WINDOW_DAYS)
+                rule.last_error = None
+            rule_infos.append({
+                "id": rule.id,
+                "name": rule.name,
+                "prompt": rule.prompt,
+                "key": f"rule_{rule.id}",
+                "watermark": rule.last_triage_at,
+                "item_type": rule.item_type or "both",
+                "repos": rule.repos,
+                "areas": rule.areas,
+                "include_commits": rule.include_commits is not False,
+            })
+        db.commit()
+        if not rule_infos:
+            return {}
+
+        # 组内取最小水位线：水印更靠后的规则会多评一些已评过的条目，
+        # 结果不变（matched_at 不刷新），代价远小于按规则分别拉取
+        watermarks = [ri["watermark"] for ri in rule_infos if ri["watermark"]]
+        watermark = min(watermarks) if watermarks else None
+        base = SimpleNamespace(
+            item_type=rule_infos[0]["item_type"],
+            repos=rule_infos[0]["repos"],
+            areas=rule_infos[0]["areas"],
+            include_commits=rule_infos[0]["include_commits"],
+        )
         candidates = [
             {
                 "repo": it.repo, "type": it.type, "number": it.number,
@@ -265,32 +318,41 @@ def run_triage(rule_id: int, rerun: bool = False) -> dict:
                 "labels": it.labels or "", "area": it.area or "",
                 "body": it.body or "",
             }
-            for it in _candidate_items(db, rule, rule.last_triage_at)
+            for it in _candidate_items(db, base, watermark)
         ]
-        candidates += _candidate_commits(db, rule, rule.last_triage_at)
+        candidates += _candidate_commits(db, base, watermark)
     finally:
         db.close()
 
+    now = _utcnow()
     if not candidates:
         # 空跑也推进水位线，下轮从当前时间起算
-        now = _utcnow()
-        _update_rule_meta(rule_id, run_at=now, advance_watermark_to=now)
-        return {"ok": True, "candidates": 0, "matched": 0}
+        results = {}
+        for ri in rule_infos:
+            _update_rule_meta(ri["id"], run_at=now, advance_watermark_to=now)
+            results[str(ri["id"])] = {"ok": True, "candidates": 0, "matched": 0}
+        return results
 
     run_at = _utcnow()
 
-    # 2) LLM 调用（不持有 DB session）；空输出/不可解析时重试并反馈，避免一次失败丢整轮
+    # 2) LLM 联合调用（不持有 DB session）；空输出/不可解析时重试并反馈
     try:
-        prompt = _build_prompt(rule_name, rule_prompt, candidates)
+        prompt = _build_group_prompt(rule_infos, candidates)
         data = None
         content = ""
         last_err = "empty content"
+
+        def _valid(d) -> bool:
+            if not isinstance(d, dict):
+                return False
+            return all(isinstance(d.get(ri["key"]), dict) for ri in rule_infos)
+
         for attempt in range(3):
             content = _get_llm_client().chat_sync(
                 prompt, max_tokens=_TRIAGE_MAX_TOKENS, temperature=0.2,
             )
             data = LLMClient.safe_json(content, default=None)
-            if isinstance(data, dict) and "matches" in data:
+            if _valid(data):
                 break
             if not content:
                 last_err = "AI 返回了空内容"
@@ -298,62 +360,71 @@ def run_triage(rule_id: int, rerun: bool = False) -> dict:
                 last_err = f"LLM 返回内容无法解析为 JSON: {(content or '')[:200]}"
             if attempt < 2:
                 logger.warning(
-                    "AI triage parse failed for rule %s (attempt %d/3): %s — 重试",
-                    rule_id, attempt + 1, last_err,
+                    "AI triage parse failed for rules %s (attempt %d/3): %s — 重试",
+                    [ri["id"] for ri in rule_infos], attempt + 1, last_err,
                 )
                 prompt = (
                     f"{prompt}\n\n上一个回答不符合要求的 JSON 格式"
                     f"（你回答的是：{(content or '')[:200]}）。"
-                    f"请只输出 JSON，不要输出任何其他文字或问题。"
+                    f"必须为每条规则输出一个 key（{', '.join(ri['key'] for ri in rule_infos)}），"
+                    f"只输出 JSON，不要输出任何其他文字或问题。"
                 )
-        if not isinstance(data, dict):
+        if not _valid(data):
             raise ValueError(last_err)
-        raw_matches = data.get("matches") or []
-        if not isinstance(raw_matches, list):
-            raw_matches = []
+
+        # 3) 按序号映射回条目，得到每条规则的命中 dict
+        index_map = {i + 1: c for i, c in enumerate(candidates)}
+        matches_per_rule: dict = {}
+        for ri in rule_infos:
+            matches: dict = {}
+            raw_matches = (data.get(ri["key"]) or {}).get("matches") or []
+            if not isinstance(raw_matches, list):
+                raw_matches = []
+            for m in raw_matches:
+                if not isinstance(m, dict):
+                    continue
+                try:
+                    idx = int(m.get("index"))
+                except (TypeError, ValueError):
+                    continue
+                cand = index_map.get(idx)
+                if not cand:
+                    continue
+                if cand["type"] == "commit":
+                    key = ("commit", cand["repo"], cand["sha"])
+                else:
+                    key = (cand["type"], cand["repo"], cand["number"])
+                matches[key] = (m.get("reason") or "").strip()[:500]
+            matches_per_rule[ri["id"]] = matches
     except Exception as e:
-        logger.exception("AI triage failed for rule %s", rule_id)
-        _update_rule_meta(rule_id, run_at=run_at, error=str(e))
-        return {"ok": False, "error": str(e)}
+        logger.exception("AI triage failed for rules %s", [ri["id"] for ri in rule_infos])
+        for ri in rule_infos:
+            _update_rule_meta(ri["id"], run_at=run_at, error=str(e))
+        return {str(ri["id"]): {"ok": False, "error": str(e)} for ri in rule_infos}
 
-    # 3) 按序号映射回条目，短事务落库
-    index_map = {i + 1: c for i, c in enumerate(candidates)}
-    matches: dict = {}
-    for m in raw_matches:
-        if not isinstance(m, dict):
-            continue
-        try:
-            idx = int(m.get("index"))
-        except (TypeError, ValueError):
-            continue
-        cand = index_map.get(idx)
-        if not cand:
-            continue
-        if cand["type"] == "commit":
-            key = ("commit", cand["repo"], cand["sha"])
-        else:
-            key = (cand["type"], cand["repo"], cand["number"])
-        matches[key] = (m.get("reason") or "").strip()[:500]
+    # 3.5) 第二段 agent 复核：组内命中候选去重后一次复核，剔除误报
+    _apply_agent_review_group(rule_infos, candidates, matches_per_rule)
 
-    # 3.5) 第二段 agent 复核：对粗筛命中的候选带工具复核，剔除误报
-    _apply_agent_review(rule_name, rule_prompt, candidates, matches)
-
-    _persist_result(rule_id, candidates, matches, run_at)
-    return {"ok": True, "candidates": len(candidates), "matched": len(matches)}
+    # 4) 逐规则落库（独立短事务）
+    results = {}
+    for ri in rule_infos:
+        _persist_result(ri["id"], candidates, matches_per_rule[ri["id"]], run_at)
+        results[str(ri["id"])] = {"ok": True, "candidates": len(candidates),
+                                  "matched": len(matches_per_rule[ri["id"]])}
+    return results
 
 
-def _apply_agent_review(rule_name: str, rule_prompt: str,
-                        candidates: list, matches: dict):
-    """对粗筛命中做 agent 复核（原字典原地修改）。
+def _apply_agent_review_group(rule_infos: list, candidates: list, matches_per_rule: dict):
+    """组内联合 agent 复核（matches_per_rule 各字典原地修改）。
 
-    复核范围截断到 AI_TRIAGE_AGENT_MAX_CANDIDATES，范围外的命中保留粗筛结论。
-    复核失败（返回 None）时整体回退粗筛结果。
+    把各规则命中的候选按候选去重（同一条候选带"命中它的规则+粗筛理由"列表），
+    一次 agent 会话完成整组复核；复核范围截断到 AI_TRIAGE_AGENT_MAX_CANDIDATES，
+    范围外命中保留粗筛结论；复核失败时全部回退粗筛结果。
     """
-    if not Config.AI_TRIAGE_AGENT_REVIEW or not matches:
+    if not Config.AI_TRIAGE_AGENT_REVIEW or not any(matches_per_rule.values()):
         return
-    from app.services.ai_triage_agent import review_matches
+    from app.services.ai_triage_agent import review_group
 
-    index_map = {i + 1: c for i, c in enumerate(candidates)}
     key_to_index = {}
     for i, c in enumerate(candidates, start=1):
         if c["type"] == "commit":
@@ -361,47 +432,65 @@ def _apply_agent_review(rule_name: str, rule_prompt: str,
         else:
             key_to_index[(c["type"], c["repo"], c["number"])] = i
 
-    matched_for_review = []
-    for key, reason in matches.items():
-        idx = key_to_index.get(key)
-        if idx is not None:
-            matched_for_review.append(dict(candidates[idx - 1], index=idx, reason=reason))
+    # 按候选去重：一条候选只进一次复核会话
+    entries: dict = {}
+    for ri in rule_infos:
+        for key, reason in matches_per_rule.get(ri["id"], {}).items():
+            idx = key_to_index.get(key)
+            if idx is None:
+                continue
+            entry = entries.setdefault(idx, dict(candidates[idx - 1], index=idx, hits={}))
+            entry["hits"][ri["key"]] = reason
+    matched_for_review = [entries[i] for i in sorted(entries)]
     matched_for_review = matched_for_review[:Config.AI_TRIAGE_AGENT_MAX_CANDIDATES]
     if not matched_for_review:
         return
 
-    reviewed = review_matches(rule_name, rule_prompt, matched_for_review)
+    reviewed = review_group(rule_infos, matched_for_review)
     if reviewed is None:
         return
-    review_scope = {c["index"] for c in matched_for_review}
-    for key in list(matches):
-        idx = key_to_index.get(key)
-        if idx not in review_scope:
-            continue
-        if idx in reviewed:
-            matches[key] = reviewed[idx]
-        else:
-            del matches[key]  # agent 复核剔除
-    logger.info("agent review for rule %s: %s candidates, %s kept",
-                rule_name, len(matched_for_review), len(reviewed))
+    review_scope = {e["index"] for e in matched_for_review}
+    for ri in rule_infos:
+        verdict = reviewed.get(ri["key"], {})
+        matches = matches_per_rule.get(ri["id"], {})
+        for key in list(matches):
+            idx = key_to_index.get(key)
+            if idx not in review_scope:
+                continue
+            if idx in verdict:
+                matches[key] = verdict[idx]
+            else:
+                del matches[key]  # agent 复核剔除
+    logger.info("agent review for rules %s: %s candidates, kept %s",
+                [ri["id"] for ri in rule_infos], len(matched_for_review),
+                {k: len(v) for k, v in reviewed.items()})
 
 
 def run_all_rules() -> dict:
-    """遍历全部 enabled 规则逐条分诊；单条失败不影响其他规则。"""
+    """遍历全部 enabled 规则分诊：候选集相同的规则合组共享一次 LLM 调用。
+
+    组间互不影响；组内某环节失败只影响组内规则。
+    """
     db = SessionLocal()
     try:
-        rule_ids = [
-            r.id for r in db.query(AIRule)
+        rules = (
+            db.query(AIRule)
             .filter(AIRule.enabled == True)  # noqa: E712
             .order_by(AIRule.sort_order, AIRule.id).all()
-        ]
+        )
     finally:
         db.close()
+
+    groups: dict = {}
+    for rule in rules:
+        groups.setdefault(_group_key(rule), []).append(rule)
+
     results = {}
-    for rid in rule_ids:
+    for group in groups.values():
         try:
-            results[str(rid)] = run_triage(rid)
+            results.update(_run_group(group, rerun_rule_ids=set()))
         except Exception as e:
-            logger.exception("AI triage crashed for rule %s", rid)
-            results[str(rid)] = {"ok": False, "error": str(e)}
+            logger.exception("AI triage crashed for rule group %s", [r.id for r in group])
+            for r in group:
+                results[str(r.id)] = {"ok": False, "error": str(e)}
     return results

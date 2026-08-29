@@ -86,17 +86,6 @@ class IntelligenceReportGenerator:
             except Exception:
                 logger.warning("Failed to load repos from RepoCache", exc_info=True)
 
-        config["academic"] = {
-            "display_name": "学术动态",
-            "type": "manual",
-            "description": "用户手动提供的学术论文信息",
-        }
-        config["news"] = {
-            "display_name": "新闻动态",
-            "type": "web",
-            "description": "行业新闻、版本发布信息",
-        }
-
         has_slack_creds = False
         try:
             from app.database import SessionLocal
@@ -111,14 +100,31 @@ class IntelligenceReportGenerator:
         except Exception:
             pass
 
+        config.update(self._non_repo_source_entries(has_slack_creds))
+        return config
+
+    @staticmethod
+    def _non_repo_source_entries(has_slack_creds: bool) -> Dict[str, dict]:
+        """仓库之外的固定来源条目（academic/news/slack），供 source_config 与调度器共享。"""
+        entries = {
+            "academic": {
+                "display_name": "学术动态",
+                "type": "manual",
+                "description": "用户手动提供的学术论文信息",
+            },
+            "news": {
+                "display_name": "新闻动态",
+                "type": "web",
+                "description": "行业新闻、版本发布信息",
+            },
+        }
         if has_slack_creds:
-            config["slack"] = {
+            entries["slack"] = {
                 "display_name": "Slack 社群讨论",
                 "type": "slack",
                 "description": "vLLM Slack 工作区各频道的讨论消息",
             }
-
-        return config
+        return entries
 
     def _resolve_sources(
         self, sources: List[str], excluded_sources: Optional[List[str]] = None,

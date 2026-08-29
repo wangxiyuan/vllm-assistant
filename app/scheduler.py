@@ -892,7 +892,18 @@ def generate_daily_vllm_report():
             RepoCache.status == "active"
         ).all()
         repo_sources = [r.repo for r in active_repos]
-        sources = list(repo_sources)
+        has_slack_creds = False
+        try:
+            sc = db.query(SlackConfig).first()
+            if sc and sc.token and sc.cookie:
+                has_slack_creds = True
+        except Exception:
+            pass
+        # academic/news/slack 必须进入 sources，否则调研阶段 prompt 不会包含
+        # search_arxiv / search_by_tags 指令，报告对应章节只能写"暂无数据"
+        sources = list(repo_sources) + list(
+            IntelligenceReportGenerator._non_repo_source_entries(has_slack_creds)
+        )
 
         # 检查今天是否已经生成过成功报告或正在生成
         today_start_dt = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d 00:00:00")
@@ -927,6 +938,11 @@ def generate_daily_vllm_report():
             for r in repo_sources
             if repo_clone_urls.get(r)
         }
+        # 补上 academic/news/slack 条目，否则 _get_source_config 的缓存短路
+        # 会让 effective_sources 过滤掉这些来源
+        generator._cached_source_config.update(
+            IntelligenceReportGenerator._non_repo_source_entries(has_slack_creds)
+        )
 
         # 先生成占位记录（拿到 report_id 用于上报进度），生成完成后回写
         db = SessionLocal()
