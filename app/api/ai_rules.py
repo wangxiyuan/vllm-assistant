@@ -7,6 +7,7 @@ AI 筛选规则 API（总览页）
 import json
 import logging
 import threading
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -81,6 +82,15 @@ def _commit_match_counts(db, rule_ids: list) -> dict:
         .all()
     )
     return dict(rows)
+
+
+def _match_is_new(matched_at) -> bool:
+    """命中标识：首次命中时间在 24 小时内视为新命中"""
+    if not matched_at:
+        return False
+    if matched_at.tzinfo is None:
+        matched_at = matched_at.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - matched_at) < timedelta(hours=24)
 
 
 @router.get("")
@@ -215,6 +225,7 @@ async def get_rule_matches(
             }
         d["rule_id"] = rule_id
         d["reason"] = match.reason or ""
+        d["is_new"] = _match_is_new(match.matched_at)
         d["matched_at"] = match.matched_at.isoformat() + "Z" if match.matched_at else None
         items.append(d)
 
@@ -227,7 +238,6 @@ async def get_rule_matches(
         .limit(limit)
         .all()
     )
-    from app.api.community import _is_recent
 
     for match in commit_rows:
         items.append({
@@ -242,7 +252,7 @@ async def get_rule_matches(
             "committed_at": match.committed_at.isoformat() + "Z" if match.committed_at else None,
             "created_at": match.committed_at.isoformat() + "Z" if match.committed_at else None,
             "labels": [], "area": None, "comments": 0,
-            "is_new": _is_recent(match.committed_at),
+            "is_new": _match_is_new(match.matched_at),
             "rule_id": rule_id,
             "reason": match.reason or "",
             "matched_at": match.matched_at.isoformat() + "Z" if match.matched_at else None,

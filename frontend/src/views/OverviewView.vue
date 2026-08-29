@@ -48,6 +48,7 @@ watch(ruleTabs, (tabs) => {
 watch(activeTab, (tab) => {
   if (tab.startsWith('rule:')) {
     const ruleId = parseInt(tab.slice(5), 10)
+    markRuleViewed(ruleId)
     if (!matchesLoaded.value.has(ruleId)) {
       matchesLoaded.value.add(ruleId)
       rulesStore.loadMatches(ruleId)
@@ -91,6 +92,40 @@ const activeMatchesFiltered = computed(() => {
   if (ruleMatchFilter.value === 'all') return activeMatches.value
   return activeMatches.value.filter(m => m.type === ruleMatchFilter.value)
 })
+
+// ================= 规则命中"已读"标记（localStorage 记录每规则上次查看时间） =================
+const RULE_LASTSEEN_KEY = 'rule-match-lastseen'
+// 本轮渲染使用的"上次查看时间"快照：打开 tab 时先取旧值再写入当前时间，
+// 这样本次浏览期间命中以旧值为准，下次打开才显示新的
+const prevSeenAt = ref<Record<string, number>>({})
+
+function loadLastSeenMap(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(RULE_LASTSEEN_KEY) || '{}')
+  } catch (_) {
+    return {}
+  }
+}
+
+function markRuleViewed(ruleId: number) {
+  const map = loadLastSeenMap()
+  prevSeenAt.value[String(ruleId)] = map[String(ruleId)] || 0
+  map[String(ruleId)] = Date.now()
+  try {
+    localStorage.setItem(RULE_LASTSEEN_KEY, JSON.stringify(map))
+  } catch (_) {}
+}
+
+function isNewForUser(item: any): boolean {
+  const last = prevSeenAt.value[String(activeRuleId.value ?? '')] ?? 0
+  if (!item.matched_at) return false
+  const matchedTs = new Date(item.matched_at).getTime()
+  if (!last) {
+    // 从未看过该规则：退化为服务端的 24 小时新增标识，避免首访满屏"新"
+    return !!item.is_new
+  }
+  return matchedTs > last
+}
 const activeRuleRunning = computed(() => {
   if (!activeTab.value.startsWith('rule:')) return false
   const ruleId = parseInt(activeTab.value.slice(5), 10)
@@ -101,6 +136,7 @@ const activeRule = computed(() => {
   const ruleId = parseInt(activeTab.value.slice(5), 10)
   return rulesStore.rules.find(r => r.id === ruleId) || null
 })
+const activeRuleId = computed(() => activeTab.value.startsWith('rule:') ? parseInt(activeTab.value.slice(5), 10) : null)
 
 function openMatchedItem(item: any) {
   if (item.type === 'commit') {
@@ -289,7 +325,7 @@ function watchlistChangeHint(w: any): string {
                 <span class="item-type-badge badge-commit">COMMIT</span>
                 <span class="item-number">{{ item.short_sha || item.sha?.slice(0, 7) }}</span>
                 <span v-if="commitPrNumber(item)" class="item-state">关联 #{{ commitPrNumber(item) }}</span>
-                <span v-if="item.is_new" class="badge badge-new">新</span>
+                <span v-if="isNewForUser(item)" class="badge badge-new" title="上次查看该规则后新增的命中">新</span>
               </div>
               <div class="item-title-row">
                 <h3 class="item-title">{{ item.title }}</h3>
@@ -318,7 +354,7 @@ function watchlistChangeHint(w: any): string {
                   {{ item.type === 'pr' ? prStateLabel(item.state) : issueStateLabel(item.state) }}
                 </span>
                 <span v-if="item.type === 'issue'" class="item-issue-type">{{ issueTypeLabel(issueType(item)) }}</span>
-                <span v-if="item.is_new" class="badge badge-new">新</span>
+                <span v-if="isNewForUser(item)" class="badge badge-new" title="上次查看该规则后新增的命中">新</span>
               </div>
               <div class="item-title-row">
                 <h3 class="item-title">{{ item.title }}</h3>

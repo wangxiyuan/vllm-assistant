@@ -175,6 +175,8 @@ def _persist_result(rule_id: int, candidates: list, matches: dict, run_at: datet
     """把一轮分诊结果写入/清理 matches（items 与 commit 两张表），并推进水位线（独立短事务）
 
     matches 的 key：普通条目为 (item_type, repo, number)，commit 为 ("commit", repo, sha)。
+    matched_at 语义为"首次命中时间"：已存在的行只更新 reason，不刷新 matched_at，
+    供前端"最近 24 小时新增命中"标识使用。
     """
     db = SessionLocal()
     try:
@@ -205,7 +207,6 @@ def _persist_result(rule_id: int, candidates: list, matches: dict, run_at: datet
                 ).first()
                 if row:
                     row.reason = reason
-                    row.matched_at = run_at
                 else:
                     db.add(AIRuleCommitMatch(
                         rule_id=rule_id, repo=repo, sha=ident,
@@ -221,7 +222,6 @@ def _persist_result(rule_id: int, candidates: list, matches: dict, run_at: datet
                 ).first()
                 if row:
                     row.reason = reason
-                    row.matched_at = run_at
                 else:
                     db.add(AIRuleMatch(
                         rule_id=rule_id, repo=repo, item_type=match_type,
