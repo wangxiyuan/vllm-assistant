@@ -959,3 +959,520 @@ class AIRuleCommitMatch(Base):
     __table_args__ = (
         UniqueConstraint("rule_id", "repo", "sha", name="uq_ai_rule_commit_match"),
     )
+
+
+# ======================================================================
+# NPU 算力管理：机器纳管（SSH）、容器任务、模型服务部署、Profiling 采集、
+# 用例测试与 benchmark。所有任务统一通过 docker 容器在 NPU 机器上运行
+# （巡检除外，巡检在宿主机跑 npu-smi），机型差异由 profiles 模板吸收。
+# ======================================================================
+
+
+class NpuMachine(Base):
+    """NPU 机器（SSH 纳管）"""
+
+    __tablename__ = "npu_machines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)  # 展示名，也是 docker 主机别名
+    host = Column(String(200), nullable=False)
+    port = Column(Integer, nullable=False, default=22)
+    username = Column(String(100), nullable=False)
+    auth_type = Column(String(20), nullable=False, default="key")  # 'key' / 'password'
+    key_path = Column(String(500))  # 服务端私钥文件路径（兼容模式，优先用 key_content）
+    key_content_enc = Column(Text)  # Fernet 加密的私钥内容（前端粘贴/文件读取，优先于 key_path）
+    password_enc = Column(Text)  # Fernet 加密的密码（auth_type=password 时使用），永不外泄
+    machine_type = Column(String(20), nullable=False, default="a2")  # a2 / a3 / 310p / other
+    workdir = Column(String(500), default="~/npu-workspace")  # 远程工作目录（任务/日志/profiling 根）
+    model_root = Column(String(500))  # 模型仓库根目录（扫描模型权重目录用）
+    tags = Column(Text)  # JSON array，自定义标签（用途/位置等）
+    status = Column(String(20), nullable=False, default="unknown")  # online / offline / unknown
+    status_message = Column(Text)  # 最近一次巡检的异常信息
+    last_check_at = Column(DateTime)
+    npu_count = Column(Integer)  # NPU 卡数（纳管探测/巡检更新）
+    npu_chip = Column(String(100))  # 芯片型号
+    driver_version = Column(String(200))
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                        onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    __table_args__ = (
+        Index("idx_npu_machines_status", "status"),
+    )
+
+    def to_ssh_params(self) -> Dict[str, Any]:
+        """SSH 层连接参数（含加密密码/私钥内容，仅限服务端内部使用，勿返回给前端）"""
+        return {
+            "host": self.host,
+            "port": self.port or 22,
+            "username": self.username,
+            "auth_type": self.auth_type or "key",
+            "key_path": self.key_path,
+            "key_content_enc": self.key_content_enc,
+            "password_enc": self.password_enc,
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "host": self.host,
+            "port": self.port or 22,
+            "username": self.username,
+            "auth_type": self.auth_type,
+            "key_path": self.key_path,
+            "has_key_content": bool(self.key_content_enc),
+            "has_password": bool(self.password_enc),
+            "machine_type": self.machine_type,
+            "workdir": self.workdir,
+            "model_root": self.model_root,
+            "tags": json.loads(self.tags) if self.tags else [],
+            "status": self.status,
+            "status_message": self.status_message,
+            "last_check_at": _iso_utc(self.last_check_at),
+            "npu_count": self.npu_count,
+            "npu_chip": self.npu_chip,
+            "driver_version": self.driver_version,
+            "enabled": bool(self.enabled),
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }
+
+
+class NpuMachineMetric(Base):
+    """机器巡检历史（利用率曲线数据点）"""
+
+    __tablename__ = "npu_machine_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("npu_machines.id", ondelete="CASCADE"), nullable=False, index=True)
+    ts = Column(DateTime, nullable=False, index=True,
+                default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    npu_util = Column(Text)  # JSON array，每卡利用率 %
+    npu_mem_used = Column(Text)  # JSON array，每卡已用显存 MB
+    npu_mem_total = Column(Text)  # JSON array，每卡总显存 MB
+    temperature = Column(Text)  # JSON array，每卡温度 ℃
+    power = Column(Text)  # JSON array，每卡功耗 W
+    cpu = Column(Float)  # 宿主机 CPU 利用率 %
+    mem = Column(Float)  # 宿主机内存利用率 %
+    disk = Column(Float)  # 宿主机磁盘利用率 %
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "machine_id": self.machine_id,
+            "ts": _iso_utc(self.ts),
+            "npu_util": json.loads(self.npu_util) if self.npu_util else [],
+            "npu_mem_used": json.loads(self.npu_mem_used) if self.npu_mem_used else [],
+            "npu_mem_total": json.loads(self.npu_mem_total) if self.npu_mem_total else [],
+            "temperature": json.loads(self.temperature) if self.temperature else [],
+            "power": json.loads(self.power) if self.power else [],
+            "cpu": self.cpu,
+            "mem": self.mem,
+            "disk": self.disk,
+        }
+
+
+class NpuImage(Base):
+    """机器上的容器镜像（巡检扫描缓存，部署表单下拉数据源）"""
+
+    __tablename__ = "npu_images"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("npu_machines.id", ondelete="CASCADE"), nullable=False, index=True)
+    full_name = Column(String(300), nullable=False)  # repo:tag
+    source = Column(String(20), nullable=False, default="scan")  # scan / manual
+    scanned_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    __table_args__ = (
+        UniqueConstraint("machine_id", "full_name", name="uq_npu_image"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "machine_id": self.machine_id,
+            "full_name": self.full_name,
+            "source": self.source,
+            "scanned_at": _iso_utc(self.scanned_at),
+        }
+
+
+class NpuModelDir(Base):
+    """机器上的模型权重目录（部署时下拉选择并挂载进容器）"""
+
+    __tablename__ = "npu_model_dirs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("npu_machines.id", ondelete="CASCADE"), nullable=False, index=True)
+    path = Column(String(500), nullable=False)
+    note = Column(String(300))
+    source = Column(String(20), nullable=False, default="scan")  # scan / manual
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    __table_args__ = (
+        UniqueConstraint("machine_id", "path", name="uq_npu_model_dir"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "machine_id": self.machine_id,
+            "path": self.path,
+            "note": self.note,
+            "source": self.source,
+            "created_at": _iso_utc(self.created_at),
+        }
+
+
+class NpuContainerTemplate(Base):
+    """容器任务模板（保存整套任务配置，一键套用改参数）"""
+
+    __tablename__ = "npu_container_templates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    mode = Column(String(20), nullable=False, default="oneshot")  # persistent / oneshot
+    machine_type = Column(String(20))  # 适用机型（空 = 通用）
+    image = Column(String(300))
+    devices = Column(Text)  # JSON array，NPU 卡索引列表（如 [0,1,2,3]）
+    mounts = Column(Text)  # JSON array，宿主机:容器内 挂载对列表
+    env = Column(Text)  # JSON object，环境变量
+    network = Column(String(20), default="host")  # host / bridge
+    ports = Column(Text)  # JSON array，"host:container" 端口映射（bridge 模式）
+    command = Column(Text)  # 容器内执行命令
+    shm_size = Column(String(50))
+    notes = Column(Text)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                        onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "mode": self.mode,
+            "machine_type": self.machine_type,
+            "image": self.image,
+            "devices": json.loads(self.devices) if self.devices else [],
+            "mounts": json.loads(self.mounts) if self.mounts else [],
+            "env": json.loads(self.env) if self.env else {},
+            "network": self.network or "host",
+            "ports": json.loads(self.ports) if self.ports else [],
+            "command": self.command,
+            "shm_size": self.shm_size,
+            "notes": self.notes,
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }
+
+
+class NpuJob(Base):
+    """NPU 远程任务（统一任务中心记录）
+
+    type: container(自定义容器任务) / deploy(部署服务) / service_start / service_stop /
+          test / benchmark。
+    mode: persistent(docker run -d 常驻容器，running 即长期状态，页面可停止) /
+          oneshot(docker run --rm 跑完退出，exit_code 落库)。
+    payload: 容器规格 JSON（image/devices/mounts/env/network/ports/command/shm_size）
+             + docker_cmd（最终生成的完整命令，可复现）。
+    日志只落文件系统（log_file 指向 data/npu_jobs/{id}.log），DB 仅存路径与大小。
+    """
+
+    __tablename__ = "npu_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("npu_machines.id", ondelete="CASCADE"), nullable=False, index=True)
+    type = Column(String(20), nullable=False, default="container")
+    mode = Column(String(20), nullable=False, default="oneshot")  # persistent / oneshot
+    name = Column(String(200))
+    payload = Column(Text)  # JSON：容器规格 + docker_cmd
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    # pending / running / completed / failed / cancelled
+    exit_code = Column(Integer)
+    container_name = Column(String(200))
+    log_file = Column(String(500))
+    log_size = Column(Integer, default=0)
+    error_message = Column(Text)
+    source = Column(String(10), nullable=False, default="ui")  # ui / agent
+    service_id = Column(Integer, index=True)  # 关联部署实例（deploy/service_start/service_stop）
+    test_case_id = Column(Integer, index=True)
+    benchmark_id = Column(Integer, index=True)
+    started_at = Column(DateTime)
+    finished_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    __table_args__ = (
+        Index("idx_npu_jobs_machine", "machine_id", "created_at"),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "machine_id": self.machine_id,
+            "type": self.type,
+            "mode": self.mode,
+            "name": self.name,
+            "payload": json.loads(self.payload) if self.payload else {},
+            "status": self.status,
+            "exit_code": self.exit_code,
+            "container_name": self.container_name,
+            "log_file": self.log_file,
+            "log_size": self.log_size or 0,
+            "error_message": self.error_message,
+            "source": self.source,
+            "service_id": self.service_id,
+            "test_case_id": self.test_case_id,
+            "benchmark_id": self.benchmark_id,
+            "started_at": _iso_utc(self.started_at),
+            "finished_at": _iso_utc(self.finished_at),
+            "created_at": _iso_utc(self.created_at),
+        }
+
+
+class NpuServiceInstance(Base):
+    """vLLM 模型服务实例（docker 容器形态，生命周期由管理服务托管）
+
+    network=host 时服务端口即 ports[0] 的宿主端口；bridge 时 ports 为
+    "host:container" 映射，健康检查走宿主端口。
+    """
+
+    __tablename__ = "npu_service_instances"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("npu_machines.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(100), nullable=False, unique=True)
+    model_dir = Column(String(500))  # 模型权重目录（机器路径，挂载进容器）
+    model_name = Column(String(200))  # --served-model-name（对外模型名）
+    image = Column(String(300), nullable=False)
+    container_name = Column(String(200), nullable=False, unique=True)
+    mounts = Column(Text)  # JSON array，模型目录等额外挂载
+    env = Column(Text)  # JSON object
+    network = Column(String(20), nullable=False, default="host")
+    ports = Column(Text)  # JSON array
+    devices = Column(Text)  # JSON array，NPU 卡索引
+    tp = Column(Integer, default=1)  # --tensor-parallel-size
+    serve_args = Column(Text)  # vllm serve 额外参数文本
+    serve_params = Column(Text)  # JSON：完整结构化 serve 参数（并行策略/内存/精度/JSON 配置），启动/重启重放用
+    debug_mode = Column(Boolean, nullable=False, default=False)
+    debugpy_port = Column(Integer)  # 调试模式 debugpy 监听端口
+    wait_for_client = Column(Boolean, default=False)  # 调试模式是否挂起等 attach
+    profiling_enabled = Column(Boolean, nullable=False, default=False)
+    profiling_dir = Column(String(500))  # 机器上 profiling 输出目录（与容器内同路径挂载）
+    health_url = Column(String(300))
+    container_id = Column(String(100))
+    status = Column(String(20), nullable=False, default="deploying", index=True)
+    # deploying / running / stopped / failed / unknown
+    last_health_at = Column(DateTime)
+    last_health_ok = Column(Boolean)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                        onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "machine_id": self.machine_id,
+            "name": self.name,
+            "model_dir": self.model_dir,
+            "model_name": self.model_name,
+            "image": self.image,
+            "container_name": self.container_name,
+            "mounts": json.loads(self.mounts) if self.mounts else [],
+            "env": json.loads(self.env) if self.env else {},
+            "network": self.network,
+            "ports": json.loads(self.ports) if self.ports else [],
+            "devices": json.loads(self.devices) if self.devices else [],
+            "tp": self.tp or 1,
+            "serve_args": self.serve_args,
+            "serve_params": json.loads(self.serve_params) if self.serve_params else {},
+            "debug_mode": bool(self.debug_mode),
+            "debugpy_port": self.debugpy_port,
+            "wait_for_client": bool(self.wait_for_client),
+            "profiling_enabled": bool(self.profiling_enabled),
+            "profiling_dir": self.profiling_dir,
+            "health_url": self.health_url,
+            "container_id": self.container_id,
+            "status": self.status,
+            "last_health_at": _iso_utc(self.last_health_at),
+            "last_health_ok": bool(self.last_health_ok) if self.last_health_ok is not None else None,
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }
+
+
+class NpuProfileSession(Base):
+    """Profiling 采集会话（对应一次 /start_profile → /stop_profile）
+
+    files 为输出目录文件快照 JSON（[{name,size,mtime}]），可 refresh 重扫。
+    """
+
+    __tablename__ = "npu_profile_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    service_id = Column(Integer, ForeignKey("npu_service_instances.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    machine_id = Column(Integer, nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="collecting")  # collecting / completed / failed
+    output_dir = Column(String(500), nullable=False)  # 机器上的输出目录
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    stopped_at = Column(DateTime)
+    duration_s = Column(Float)
+    files = Column(Text)  # JSON：[{name, size, mtime}]
+    total_size = Column(Integer, default=0)
+    notes = Column(Text)
+    error_message = Column(Text)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "service_id": self.service_id,
+            "machine_id": self.machine_id,
+            "status": self.status,
+            "output_dir": self.output_dir,
+            "started_at": _iso_utc(self.started_at),
+            "stopped_at": _iso_utc(self.stopped_at),
+            "duration_s": self.duration_s,
+            "files": json.loads(self.files) if self.files else [],
+            "total_size": self.total_size or 0,
+            "notes": self.notes,
+            "error_message": self.error_message,
+            "created_at": _iso_utc(self.created_at),
+        }
+
+
+class NpuTestCase(Base):
+    """测试用例
+
+    kind=container_cmd：在机器上起一次性容器跑 shell 命令（payload: {image?, command}）；
+    kind=openai_chat：管理端直接向服务实例发 OpenAI 兼容请求断言响应
+    （payload: {message?, expect_keyword?, max_tokens?}）。
+    """
+
+    __tablename__ = "npu_test_cases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text)
+    kind = Column(String(20), nullable=False, default="openai_chat")  # container_cmd / openai_chat
+    payload = Column(Text)  # JSON，结构随 kind
+    target = Column(String(20), nullable=False, default="service")  # machine / service
+    timeout_seconds = Column(Integer, default=600)
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                        onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "kind": self.kind,
+            "payload": json.loads(self.payload) if self.payload else {},
+            "target": self.target,
+            "timeout_seconds": self.timeout_seconds or 600,
+            "enabled": bool(self.enabled),
+            "created_at": _iso_utc(self.created_at),
+            "updated_at": _iso_utc(self.updated_at),
+        }
+
+
+class NpuTestRun(Base):
+    """测试用例运行记录"""
+
+    __tablename__ = "npu_test_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("npu_test_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    machine_id = Column(Integer, index=True)
+    service_id = Column(Integer, index=True)
+    job_id = Column(Integer, index=True)  # container_cmd 类关联的远程任务
+    status = Column(String(20), nullable=False)  # passed / failed / error
+    duration_ms = Column(Float)
+    output_summary = Column(Text)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                        index=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "case_id": self.case_id,
+            "machine_id": self.machine_id,
+            "service_id": self.service_id,
+            "job_id": self.job_id,
+            "status": self.status,
+            "duration_ms": self.duration_ms,
+            "output_summary": self.output_summary,
+            "created_at": _iso_utc(self.created_at),
+        }
+
+
+class NpuBenchmarkRun(Base):
+    """benchmark 压测记录（指标由 vllm bench serve 输出 JSON 解析）"""
+
+    __tablename__ = "npu_benchmark_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("npu_machines.id", ondelete="CASCADE"), nullable=False, index=True)
+    service_id = Column(Integer, index=True)
+    job_id = Column(Integer, index=True)
+    model = Column(String(300))
+    endpoint = Column(String(100), default="/v1/completions")
+    dataset_name = Column(String(50), default="random")  # random / sharegpt
+    dataset_path = Column(String(500))
+    num_prompts = Column(Integer, default=10)
+    request_rate = Column(Float)
+    max_concurrency = Column(Integer)
+    params = Column(Text)  # JSON，其余 bench 参数
+    status = Column(String(20), nullable=False, default="running")  # running / completed / failed
+    total_throughput = Column(Float)
+    output_throughput = Column(Float)
+    ttft_p50 = Column(Float)
+    ttft_p99 = Column(Float)
+    tpot_p50 = Column(Float)
+    tpot_p99 = Column(Float)
+    itl_p50 = Column(Float)
+    itl_p99 = Column(Float)
+    e2el_p99 = Column(Float)
+    success_rate = Column(Float)
+    result_file = Column(String(500))  # 机器上结果 JSON 路径
+    raw_metrics = Column(Text)  # JSON，原始指标（供后续扩展展示）
+    notes = Column(Text)
+    error_message = Column(Text)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                        index=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "machine_id": self.machine_id,
+            "service_id": self.service_id,
+            "job_id": self.job_id,
+            "model": self.model,
+            "endpoint": self.endpoint,
+            "dataset_name": self.dataset_name,
+            "dataset_path": self.dataset_path,
+            "num_prompts": self.num_prompts,
+            "request_rate": self.request_rate,
+            "max_concurrency": self.max_concurrency,
+            "params": json.loads(self.params) if self.params else {},
+            "status": self.status,
+            "total_throughput": self.total_throughput,
+            "output_throughput": self.output_throughput,
+            "ttft_p50": self.ttft_p50,
+            "ttft_p99": self.ttft_p99,
+            "tpot_p50": self.tpot_p50,
+            "tpot_p99": self.tpot_p99,
+            "itl_p50": self.itl_p50,
+            "itl_p99": self.itl_p99,
+            "e2el_p99": self.e2el_p99,
+            "success_rate": self.success_rate,
+            "result_file": self.result_file,
+            "raw_metrics": json.loads(self.raw_metrics) if self.raw_metrics else {},
+            "notes": self.notes,
+            "error_message": self.error_message,
+            "created_at": _iso_utc(self.created_at),
+        }

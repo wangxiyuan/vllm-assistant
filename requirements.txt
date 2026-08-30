@@ -15,3 +15,7 @@ requests==2.32.3
 tenacity==9.0.0
 markdown==3.7
 jinja2==3.1.6
+# NPU 算力管理：SSH 远程执行（自带 cryptography 依赖）+ 代理网关流式转发
+asyncssh==2.21.0
+cryptography>=3.1
+httpx>=0.27

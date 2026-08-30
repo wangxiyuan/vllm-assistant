@@ -1087,6 +1087,59 @@ def run_ai_triage_job():
         _running_jobs.discard(job_id)
 
 
+def npu_inspect_all_job():
+    """NPU 机器巡检（独立小线程池并行采集，不与知识库构建的 _bg_executor 抢占）"""
+    job_id = "npu_inspect_all"
+    if job_id in _running_jobs:
+        return
+    _running_jobs.add(job_id)
+    try:
+        from concurrent.futures import ThreadPoolExecutor as _TPE
+        from app.models import NpuMachine
+        from app.services.npu.collector import inspect_machine
+
+        db = SessionLocal()
+        try:
+            machine_ids = [m.id for m in db.query(NpuMachine).filter(
+                NpuMachine.enabled == True).all()]  # noqa: E712
+        finally:
+            db.close()
+        if not machine_ids:
+            return
+
+        executor = _TPE(max_workers=3, thread_name_prefix="npu-inspect")
+        futures = [executor.submit(inspect_machine, mid) for mid in machine_ids]
+        for f in futures:
+            try:
+                f.result(timeout=300)
+            except Exception:
+                logger.exception("NPU inspect worker failed")
+        executor.shutdown(wait=False)
+    except Exception:
+        logger.exception("npu_inspect_all_job failed")
+    finally:
+        _running_jobs.discard(job_id)
+
+
+def npu_cleanup_metrics_job():
+    """清理过期的 NPU 巡检历史指标"""
+    from app.models import NpuMachineMetric
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        days=Config.NPU_METRIC_RETENTION_DAYS)
+    db = SessionLocal()
+    try:
+        deleted = db.query(NpuMachineMetric).filter(
+            NpuMachineMetric.ts < cutoff).delete(synchronize_session=False)
+        db.commit()
+        if deleted:
+            logger.info(f"Cleaned {deleted} expired NPU metric records")
+    except Exception:
+        db.rollback()
+        logger.exception("npu_cleanup_metrics_job failed")
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """启动定时调度器
 
@@ -1202,6 +1255,23 @@ def start_scheduler():
         name="Collect Slack Messages",
         replace_existing=True,
         misfire_grace_time=600,
+    )
+
+    # NPU 机器巡检（npu-smi/镜像/模型目录扫描）与历史指标清理
+    scheduler.add_job(
+        npu_inspect_all_job,
+        trigger=IntervalTrigger(seconds=Config.NPU_CHECK_INTERVAL),
+        id="npu_inspect_all",
+        name="NPU Fleet Inspect",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+    scheduler.add_job(
+        npu_cleanup_metrics_job,
+        trigger=IntervalTrigger(hours=24),
+        id="npu_cleanup_metrics",
+        name="NPU Metrics Cleanup",
+        replace_existing=True,
     )
 
     scheduler.start()

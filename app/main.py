@@ -59,6 +59,13 @@ async def lifespan(app: FastAPI):
     from app.database import SessionLocal
     from app.models import RepoCache
 
+    # NPU 任务对账：服务重启后把中断的 oneshot 任务标失败
+    try:
+        from app.services.npu.jobs import reconcile_on_startup
+        reconcile_on_startup()
+    except Exception:
+        logger.exception("NPU job reconcile failed")
+
     db = SessionLocal()
     try:
         has_repos = db.query(RepoCache).filter(RepoCache.status == "active").count() > 0
@@ -224,6 +231,12 @@ from app.api.ai_agent import router as ai_agent_router
 from app.api.slack import router as slack_router
 from app.api.comments import router as comments_router
 from app.api.ai_rules import router as ai_rules_router
+from app.api.npu.machines import router as npu_machines_router
+from app.api.npu.jobs import router as npu_jobs_router
+from app.api.npu.services import router as npu_services_router
+from app.api.npu.profiles import router as npu_profiles_router
+from app.api.npu.benchmarks import router as npu_benchmarks_router
+from app.api.npu.tests import router as npu_tests_router
 
 app.include_router(community_router, prefix="/api/community", tags=["Community Pulse"])
 app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command Center"])
@@ -240,6 +253,12 @@ app.include_router(ai_agent_router, prefix="/api/ai-agent", tags=["AI Agent"])
 app.include_router(slack_router, prefix="/api/slack", tags=["Slack"])
 app.include_router(comments_router, prefix="/api/comments", tags=["Comments"])
 app.include_router(ai_rules_router, prefix="/api/rules", tags=["AI Rules"])
+app.include_router(npu_machines_router, prefix="/api/npu/machines", tags=["NPU Machines"])
+app.include_router(npu_jobs_router, prefix="/api/npu/jobs", tags=["NPU Jobs"])
+app.include_router(npu_services_router, prefix="/api/npu/services", tags=["NPU Services"])
+app.include_router(npu_profiles_router, prefix="/api/npu/profiles", tags=["NPU Profiling"])
+app.include_router(npu_benchmarks_router, prefix="/api/npu/benchmarks", tags=["NPU Benchmarks"])
+app.include_router(npu_tests_router, prefix="/api/npu/test-cases", tags=["NPU Tests"])
 
 
 # 静态文件

@@ -18,12 +18,14 @@ def build_system_prompt(messages: List[dict], custom_prompt: Optional[str] = Non
     memory_context = build_memory_context(user_query, top_k=3)
     time_context = build_time_context()
     repo_list_text = build_repo_list_text()
+    npu_context = build_npu_context()
 
     system_prompt = render_prompt(
         "agent", "system_prompt.md",
         time_context=time_context,
         repo_list_text=repo_list_text,
         memory_context=memory_context,
+        npu_context=npu_context,
     )
     if custom_prompt:
         system_prompt = f"{custom_prompt}\n\n{system_prompt}"
@@ -90,4 +92,37 @@ def build_repo_list_text() -> str:
             return f"\n\n## 已配置的代码仓库\n当前支持的项目：{names}。GitHub 搜索工具（search_issues 等）可搜索任意 GitHub 仓库，不受此限制。"
     except Exception:
         logger.warning("Failed to query repos", exc_info=True)
+    return ""
+
+
+def build_npu_context() -> str:
+    """返回已纳管 NPU 机器与运行中服务的清单（无纳管机器时返回空，不注入段落）。"""
+    try:
+        from app.database import SessionLocal
+        from app.models import NpuMachine, NpuServiceInstance
+        db = SessionLocal()
+        try:
+            machines = db.query(NpuMachine).filter(
+                NpuMachine.enabled == True).all()  # noqa: E712
+            services = db.query(NpuServiceInstance).filter(
+                NpuServiceInstance.status == "running").all()
+        finally:
+            db.close()
+        if not machines:
+            return ""
+        lines = ["\n\n## 当前 NPU 算力清单"]
+        for m in machines:
+            lines.append(
+                f"- 机器 #{m.id} `{m.name}`（{m.machine_type}，{m.host}，"
+                f"{m.npu_count or '?'} 卡 {m.npu_chip or ''}，状态 {m.status}）")
+        if services:
+            lines.append("运行中的服务：")
+            for s in services:
+                lines.append(
+                    f"- 服务 #{s.id} `{s.name}`（模型 {s.model_name or s.name}，"
+                    f"机器 #{s.machine_id}，状态 {s.status}）")
+        lines.append("部署新服务时可先用 list_npu_models 查看机器上的模型目录。")
+        return "\n".join(lines)
+    except Exception:
+        logger.warning("Failed to build npu context", exc_info=True)
     return ""

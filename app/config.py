@@ -79,6 +79,53 @@ class Config:
     SLACK_EMAIL: str = os.getenv("SLACK_EMAIL", "")
     SLACK_PASSWORD: str = os.getenv("SLACK_PASSWORD", "")
 
+    # ===== NPU 算力管理配置 =====
+    # 巡检间隔（秒）：定时 SSH 采集 npu-smi / 镜像 / 模型目录
+    NPU_CHECK_INTERVAL: int = int(os.getenv("NPU_CHECK_INTERVAL", "300"))
+    # 是否写入巡检历史（npu_machine_metrics，用于利用率曲线）；关闭时只更新机器最新状态
+    NPU_METRICS_ENABLED: bool = os.getenv("NPU_METRICS_ENABLED", "true").lower() in ("1", "true", "yes")
+    # 巡检历史保留天数
+    NPU_METRIC_RETENTION_DAYS: int = int(os.getenv("NPU_METRIC_RETENTION_DAYS", "7"))
+    # 远程任务并发执行线程数
+    NPU_JOB_WORKERS: int = int(os.getenv("NPU_JOB_WORKERS", "2"))
+    # 一次性任务默认超时（秒），表单可覆盖
+    NPU_JOB_TIMEOUT: int = int(os.getenv("NPU_JOB_TIMEOUT", "3600"))
+    # 部署健康检查循环超时（秒）：大模型加载慢，给足余量
+    NPU_HEALTH_TIMEOUT: int = int(os.getenv("NPU_HEALTH_TIMEOUT", "1800"))
+    # 默认镜像仓库与版本（机型默认镜像 = repo:version 或 repo:version-机型后缀）
+    NPU_IMAGE_REPO: str = os.getenv("NPU_IMAGE_REPO", "quay.io/ascend/vllm-ascend")
+    NPU_IMAGE_VERSION: str = os.getenv("NPU_IMAGE_VERSION", "v0.23.0")
+
+    _npu_secret_key_cache: bytes = b""
+
+    @classmethod
+    def get_npu_secret_key(cls) -> bytes:
+        """NPU 密码加密密钥（Fernet key bytes）。
+
+        优先取 NPU_SECRET_KEY 环境变量；未设置时自动生成并持久化到
+        data/secret_key（权限 600），避免重启后无法解密已存密码。
+        """
+        if cls._npu_secret_key_cache:
+            return cls._npu_secret_key_cache
+        from cryptography.fernet import Fernet
+
+        env_key = os.getenv("NPU_SECRET_KEY", "").strip()
+        if env_key:
+            cls._npu_secret_key_cache = env_key.encode()
+            return cls._npu_secret_key_cache
+        key_path = cls.BASE_DIR / "data" / "secret_key"
+        if key_path.exists():
+            cached = key_path.read_bytes().strip()
+            if cached:
+                cls._npu_secret_key_cache = cached
+                return cls._npu_secret_key_cache
+        key = Fernet.generate_key()
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_bytes(key + b"\n")
+        os.chmod(key_path, 0o600)
+        cls._npu_secret_key_cache = key
+        return cls._npu_secret_key_cache
+
     @classmethod
     def validate(cls) -> bool:
         if not cls.GITHUB_PAT:

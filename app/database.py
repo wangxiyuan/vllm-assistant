@@ -519,6 +519,45 @@ def _ensure_ai_chat_messages_proc_columns():
                     logger.warning(f"Failed to add column {col_name} to ai_chat_messages: {e}")
 
 
+
+def _ensure_npu_machines_key_content_column():
+    """确保 npu_machines 表包含 key_content_enc 列（向后兼容迁移：私钥内容存储）"""
+    from sqlalchemy import inspect, DDL
+
+    with engine.connect() as conn:
+        try:
+            existing_cols = {c["name"] for c in inspect(conn).get_columns("npu_machines")}
+        except Exception:
+            return
+
+        if "key_content_enc" not in existing_cols:
+            try:
+                conn.execute(DDL("ALTER TABLE npu_machines ADD COLUMN key_content_enc TEXT"))
+                conn.commit()
+                logger.info("Added key_content_enc column to npu_machines table")
+            except Exception as e:
+                logger.warning(f"Failed to add key_content_enc column to npu_machines: {e}")
+
+
+def _ensure_npu_service_instances_serve_params_column():
+    """确保 npu_service_instances 表包含 serve_params 列（向后兼容迁移：结构化 serve 参数）"""
+    from sqlalchemy import inspect, DDL
+
+    with engine.connect() as conn:
+        try:
+            existing_cols = {c["name"] for c in inspect(conn).get_columns("npu_service_instances")}
+        except Exception:
+            return
+
+        if "serve_params" not in existing_cols:
+            try:
+                conn.execute(DDL("ALTER TABLE npu_service_instances ADD COLUMN serve_params TEXT"))
+                conn.commit()
+                logger.info("Added serve_params column to npu_service_instances table")
+            except Exception as e:
+                logger.warning(f"Failed to add serve_params column to npu_service_instances: {e}")
+
+
 def _ensure_watchlist_state_change_column():
     """确保 watchlist 表包含 last_state_change_at 列（向后兼容迁移）"""
     from sqlalchemy import inspect, DDL
@@ -632,6 +671,8 @@ _ensure_intelligence_reports_category()
 _ensure_intelligence_report_traces()
 _ensure_ai_chat_messages_proc_columns()
 _ensure_watchlist_state_change_column()
+_ensure_npu_machines_key_content_column()
+_ensure_npu_service_instances_serve_params_column()
 _ensure_ai_rules_include_commits_column()
 _cleanup_obsolete_schema()
 # 重建表会丢失索引，迁移后重新补建

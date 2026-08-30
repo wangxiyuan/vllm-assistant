@@ -15,3 +15,4 @@ from . import doc_tools
 from . import academic_tools
 from . import web_search_tools
 from . import write_tools
+from . import npu_tools

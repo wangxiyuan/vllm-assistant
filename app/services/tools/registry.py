@@ -44,6 +44,23 @@ CATEGORY_TOOLS: Dict[str, List[str]] = {
         "search_web",
         "extract_web_content",
     ],
+    # NPU 运维工具：查机器/模型/服务、执行命令（confirm 守卫）、部署/压测/
+    # profiling 采集。长任务返回 id，用 get_npu_job / get_npu_benchmark_result 轮询。
+    "npu": [
+        "list_npu_machines",
+        "get_npu_machine_detail",
+        "list_npu_models",
+        "list_npu_services",
+        "get_npu_job",
+        "run_npu_command",
+        "deploy_npu_service",
+        "stop_npu_service",
+        "start_npu_benchmark",
+        "get_npu_benchmark_result",
+        "start_npu_profile",
+        "stop_npu_profile",
+        "run_npu_test",
+    ],
     # 写类工具：AI 可创建/更新/删除项目实体（删除带 confirm 守卫）。
     # 不挂限流器（rate_limiter 对未知名返回 None）。
     "write": [
