@@ -1,6 +1,97 @@
 /* =====================================================================
    RESET & BASE
    ===================================================================== */
+/* ── Native controls in dark theme ──
+   让原生控件（number spinner、select 弹层、滚动条等）跟随深色主题渲染，
+   避免深色界面里出现浏览器默认的白色控件碎片。 */
+:root {
+    color-scheme: dark;
+}
+
+/* ── Checkbox / radio ──
+   自定义勾选框：amber 主题方形指示器，替代浏览器原生样式。 */
+input[type="checkbox"],
+input[type="radio"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    border: 1.5px solid var(--border-bright);
+    border-radius: 3px;
+    background: var(--bg-elev-2);
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+input[type="radio"] { border-radius: 50%; }
+
+input[type="checkbox"]:hover,
+input[type="radio"]:hover {
+    border-color: var(--amber);
+}
+
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+    outline: none;
+    border-color: var(--amber);
+    box-shadow: 0 0 0 2px var(--amber-glow);
+}
+
+input[type="checkbox"]:checked {
+    background: var(--amber);
+    border-color: var(--amber);
+}
+
+input[type="checkbox"]:checked::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 4px;
+    height: 8px;
+    border: solid var(--text-on-accent);
+    border-width: 0 1.8px 1.8px 0;
+    transform: rotate(45deg);
+}
+
+input[type="radio"]:checked {
+    border-color: var(--amber);
+    background: var(--bg-elev-2);
+}
+
+input[type="radio"]:checked::after {
+    content: "";
+    position: absolute;
+    inset: 2.5px;
+    border-radius: 50%;
+    background: var(--amber);
+}
+
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ── Number input ──
+   spinner 按钮配色交给 color-scheme: dark，这里仅收窄宽度并加 hover 反馈。 */
+input[type="number"] {
+    color-scheme: dark;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+    opacity: 0.55;
+    cursor: pointer;
+}
+
+input[type="number"]::-webkit-inner-spin-button:hover {
+    opacity: 1;
+}
+
 *, *::before, *::after {
     box-sizing: border-box;
 }

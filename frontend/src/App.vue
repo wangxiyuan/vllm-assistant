@@ -151,7 +151,11 @@ async function startApp() {
   watch(() => authStore.authenticated, async (val) => {
     if (val) {
       await startApp()
-      if (router.currentRoute.value.path === '/' || router.currentRoute.value.path === '/login') {
+      // 等待初始路由解析完成：否则 currentRoute 还是初始 '/'，
+      // 直接访问 /npu-services 等子路由会被误跳到总览页
+      await router.isReady()
+      const path = router.currentRoute.value.path
+      if (path === '/' || path === '/login') {
         router.push({ name: 'overview' })
       }
     }
