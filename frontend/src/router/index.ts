@@ -46,6 +46,30 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/AIAgentView.vue'),
     meta: { title: 'AI Agent' },
   },
+  {
+    path: '/npu-machines',
+    name: 'npu-machines',
+    component: () => import('@/views/NpuMachinesView.vue'),
+    meta: { title: 'NPU 机器' },
+  },
+  {
+    path: '/npu-jobs',
+    name: 'npu-jobs',
+    component: () => import('@/views/NpuJobsView.vue'),
+    meta: { title: '任务中心' },
+  },
+  {
+    path: '/npu-services',
+    name: 'npu-services',
+    component: () => import('@/views/NpuServicesView.vue'),
+    meta: { title: '服务部署' },
+  },
+  {
+    path: '/npu-testing',
+    name: 'npu-testing',
+    component: () => import('@/views/NpuTestingView.vue'),
+    meta: { title: '测试压测' },
+  },
 ]
 
 const router = createRouter({

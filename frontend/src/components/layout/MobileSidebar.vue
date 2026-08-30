@@ -57,6 +57,16 @@ const navGroups = ref<NavGroup[]>([
       { name: 'ai-agent', label: 'AI Agent', kbd: '6', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z' },
     ],
   },
+  {
+    label: 'NPU',
+    expanded: true,
+    items: [
+      { name: 'npu-machines', label: 'NPU 机器', kbd: '7', icon: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01' },
+      { name: 'npu-jobs', label: '任务中心', kbd: '8', icon: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' },
+      { name: 'npu-services', label: '服务部署', kbd: '9', icon: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5' },
+      { name: 'npu-testing', label: '测试压测', kbd: '0', icon: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' },
+    ],
+  },
 ])
 
 function toggleGroup(index: number) {
