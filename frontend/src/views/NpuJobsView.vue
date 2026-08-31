@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { useNpuStore, type NpuJob, type NpuContainerTemplate } from '@/stores/npu'
+import { useNpuStore, type NpuJob, type NpuContainerTemplate, type MachineImage } from '@/stores/npu'
 import LogViewer from '@/components/npu/LogViewer.vue'
 import NpuCardPicker from '@/components/npu/NpuCardPicker.vue'
+import NpuFilterSelect from '@/components/npu/NpuFilterSelect.vue'
 import NpuDialog from '@/components/npu/NpuDialog.vue'
 import { useNpuDialog } from '@/composables/useNpuDialog'
 
@@ -28,6 +29,20 @@ async function copy(text: string, tag: string) {
 const draft = ref<any>(emptyDraft())
 const preset = ref('bash')
 const envText = ref('')
+/** 执行方式：container = docker run；host = 宿主机 shell 直执行（仅 oneshot，无需镜像） */
+const runTarget = ref<'container' | 'host'>('container')
+const machineImages = ref<MachineImage[]>([])
+
+async function onMachineChange() {
+  machineImages.value = []
+  if (!draft.value.machine_id) return
+  try { machineImages.value = await npu.fetchMachineImages(draft.value.machine_id) } catch {}
+}
+
+watch(runTarget, (t) => {
+  // 宿主机直执行不支持常驻容器
+  if (t === 'host') draft.value.mode = 'oneshot'
+})
 
 function emptyDraft() {
   return {
@@ -62,11 +77,13 @@ function parseEnv(t: string): Record<string, string> {
   return env
 }
 function buildSpec() {
+  const host = runTarget.value === 'host'
   return {
     machine_id: draft.value.machine_id,
-    mode: draft.value.mode,
+    mode: host ? 'oneshot' : draft.value.mode,
     name: draft.value.name,
-    image: draft.value.image,
+    exec_target: runTarget.value,
+    image: host ? '' : draft.value.image,
     device_ids: draft.value.device_ids,
     mounts: parseLines(draft.value.mountsText),
     env: parseEnv(envText.value),
@@ -80,6 +97,10 @@ function buildSpec() {
 }
 
 async function doPreview() {
+  if (runTarget.value === 'host') {
+    preview.value = `[宿主机执行] ${draft.value.command}`
+    return
+  }
   try {
     const r = await npu.previewCommand(buildSpec())
     preview.value = r.docker_cmd
@@ -135,6 +156,15 @@ function statusClass(s: string) {
     : (s === 'failed' || s === 'cancelled') ? 'job-st-failed' : 'job-st-pending'
 }
 
+async function removeJob(j: NpuJob) {
+  if (!(await dialog.confirm(`删除任务 #${j.id}？其日志文件将一并清理，运行中任务需先停止。`, '删除任务'))) return
+  try {
+    await npu.deleteJob(j.id)
+    if (activeJob.value?.id === j.id) activeJob.value = null
+    dialog.toastSuccess('任务已删除', `#${j.id}`)
+  } catch (e: any) { dialog.toastError('删除失败', e) }
+}
+
 function fmtTime(ts: string | null) { return ts ? new Date(ts).toLocaleString() : '—' }
 
 async function refreshJobs() {
@@ -175,7 +205,7 @@ onMounted(async () => {
     </div>
 
     <div class="job-list">
-      <div v-for="j in npu.jobs" :key="j.id" class="job-row-item">
+      <div v-for="j in npu.jobs" :key="j.id" class="job-row-item job-row-click" @click="activeJob = j">
         <div class="job-item-top">
           <b>#{{ j.id }}</b>
           <span class="job-badge">{{ j.type }}</span>
@@ -184,11 +214,11 @@ onMounted(async () => {
           <span class="muted">{{ j.name || j.payload?.command?.slice(0, 40) }}</span>
           <span style="flex: 1"></span>
           <button v-if="j.mode === 'persistent' && j.status === 'running'" class="btn-mini"
-                  @click="copy(`docker exec -it ${j.container_name} bash`, `exec${j.id}`)">
+                  @click.stop="copy(`docker exec -it ${j.container_name} bash`, `exec${j.id}`)">
             {{ copiedTag === `exec${j.id}` ? '已复制' : '复制 exec 命令' }}
           </button>
-          <button v-if="j.status === 'pending' || j.status === 'running'" class="btn-mini" @click="npu.stopJob(j.id)">停止</button>
-          <button class="btn-mini" @click="activeJob = j">日志</button>
+          <button v-if="j.status === 'pending' || j.status === 'running'" class="btn-mini" @click.stop="npu.stopJob(j.id)">停止</button>
+          <button v-if="j.status !== 'pending' && j.status !== 'running'" class="btn-mini btn-danger-mini" @click.stop="removeJob(j)">删除</button>
         </div>
         <div class="job-meta">
           <span>机器：{{ npu.machineName(j.machine_id) }}</span>
@@ -203,21 +233,27 @@ onMounted(async () => {
     </div>
 
     <!-- 提交表单 -->
-    <div v-if="showForm" class="modal-mask" @click.self="showForm = false">
+    <div v-if="showForm" class="modal-mask">
       <div class="modal">
-        <h3>提交容器任务</h3>
+        <h3>提交任务</h3>
         <div class="job-form">
           <div class="job-row">
             <label>机器
-              <select v-model="draft.machine_id">
+              <select v-model="draft.machine_id" @change="onMachineChange">
                 <option :value="null" disabled>选择机器</option>
                 <option v-for="m in npu.machines.filter(x => x.enabled)" :key="m.id" :value="m.id">
                   {{ m.name }}（{{ m.npu_count ?? '?' }} 卡）
                 </option>
               </select>
             </label>
+            <label>执行方式
+              <select v-model="runTarget">
+                <option value="container">容器内执行（docker run）</option>
+                <option value="host">宿主机直执行（不进容器，一次性）</option>
+              </select>
+            </label>
             <label>模式
-              <select v-model="draft.mode">
+              <select v-model="draft.mode" :disabled="runTarget === 'host'">
                 <option value="persistent">常驻（docker run -d，exec 进去开发）</option>
                 <option value="oneshot">一次性（跑完退出）</option>
               </select>
@@ -231,14 +267,19 @@ onMounted(async () => {
             <button class="btn-mini" @click="applyPreset">应用</button>
           </div>
           <label style="font-size: var(--text-xs); color: var(--text-tertiary); display: flex; flex-direction: column; gap: 4px;">
-            容器执行命令（自定义，一等公民）
-            <textarea v-model="draft.command" rows="3" placeholder="容器内 shell 命令；常驻模式留空则 sleep infinity 常住"></textarea>
+            {{ runTarget === 'host' ? '执行命令（宿主机 shell 直执行）' : '容器执行命令（自定义，一等公民）' }}
+            <textarea v-model="draft.command" rows="3" :placeholder="runTarget === 'host' ? '宿主机 shell 命令，如 npu-smi info' : '容器内 shell 命令；常驻模式留空则 sleep infinity 常住'"></textarea>
           </label>
           <div class="job-row">
-            <label>镜像（留空 = 机型默认）
-              <input v-model="draft.image" placeholder="quay.io/ascend/vllm-ascend:v0.23.0" />
+            <label v-if="runTarget === 'container'">镜像（留空 = 机型默认，可输入关键字过滤）
+              <NpuFilterSelect
+                v-model="draft.image"
+                :options="machineImages.map(i => i.full_name)"
+                placeholder="从下拉选择机器上的镜像，或手输"
+              />
             </label>
-            <label>NPU 卡（已占用的卡不可选，不选 = 全部卡）
+            <label v-if="runTarget === 'host'" class="muted" style="flex: 1; align-self: end;">宿主机直执行：不使用镜像、挂载与 NPU 卡绑定，命令直接跑在宿主机 shell</label>
+            <label v-else>NPU 卡（已占用的卡不可选，不选 = 全部卡）
               <NpuCardPicker v-model="draft.device_ids" :machine-id="draft.machine_id" />
             </label>
           </div>
@@ -266,6 +307,7 @@ onMounted(async () => {
           </div>
           <div v-if="preview" class="docker-preview">{{ preview }}</div>
           <div class="form-actions">
+            <button class="btn-ghost" @click="showForm = false">取消</button>
             <button class="btn-ghost" @click="saveAsTemplate">存为模板</button>
             <button class="btn-ghost" @click="doPreview">预览命令</button>
             <button class="btn-primary" :disabled="submitting" @click="submit">{{ submitting ? '提交中…' : '提交任务' }}</button>
@@ -289,7 +331,9 @@ onMounted(async () => {
     <div v-if="activeJob" class="modal-mask" @click.self="activeJob = null">
       <div class="modal">
         <h3>任务 #{{ activeJob.id }} 日志 <span :class="statusClass(activeJob.status)">{{ activeJob.status }}</span></h3>
-        <div class="docker-preview" style="margin-bottom: var(--space-2);">{{ activeJob.payload?.docker_cmd }}</div>
+        <div class="docker-preview" style="margin-bottom: var(--space-2);">
+          {{ activeJob.type === 'host' ? `[宿主机执行] ${activeJob.payload?.command}` : activeJob.payload?.docker_cmd }}
+        </div>
         <LogViewer :job-id="activeJob.id" />
       </div>
     </div>
@@ -307,4 +351,8 @@ onMounted(async () => {
   color: inherit; font-size: var(--text-sm);
 }
 .template-chip { display: inline-flex; gap: 2px; align-items: center; }
+/* 整行可点击查看日志 */
+.job-row-click { cursor: pointer; transition: border-color var(--t-fast); }
+.job-row-click:hover { border-color: var(--accent); }
+.btn-danger-mini { color: var(--danger, #e5484d); border-color: var(--danger, #e5484d); }
 </style>

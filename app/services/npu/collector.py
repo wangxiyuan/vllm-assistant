@@ -33,9 +33,10 @@ def _build_inspect_command(model_root: str) -> str:
     model_root_sh = _shell_path(model_root)
     model_scan = ""
     if model_root_sh:
+        # 两层扫描：root/<模型>/ 与 root/<org>/<模型>/（ModelScope/HuggingFace hub 布局）
         model_scan = (
             f'if [ -d "{model_root_sh}" ]; then '
-            f'for d in "{model_root_sh}"/*/; do '
+            f'for d in "{model_root_sh}"/*/ "{model_root_sh}"/*/*/; do '
             f'if [ -f "$d/config.json" ] || ls "$d"*.safetensors* >/dev/null 2>&1 '
             f'|| ls "$d"pytorch_model*.bin >/dev/null 2>&1; then echo "${{d%/}}"; fi; '
             f"done; fi"
@@ -56,8 +57,11 @@ def _build_inspect_command(model_root: str) -> str:
 _RE_NPU_ROW = re.compile(
     r"^\|\s*(\d+)\s+([A-Za-z0-9._-]+)\s*\|\s*(OK|Warning|Error|\S+)\s*\|"
     r"\s*([\d.]+|-)\s+(-?\d+|-)\s+(\d+|-)")
+# 芯片明细行：| Chip Phy-ID | 总线地址(含 : . ) | AICore% 及若干 "used / total" 对，
+# 显存(HBM)取行内最后一组 used/total（新版 npu-smi 中 Hugepages 在其前面）
 _RE_CHIP_ROW = re.compile(
-    r"^\|\s*\d+\s+\d+\s*\|\s*[0-9a-fA-Fx]+\s*\|\s*(\d+)\s+(\d+)\s*/\s*(\d+)")
+    r"^\|\s*\d+\s+\d+\s*\|\s*[\w:.]+\s*\|\s*(\d+)\s+(.*)$")
+_RE_USAGE_PAIR = re.compile(r"(\d+)\s*/\s*(\d+)")
 _RE_VERSION = re.compile(r"npu-smi\s+([\d.]+[^\s|]*)\s+.*Version:\s*([\d.]+[^\s|]*)")
 _RE_CPU = re.compile(r"([\d.]+)\s*id")
 _RE_MEM = re.compile(r"Mem:\s+(\d+)\s+(\d+)")
@@ -85,8 +89,10 @@ def _parse_npu_smi(text: str) -> Dict[str, Any]:
         m = _RE_CHIP_ROW.match(line)
         if m and cards:
             cards[-1]["aicore"] = int(m.group(1))
-            cards[-1]["mem_used"] = int(m.group(2))
-            cards[-1]["mem_total"] = int(m.group(3))
+            pairs = _RE_USAGE_PAIR.findall(m.group(2))
+            if pairs:
+                cards[-1]["mem_used"] = int(pairs[-1][0])
+                cards[-1]["mem_total"] = int(pairs[-1][1])
     return {"version": version, "cards": cards}
 
 

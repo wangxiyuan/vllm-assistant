@@ -23,6 +23,7 @@ class JobCreateRequest(BaseModel):
     machine_id: int
     mode: str = "oneshot"  # persistent / oneshot
     type: str = "container"
+    exec_target: str = "container"  # container = docker run；host = 宿主机 shell 直执行（仅 oneshot）
     name: str = ""
     image: str = ""  # 空 = 机型默认镜像
     device_ids: Optional[List[int]] = None  # None = 全部卡
@@ -40,6 +41,13 @@ class JobCreateRequest(BaseModel):
     def _validate_mode(cls, v):
         if v not in ("oneshot", "persistent"):
             raise ValueError("mode must be oneshot/persistent")
+        return v
+
+    @field_validator("exec_target")
+    @classmethod
+    def _validate_exec_target(cls, v):
+        if v not in ("container", "host"):
+            raise ValueError("exec_target must be container/host")
         return v
 
 
@@ -98,8 +106,27 @@ def preview_command(req: JobCreateRequest, db: Session = Depends(get_db)):
 
 @router.post("")
 def create_job(req: JobCreateRequest, db: Session = Depends(get_db)):
-    """提交容器任务（异步执行，返回任务记录）"""
+    """提交任务（异步执行，返回任务记录）
+
+    exec_target=host 时命令直接在宿主机 shell 执行（不进容器，仅 oneshot）；
+    其余走 docker run 容器执行。
+    """
     machine = _get_machine_or_404(db, req.machine_id)
+    if req.exec_target == "host":
+        if req.mode != "oneshot":
+            raise HTTPException(status_code=400, detail="宿主机直执行仅支持 oneshot 模式")
+        if not req.command.strip():
+            raise HTTPException(status_code=400, detail="命令不能为空")
+        job = job_service.create_and_submit(
+            machine,
+            job_type="host",
+            mode="oneshot",
+            name=req.name,
+            spec={"command": req.command},
+            timeout=req.timeout,
+            source="ui",
+        )
+        return job.to_dict()
     spec = _spec_from_req(req, machine)
     try:
         job = job_service.create_and_submit(
@@ -205,3 +232,15 @@ def stop_job(job_id: int, db: Session = Depends(get_db)):
     if job is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return job_service.stop_job(job_id)
+
+
+@router.delete("/{job_id}")
+def delete_job(job_id: int, db: Session = Depends(get_db)):
+    """删除已结束的任务记录（运行中/pending 需先停止），同时清理日志文件"""
+    job = db.query(NpuJob).filter(NpuJob.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if job.status in ("pending", "running"):
+        raise HTTPException(status_code=400, detail="任务仍在运行，请先停止再删除")
+    job_service.delete_job_record(job_id)
+    return {"ok": True}

@@ -54,8 +54,10 @@ def create_and_submit(
 ) -> NpuJob:
     """创建任务记录并提交到执行线程池，返回 job（pending 状态）
 
-    spec 为容器规格（image/device_ids/mounts/env/network/ports/command/
-    shm_size/extra_devices），docker_cmd 由 build_docker_run 生成后写入 payload。
+    job_type=host 时 spec["command"] 直接在宿主机 shell 执行（快速命令等场景），
+    不生成 docker run；其余 job_type 为容器规格（image/device_ids/mounts/env/
+    network/ports/command/shm_size/extra_devices），docker_cmd 由 build_docker_run
+    生成后写入 payload。
     """
     if mode not in ("oneshot", "persistent"):
         raise ValueError("mode must be oneshot/persistent")
@@ -78,13 +80,18 @@ def create_and_submit(
         db.commit()
         db.refresh(job)
 
-        container_name = f"va-{job_type}-{job.id}"
-        spec = dict(spec or {})
-        spec["container_name"] = container_name
-        docker_cmd = build_docker_run(machine.machine_type, spec)
+        if job_type == "host":
+            payload = {"command": spec.get("command", "")}
+            container_name = None
+        else:
+            container_name = f"va-{job_type}-{job.id}"
+            spec = dict(spec or {})
+            spec["container_name"] = container_name
+            docker_cmd = build_docker_run(machine.machine_type, spec)
+            payload = _payload_with_cmd(spec, docker_cmd)
 
         job.container_name = container_name
-        job.payload = json.dumps(_payload_with_cmd(spec, docker_cmd), ensure_ascii=False)
+        job.payload = json.dumps(payload, ensure_ascii=False)
         job.log_file = str(_log_path(job.id))
         db.commit()
         job_id = job.id
@@ -141,6 +148,7 @@ def _run_job(job_id: int, timeout: Optional[int]) -> None:
             return
         payload = json.loads(job.payload) if job.payload else {}
         # session 关闭前取出全部字段（expire_on_commit=True，detached 后访问会抛错）
+        host_cmd = payload.get("command") if job.type == "host" else None
         docker_cmd = payload.get("docker_cmd", "")
         job_mode = job.mode
         log_file = job.log_file
@@ -161,11 +169,14 @@ def _run_job(job_id: int, timeout: Optional[int]) -> None:
     def on_output(tag: str, data: str) -> None:
         _write_log(data)
 
-    _write_log(f"$ {docker_cmd}\n")
+    if host_cmd is not None:
+        _write_log(f"[宿主机执行] $ {host_cmd}\n")
+    else:
+        _write_log(f"$ {docker_cmd}\n")
 
     effective_timeout = timeout or Config.NPU_JOB_TIMEOUT
     try:
-        code, out, err = ssh.run_command(ssh_params, docker_cmd,
+        code, out, err = ssh.run_command(ssh_params, host_cmd or docker_cmd,
                                          timeout=effective_timeout, on_output=on_output)
     except SshCommandTimeout:
         _write_log(f"\n[超时] 任务超过 {effective_timeout}s 被终止\n")
@@ -232,9 +243,21 @@ def stop_job(job_id: int) -> dict:
             return {"ok": False, "message": f"任务已结束（{job.status}）"}
         machine = db.query(NpuMachine).filter(NpuMachine.id == job.machine_id).first()
         container = job.container_name
+        job_type_host = job.type == "host"
     finally:
         db.close()
     if machine is None or not container:
+        if machine is not None and job_type_host:
+            db = SessionLocal()
+            try:
+                j = db.query(NpuJob).filter(NpuJob.id == job_id).first()
+                if j and j.status in ("pending", "running"):
+                    j.status = "cancelled"
+                    j.finished_at = _now()
+                    db.commit()
+            finally:
+                db.close()
+            return {"ok": True}
         return {"ok": False, "message": "缺少机器或容器信息"}
 
     try:
@@ -287,6 +310,27 @@ def get_job_log(job: NpuJob, machine_params: dict, offset: int = 0,
         data = f.read()
     return {"mode": "incremental", "content": data.decode("utf-8", errors="replace"),
             "offset": offset + len(data), "size": size, "status": job.status}
+
+
+def delete_job_record(job_id: int) -> None:
+    """删除已结束的任务记录及其日志文件（运行中任务由 API 层拒绝）"""
+    db = SessionLocal()
+    log_file: Optional[str] = None
+    try:
+        j = db.query(NpuJob).filter(NpuJob.id == job_id).first()
+        if j is None:
+            return
+        log_file = j.log_file
+        db.delete(j)
+        db.commit()
+    finally:
+        db.close()
+    if log_file:
+        try:
+            Path(log_file).unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning(f"delete job {job_id}: remove log failed: {e}")
+    logger.info(f"NPU job #{job_id} deleted")
 
 
 def reconcile_on_startup() -> None:

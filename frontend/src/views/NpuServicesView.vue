@@ -6,6 +6,7 @@ import Playground from '@/components/npu/Playground.vue'
 import LogViewer from '@/components/npu/LogViewer.vue'
 import NpuDialog from '@/components/npu/NpuDialog.vue'
 import NpuCardPicker from '@/components/npu/NpuCardPicker.vue'
+import NpuFilterSelect from '@/components/npu/NpuFilterSelect.vue'
 import { useNpuDialog } from '@/composables/useNpuDialog'
 import { useAuthStore } from '@/stores/auth'
 
@@ -309,7 +310,7 @@ onMounted(async () => {
     </div>
 
     <!-- 部署表单 -->
-    <div v-if="showDeploy" class="modal-mask" @click.self="showDeploy = false">
+    <div v-if="showDeploy" class="modal-mask">
       <div class="modal deploy-modal">
         <h3>部署 vLLM 服务</h3>
         <div class="gf">
@@ -328,19 +329,19 @@ onMounted(async () => {
           </div>
           <div class="gf-row cols-2">
             <label>模型目录 *
-              <select v-model="form.model_dir">
-                <option value="" disabled>选择模型目录</option>
-                <option v-for="d in machineModels" :key="d.id" :value="d.path">{{ d.path }}</option>
-                <option v-if="machineModels.length === 0" :value="form.model_dir">（该机器暂无扫描结果，可手输路径）</option>
-              </select>
-              <input v-model="form.model_dir" placeholder="或直接输入机器上的模型路径" class="gf-sub" />
+              <NpuFilterSelect
+                v-model="form.model_dir"
+                :options="machineModels.map(d => d.path)"
+                placeholder="输入关键字过滤（如 qwen）或从下拉选择"
+              />
             </label>
             <div class="gf-stack">
-              <label>镜像（留空 = 机型默认）
-                <select v-model="form.image">
-                  <option value="">机型默认镜像</option>
-                  <option v-for="i in machineImages" :key="i.id" :value="i.full_name">{{ i.full_name }}</option>
-                </select>
+              <label>镜像（留空 = 机型默认，可输入关键字过滤）
+                <NpuFilterSelect
+                  v-model="form.image"
+                  :options="machineImages.map(i => i.full_name)"
+                  placeholder="从下拉选择机器上的镜像，或手输"
+                />
               </label>
             </div>
           </div>
@@ -464,6 +465,7 @@ onMounted(async () => {
 
           <div v-if="deployPreview" class="docker-preview">{{ deployPreview }}</div>
           <div class="form-actions">
+            <button class="btn-ghost" @click="showDeploy = false">取消</button>
             <button class="btn-ghost" @click="doDeployPreview">预览挂载与设备</button>
             <button class="btn-primary" :disabled="deploying" @click="deploy">{{ deploying ? '部署中…' : '部署' }}</button>
           </div>
@@ -572,7 +574,7 @@ onMounted(async () => {
 .pg-api-code {
   background: var(--surface-faint, #0a0e14); color: #c7d4e3;
   padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
-  font-family: 'SF Mono', Menlo, monospace; font-size: 11px; line-height: 1.55;
+  font-family: 'SF Mono', Menlo, monospace; font-size: var(--text-xs); line-height: 1.6;
   white-space: pre-wrap; word-break: break-all; margin: 4px 0 0;
 }
 </style>

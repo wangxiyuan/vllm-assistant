@@ -77,10 +77,10 @@ onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 .log-status b { color: var(--accent); }
 .follow-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
 .log-box {
-  flex: 1; min-height: 200px; max-height: 480px; overflow: auto;
+  flex: 1; min-height: 200px; max-height: 520px; overflow: auto;
   background: var(--surface-faint, #0a0e14); color: #9fb3c8;
   padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
-  border: 1px solid var(--border-faint); font-size: 12px; line-height: 1.5;
+  border: 1px solid var(--border-faint); font-size: 13.5px; line-height: 1.6;
   font-family: 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap;
   word-break: break-all; margin: 0;
 }

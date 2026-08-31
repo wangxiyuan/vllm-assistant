@@ -136,7 +136,7 @@ export const useNpuStore = defineStore('npu', {
       return api(`/api/npu/machines/${id}/test`, { method: 'POST' }, 180000) as Promise<{ ok: boolean; message: string }>
     },
     async refreshMachine(id: number) {
-      return api(`/api/npu/machines/${id}/refresh`, { method: 'POST' }, 180000) as Promise<{ ok: boolean }>
+      return api(`/api/npu/machines/${id}/refresh`, { method: 'POST' }, 180000) as Promise<{ ok: boolean; message?: string }>
     },
     async fetchMachineMetrics(id: number, hours = 24): Promise<MachineMetric[]> {
       return api(`/api/npu/machines/${id}/metrics?hours=${hours}`)
@@ -158,7 +158,7 @@ export const useNpuStore = defineStore('npu', {
       await api(`/api/npu/machines/${machineId}/models/${modelDirId}`, { method: 'DELETE' })
       return this.fetchMachineModels(machineId)
     },
-    async fetchSshInfo(id: number): Promise<{ ssh_cmd: string; ssh_config: string; exec_hint: string }> {
+    async fetchSshInfo(id: number): Promise<{ ssh_cmd: string; ssh_config: string }> {
       return api(`/api/npu/machines/${id}/ssh-info`)
     },
 
@@ -178,6 +178,10 @@ export const useNpuStore = defineStore('npu', {
     },
     async stopJob(id: number) {
       await api(`/api/npu/jobs/${id}/stop`, { method: 'POST' })
+      await this.fetchJobs()
+    },
+    async deleteJob(id: number) {
+      await api(`/api/npu/jobs/${id}`, { method: 'DELETE' })
       await this.fetchJobs()
     },
     async fetchTemplates() {

@@ -156,7 +156,7 @@ async def _run_cmd(machine: dict, cmd: str, timeout: Optional[float],
         asyncio.create_task(_pump(proc.stderr, stderr_buf, "stderr")),
     ]
     try:
-        exit_status = await asyncio.wait_for(proc.wait(), timeout=timeout)
+        result = await asyncio.wait_for(proc.wait(), timeout=timeout)
     except asyncio.TimeoutError:
         try:
             proc.kill()
@@ -168,6 +168,17 @@ async def _run_cmd(machine: dict, cmd: str, timeout: Optional[float],
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+    # asyncssh 的 proc.wait() 返回 SSHCompletedProcess 对象而非 int，
+    # 统一归一化为退出码（信号终止时 exit_status 为空，回退 returncode/-1）
+    if isinstance(result, asyncssh.SSHCompletedProcess):
+        exit_status = result.exit_status
+        if exit_status is None:
+            exit_status = getattr(result, "returncode", None)
+        if exit_status is None:
+            exit_status = -1
+    else:
+        exit_status = int(result)
 
     return exit_status, "".join(stdout_buf), "".join(stderr_buf)
 

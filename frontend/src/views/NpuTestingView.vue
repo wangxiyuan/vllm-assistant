@@ -235,7 +235,7 @@ onMounted(async () => {
     </template>
 
     <!-- 用例表单 -->
-    <div v-if="showCaseForm" class="modal-mask" @click.self="showCaseForm = false">
+    <div v-if="showCaseForm" class="modal-mask">
       <div class="modal">
         <h3>{{ caseForm.id ? '编辑用例' : '新建用例' }}</h3>
         <div class="job-form">

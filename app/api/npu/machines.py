@@ -137,6 +137,12 @@ def create_machine(req: MachineCreateRequest, db: Session = Depends(get_db)):
     db.add(machine)
     db.commit()
     db.refresh(machine)
+    # 纳管后立即后台巡检一次，不必等下一个巡检周期
+    import threading
+
+    from app.services.npu.collector import inspect_machine as _inspect
+    threading.Thread(target=_inspect, args=(machine.id,), daemon=True,
+                     name=f"npu-inspect-{machine.id}").start()
     return machine.to_dict()
 
 
@@ -304,12 +310,9 @@ def machine_ssh_info(machine_id: int, db: Session = Depends(get_db)):
         f"    User {machine.username}\n"
         + (f"    IdentityFile ~/.ssh/<你的私钥>\n" if machine.auth_type == "key" else "")
     )
-    exec_hint = f"ssh -t -p {machine.port or 22} {machine.username}@{machine.host} " \
-                f"'docker exec -it <容器名> bash'"
     return {
         "ssh_cmd": ssh_cmd,
         "ssh_config": config_block,
-        "exec_hint": exec_hint,
         "machine_type": machine.machine_type,
         "profile_notes": get_profile(machine.machine_type).get("notes", ""),
     }

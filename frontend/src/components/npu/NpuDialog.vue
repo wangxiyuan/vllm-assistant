@@ -2,6 +2,7 @@
 /**
  * NPU 应用内 confirm/prompt 对话框（单例渲染组件）
  * 在各 NPU 视图中挂载一次 <NpuDialog />，配合 useNpuDialog() 使用。
+ * 注意：本组件样式必须自包含（npu-shared.css 被视图 scoped 引入，作用不到子组件内部）。
  */
 import { nextTick, ref, watch } from 'vue'
 import { useNpuDialog } from '@/composables/useNpuDialog'
@@ -20,8 +21,8 @@ watch(() => state.visible, async (v) => {
 </script>
 
 <template>
-  <div v-if="state.visible" class="modal-mask" @click.self="cancel()">
-    <div class="modal npd-modal">
+  <div v-if="state.visible" class="npd-mask">
+    <div class="npd-modal">
       <h3>{{ state.title }}</h3>
       <p class="npd-msg">{{ state.message }}</p>
       <input
@@ -33,10 +34,10 @@ watch(() => state.visible, async (v) => {
         @keydown.enter="accept()"
         @keydown.esc="cancel()"
       />
-      <div class="form-actions">
-        <button class="btn-ghost" @click="cancel()">取消</button>
+      <div class="npd-actions">
+        <button class="npd-btn npd-btn-ghost" @click="cancel()">取消</button>
         <button
-          class="btn-primary"
+          class="npd-btn npd-btn-primary"
           :disabled="state.kind === 'prompt' && !state.inputValue.trim()"
           @click="accept()"
         >确定</button>
@@ -46,12 +47,32 @@ watch(() => state.visible, async (v) => {
 </template>
 
 <style scoped>
-.npd-modal { width: min(420px, 90vw); }
-.npd-msg { margin: var(--space-2) 0 var(--space-3); font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; word-break: break-all; }
+.npd-mask {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+}
+.npd-modal {
+  background: var(--bg-panel, #12161e); border: 1px solid var(--border-faint);
+  border-radius: var(--radius-md); padding: var(--space-5); width: min(520px, 92vw);
+  max-height: 88vh; overflow-y: auto;
+}
+.npd-modal h3 { margin: 0; font-size: var(--text-lg); }
+.npd-msg {
+  margin: var(--space-3) 0; font-size: var(--text-md);
+  color: var(--text-secondary); line-height: 1.7; word-break: break-all;
+}
 .npd-input {
-  width: 100%; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
+  width: 100%; box-sizing: border-box; padding: var(--space-3); border-radius: var(--radius-md);
   border: 1px solid var(--border-faint); background: var(--bg-elev-2);
-  color: var(--text-primary); font-size: var(--text-sm);
+  color: var(--text-primary); font-size: var(--text-md);
 }
 .npd-input:focus { outline: none; border-color: var(--amber); }
+.npd-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
+.npd-btn {
+  border: none; cursor: pointer; border-radius: var(--radius-md);
+  font-size: var(--text-sm); padding: var(--space-2) var(--space-4);
+}
+.npd-btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-faint); }
+.npd-btn-primary { background: var(--accent); color: #fff; }
+.npd-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

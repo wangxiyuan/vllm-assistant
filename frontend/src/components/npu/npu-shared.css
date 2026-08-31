@@ -1,5 +1,15 @@
 /* NPU 页面共享样式（各 View 以 <style scoped src> 引入，类名统一 np- 前缀） */
 
+/* NPU 页面字号提升：在视图根节点上覆盖全局字号令牌，
+   本页所有内容（含弹窗、抽屉、日志等子组件）级联生效，不影响其他页面 */
+.view-container {
+  --text-xs: 13px;
+  --text-sm: 14.5px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 17px;
+}
+
 .page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); }
 .page-head h2 { margin: 0; }
 .head-actions { display: flex; align-items: center; gap: var(--space-3); }
@@ -13,14 +23,14 @@
 .btn-primary { padding: var(--space-2) var(--space-4); background: var(--accent); color: #fff; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-ghost { padding: var(--space-2) var(--space-4); background: transparent; color: var(--text-secondary); border: 1px solid var(--border-faint); }
-.btn-mini { padding: 2px 8px; background: var(--hover-bg); color: var(--text-secondary); }
+.btn-mini { padding: 4px 12px; background: var(--hover-bg); color: var(--text-secondary); }
 .btn-danger { padding: var(--space-2) var(--space-3); background: transparent; color: var(--amber); border: 1px solid var(--border-faint); }
 
 .empty { text-align: center; color: var(--text-tertiary); padding: var(--space-5); }
 .muted { color: var(--text-tertiary); font-size: var(--text-xs); }
 
 /* 机器卡片 */
-.machine-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-3); }
+.machine-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: var(--space-3); }
 .machine-card {
   background: var(--surface-faint, rgba(255,255,255,0.03)); border: 1px solid var(--border-faint);
   border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); cursor: pointer;
@@ -48,9 +58,11 @@
   position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100;
   display: flex; align-items: center; justify-content: center;
 }
+/* 叠加在详情抽屉之上的编辑弹窗 */
+.modal-mask-top { z-index: 110; }
 .modal {
   background: var(--bg-panel, #12161e); border: 1px solid var(--border-faint);
-  border-radius: var(--radius-md); padding: var(--space-4); width: min(680px, 92vw);
+  border-radius: var(--radius-md); padding: var(--space-5); width: min(860px, 94vw);
   max-height: 88vh; overflow-y: auto;
 }
 .modal h3 { margin-top: 0; }
@@ -67,8 +79,8 @@
 
 .drawer {
   background: var(--bg-panel, #12161e); border: 1px solid var(--border-faint);
-  border-radius: var(--radius-md); width: min(760px, 94vw); max-height: 90vh;
-  overflow-y: auto; padding: var(--space-4);
+  border-radius: var(--radius-md); width: min(960px, 95vw); max-height: 92vh;
+  overflow-y: auto; padding: var(--space-5);
 }
 .drawer-head { display: flex; justify-content: space-between; align-items: center; }
 .drawer-head h3 { margin: 0; display: flex; align-items: center; gap: var(--space-2); }
@@ -90,7 +102,7 @@
 .dir-list li { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); }
 .dir-list code { flex: 1; font-size: var(--text-xs); word-break: break-all; }
 .dir-src { color: var(--text-tertiary); }
-.log-inline { max-height: 260px; display: flex; flex-direction: column; }
+.log-inline { max-height: 320px; display: flex; flex-direction: column; }
 
 /* 任务表单 */
 .job-form { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -164,9 +176,9 @@
 /* 单元素行占满整行（额外参数/卡选择等） */
 .gf-row > label:only-child, .gf-row > .gf-note:only-child { grid-column: 1 / -1; }
 .gf-note {
-  justify-content: center; font-size: 11px; line-height: 1.5;
+  justify-content: center; font-size: var(--text-xs); line-height: 1.5;
   background: var(--bg-elev-2); border: 1px dashed var(--border-faint);
-  border-radius: var(--radius-md); padding: 4px var(--space-2); color: var(--text-tertiary);
+  border-radius: var(--radius-md); padding: var(--space-1) var(--space-2); color: var(--text-tertiary);
 }
 .gf-details summary {
   cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary);
@@ -175,7 +187,7 @@
 .gf-details { display: flex; flex-direction: column; gap: var(--space-3); }
 .gf-details[open] summary { margin-bottom: var(--space-1); }
 .gf-code { color: #c7d4e3 !important; }
-.deploy-modal { width: min(880px, 94vw); }
+.deploy-modal { width: min(1080px, 96vw); }
 
 /* 任务列表 */
 .job-list { display: flex; flex-direction: column; gap: var(--space-2); }
