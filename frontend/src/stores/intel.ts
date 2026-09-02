@@ -10,14 +10,12 @@ export const useIntelStore = defineStore('intel', () => {
   const loading = ref(false)
   const showModal = ref(false)
   const intelForm = ref({
-    task_id: '',
     title: '',
     sources: [] as string[],
     excluded_sources: [] as string[],
     extra_prompt: '',
   })
   const genLoading = ref(false)
-  const intelTasks = ref<any[]>([])
   const selectedReport = ref<IntelReport | null>(null)
   const reportDetails = ref<any>(null)
   const reportModalLoading = ref(false)
@@ -46,19 +44,8 @@ export const useIntelStore = defineStore('intel', () => {
     }
   }
 
-  async function loadIntelTasks() {
-    try {
-      const params = new URLSearchParams()
-      params.set('status', 'all')
-      params.set('per_page', '50')
-      const data: any = await api('/api/personal-todo/tasks?' + params)
-      intelTasks.value = data.tasks || []
-    } catch (_) {}
-  }
-
   function openModal() {
     showModal.value = true
-    loadIntelTasks()
     // 初始化默认来源：从仓库列表和固定来源中填充
     if (intelForm.value.sources.length === 0) {
       const defaultSources = ['academic', 'news']
@@ -87,6 +74,10 @@ export const useIntelStore = defineStore('intel', () => {
   }
 
   async function generateReport() {
+    if (!intelForm.value.title.trim()) {
+      useAppStore().showToast('请填写报告主题', '标题不能为空', 'error')
+      return
+    }
     if (intelForm.value.sources.length === 0) {
       useAppStore().showToast('请选择来源', '至少选择一个来源', 'error')
       return
@@ -99,9 +90,7 @@ export const useIntelStore = defineStore('intel', () => {
         excluded_sources: intelForm.value.excluded_sources,
         extra_prompt: intelForm.value.extra_prompt,
       }
-      // 关联任务可选，仅在没有标题时用于默认标题
-      if (intelForm.value.task_id) payload.task_id = parseInt(intelForm.value.task_id, 10)
-      if (intelForm.value.title.trim()) payload.title = intelForm.value.title.trim()
+      payload.title = intelForm.value.title.trim()
       const result: any = await api('/api/intelligence/reports/generate', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -111,7 +100,6 @@ export const useIntelStore = defineStore('intel', () => {
       reports.value.unshift({
         id: result.report_id,
         title: result.title,
-        task_id: result.task_id,
         sources: intelForm.value.sources,
         created_at: new Date().toISOString(),
         status: 'generating',
@@ -240,7 +228,6 @@ export const useIntelStore = defineStore('intel', () => {
       appStore.showUndoToast('已删除', report.title, async () => {
         try {
           const payload: any = {
-            task_id: backup.task_id,
             sources: backup.sources || [],
             excluded_sources: backup.excluded_sources || [],
             extra_prompt: backup.extra_prompt || '',
@@ -252,7 +239,7 @@ export const useIntelStore = defineStore('intel', () => {
           }, { timeout: 30000 })
           reports.value.unshift({
             id: result.report_id, title: result.title || backup.title,
-            task_id: backup.task_id, sources: payload.sources,
+            sources: payload.sources,
             created_at: new Date().toISOString(), status: 'generating' as const, word_count: 0,
           })
           pollReportStatus(result.report_id)
@@ -277,7 +264,6 @@ export const useIntelStore = defineStore('intel', () => {
     try {
       const payload: any = {
         report_id: report.id,
-        task_id: report.task_id,
         sources: report.sources || [],
         excluded_sources: report.excluded_sources || [],
         extra_prompt: report.extra_prompt || '',
@@ -293,7 +279,6 @@ export const useIntelStore = defineStore('intel', () => {
         reports.value[idx] = {
           id: result.report_id,
           title: result.title,
-          task_id: result.task_id,
           sources: payload.sources,
           created_at: new Date().toISOString(),
           status: 'generating' as const,
@@ -302,7 +287,7 @@ export const useIntelStore = defineStore('intel', () => {
       } else {
         reports.value.unshift({
           id: result.report_id, title: result.title,
-          task_id: result.task_id, sources: payload.sources,
+          sources: payload.sources,
           created_at: new Date().toISOString(), status: 'generating' as const, word_count: 0,
         })
       }
@@ -371,10 +356,10 @@ export const useIntelStore = defineStore('intel', () => {
   }
 
   return {
-    reports, loading, showModal, intelForm, genLoading, intelTasks,
+    reports, loading, showModal, intelForm, genLoading,
     selectedReport, reportDetails, reportModalLoading, pollingTimer, reportProgress,
     reportTrace,
-    loadReports, loadIntelTasks, openModal, toggleSource, isSourceSelected,
+    loadReports, openModal, toggleSource, isSourceSelected,
     generateReport, pollReportStatus, fetchReportProgress, fetchReportTrace,
     viewReport, closeReport,
     deleteReport, regenerateReport, copyReportMarkdown, triggerDailyReport,

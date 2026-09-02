@@ -17,22 +17,10 @@ const routes: RouteRecordRaw[] = [
   { path: '/watchlist', redirect: '/overview' },
   { path: '/pr-center', redirect: '/overview' },
   {
-    path: '/personal-todo',
-    name: 'personal-todo',
-    component: () => import('@/views/PersonalTodoView.vue'),
-    meta: { title: '任务面板' },
-  },
-  {
     path: '/intelligence',
     name: 'intelligence',
     component: () => import('@/views/IntelligenceView.vue'),
     meta: { title: '洞察面板' },
-  },
-  {
-    path: '/articles',
-    name: 'articles',
-    component: () => import('@/views/ArticlesView.vue'),
-    meta: { title: '技术Blog' },
   },
   {
     path: '/anatomy',

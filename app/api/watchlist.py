@@ -83,45 +83,9 @@ def _classify_issue_type(title: str) -> Optional[str]:
 
 @router.get("")
 async def list_watchlist(db: Session = Depends(get_db)):
-    """获取特别关注列表（按添加时间倒序），含关联任务信息"""
-    from app.models import PersonalTask
-
+    """获取特别关注列表（按添加时间倒序）"""
     items = db.query(Watchlist).order_by(Watchlist.added_at.desc()).all()
-    result = []
-    for w in items:
-        d = w.to_dict()
-        # 查询关联的任务
-        number = w.number
-        item_type = w.item_type  # 'issue' or 'pr'
-        repo_short = (w.repo or "").split("/")[-1] if w.repo else ""
-        # 在 personal_tasks 的 related_refs JSON 中查找匹配
-        tasks = db.query(PersonalTask).filter(
-            PersonalTask.related_refs.isnot(None),
-        ).all()
-        linked_tasks = []
-        for t in tasks:
-            refs = t.related_refs or []
-            for ref in refs:
-                if not isinstance(ref, dict):
-                    continue
-                if ref.get("number") != number or ref.get("type") != item_type:
-                    continue
-                # repo 维度匹配：related_refs 存短名，Watchlist 存完整 owner/repo
-                ref_repo = ref.get("repo", "")
-                if ref_repo and repo_short and ref_repo != repo_short:
-                    continue
-                linked_tasks.append({
-                    "id": t.id,
-                    "title": t.title,
-                    "status": t.status,
-                    "priority": t.priority,
-                    "parent_id": t.parent_id,
-                })
-                break
-        if linked_tasks:
-            d["linked_tasks"] = linked_tasks
-        result.append(d)
-    return result
+    return [w.to_dict() for w in items]
 
 
 @router.post("")

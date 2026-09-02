@@ -1143,12 +1143,6 @@ a.item-title:hover { color: var(--amber-bright); }
     color: var(--src-color);
     border-color: var(--src-border);
 }
-/* Task sources (personal todo) */
-.source-self { background: var(--signal-blue-glow); color: var(--signal-blue); border-color: rgba(132, 203, 255, 0.3); }
-.source-team { background: var(--signal-purple-glow); color: var(--signal-purple); border-color: rgba(218, 178, 255, 0.3); }
-.source-community { background: var(--signal-green-glow); color: var(--signal-green); border-color: rgba(142, 236, 151, 0.3); }
-.source-meeting { background: var(--signal-yellow-glow); color: var(--signal-yellow); border-color: rgba(242, 204, 96, 0.3); }
-
 /* Assignee badge - shared by task cards, detail drawer, operators & models */
 .badge-assignee {
     font-size: var(--text-xs);

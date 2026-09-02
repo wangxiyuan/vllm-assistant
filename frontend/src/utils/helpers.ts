@@ -80,24 +80,6 @@ export function ciBadgeClass(status: string): string {
   }[status] || 'badge-ci-unknown'
 }
 
-export function sourceLabel(source: string): string {
-  const map: Record<string, string> = { self: '主动规划', team: '产品反馈', community: '社区反馈' }
-  return map[source] || source
-}
-
-export function statusLabel(status: string): string {
-  const map: Record<string, string> = { todo: '待处理', in_progress: '进行中', done: '已完成', cancelled: '已取消' }
-  return map[status] || status
-}
-
-export function priorityClass(priority: string): string {
-  return 'priority-' + (priority || 'P2').toLowerCase()
-}
-
-export function statusClass(status: string): string {
-  return 'status-' + (status || 'todo')
-}
-
 /** 从 item 的 repo 字段和 number/type 生成 GitHub URL */
 export function ghUrl(repo: string | undefined, number: number, type: 'pr' | 'issue'): string {
   const full = repo || 'vllm-project/vllm'

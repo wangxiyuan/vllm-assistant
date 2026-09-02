@@ -61,7 +61,6 @@ export const KNOWLEDGE_TYPE_LABELS: Record<string, string> = {
   code_structure: '代码结构',
   issue: 'Issue',
   pr: 'PR',
-  article: '文章',
   report: '洞察报告',
   manual: '手动添加',
   conversation: '对话',
@@ -69,7 +68,7 @@ export const KNOWLEDGE_TYPE_LABELS: Record<string, string> = {
 }
 
 export const KNOWLEDGE_TYPE_ORDER = [
-  'docs', 'code_structure', 'issue', 'pr', 'article', 'report', 'conversation', 'slack', 'manual',
+  'docs', 'code_structure', 'issue', 'pr', 'report', 'conversation', 'slack', 'manual',
 ]
 
 export const useAIAgentStore = defineStore('aiAgent', agentStoreSetup)

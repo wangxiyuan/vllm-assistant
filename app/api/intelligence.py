@@ -1,6 +1,5 @@
 """
-Intelligence Reports API - 情报面板洞察报告
-对应 DESIGN-PERSONAL-TODO.md 3.3
+Intelligence Reports API - 洞察报告
 
 完整的报告 CRUD：列表/详情/生成/删除/每日触发
 """
@@ -12,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db, SessionLocal
-from app.models import IntelligenceReport, PersonalTask
+from app.models import IntelligenceReport
 from app.services import entity_writer
 
 logger = logging.getLogger(__name__)
@@ -41,7 +40,6 @@ async def generate_report(request: Request):
             sources=req.sources,
             excluded_sources=req.excluded_sources,
             extra_prompt=req.extra_prompt,
-            task_id=req.task_id,
             user_id=req.user_id,
             report_id=req.report_id,
         )
@@ -53,7 +51,6 @@ async def generate_report(request: Request):
 
     return {
         **result,
-        "task_id": req.task_id,
         "message": "洞察报告正在生成中，AI 将多轮搜索 GitHub 并分析，预计需要 2-5 分钟",
     }
 
@@ -61,12 +58,11 @@ async def generate_report(request: Request):
 def _generate_report_background(
     report_id: int,
     task_title: str,
-    task_description: str,
     sources: list,
     excluded_sources: list,
     extra_prompt: str,
 ):
-    """后台线程执行报告生成"""
+    """后台线程执行报告生成（task_title 即报告主题）"""
     from app.services.intelligence_report import IntelligenceReportGenerator
     from app.services.memory_service import MemoryService
     from app.models import IntelligenceReport
@@ -76,7 +72,7 @@ def _generate_report_background(
         generator = IntelligenceReportGenerator(db=db)
         result = generator.generate_report(
             task_title=task_title,
-            task_description=task_description,
+            task_description="",
             sources=sources,
             excluded_sources=excluded_sources if excluded_sources else None,
             extra_prompt=extra_prompt or "",
@@ -100,7 +96,7 @@ def _generate_report_background(
                 f"# 洞察报告: {report.title}\n\n"
                 f"{result['content']}\n\n"
                 f"---\n"
-                f"**关联任务**: {task_title}\n"
+                f"**主题**: {task_title}\n"
                 f"**来源范围**: {', '.join(sources) if sources else '全部'}\n"
                 f"**报告 ID**: {report_id}\n"
             )
@@ -128,23 +124,15 @@ def _generate_report_background(
 
 
 # ======================================================================
-# 列表/详情/删除/每日触发（原有逻辑保持不变）
+# 列表/详情/删除/每日触发
 # ======================================================================
 
 
 @router.get("/reports")
 async def list_reports(db: Session = Depends(get_db)):
-    """获取洞察报告列表（按时间倒序，DESIGN-PERSONAL-TODO.md 3.3 GET）"""
+    """获取洞察报告列表（按时间倒序）"""
     reports = db.query(IntelligenceReport).order_by(IntelligenceReport.created_at.desc()).all()
-    result = []
-    for r in reports:
-        task_title = None
-        if r.task_id:
-            task = db.query(PersonalTask).filter(PersonalTask.id == r.task_id).first()
-            if task:
-                task_title = task.title
-        result.append(r.to_dict(include_content=False, task_title=task_title))
-    return {"reports": result}
+    return {"reports": [r.to_dict(include_content=False) for r in reports]}
 
 
 @router.get("/reports/daily/latest")
@@ -229,18 +217,11 @@ async def get_report_progress(report_id: int):
 
 @router.get("/reports/{report_id}")
 async def get_report(report_id: int, db: Session = Depends(get_db)):
-    """获取洞察报告详情（DESIGN-PERSONAL-TODO.md 3.3 GET 详情）"""
+    """获取洞察报告详情"""
     report = db.query(IntelligenceReport).filter(IntelligenceReport.id == report_id).first()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-
-    task_title = None
-    if report.task_id:
-        task = db.query(PersonalTask).filter(PersonalTask.id == report.task_id).first()
-        if task:
-            task_title = task.title
-
-    return report.to_dict(include_content=True, task_title=task_title)
+    return report.to_dict(include_content=True)
 
 
 @router.delete("/reports/{report_id}")

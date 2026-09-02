@@ -1,9 +1,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePRCenterStore } from '@/stores/prCenter'
-import { useTodoStore } from '@/stores/todo'
 import { useIntelStore } from '@/stores/intel'
-import { useArticlesStore } from '@/stores/articles'
 import { useAnatomyStore } from '@/stores/anatomy'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useUsersStore } from '@/stores/users'
@@ -28,14 +26,16 @@ export function useKeyboard() {
       return
     }
 
-    // Number keys 1-6: navigate to views (matches sidebar kbd badges)
+    // Number keys 1-8: navigate to views (matches sidebar kbd badges)
     const viewByKey: Record<string, string> = {
       '1': 'overview',
-      '2': 'personal-todo',
-      '3': 'intelligence',
-      '4': 'articles',
-      '5': 'anatomy',
-      '6': 'ai-agent',
+      '2': 'intelligence',
+      '3': 'anatomy',
+      '4': 'ai-agent',
+      '5': 'npu-machines',
+      '6': 'npu-jobs',
+      '7': 'npu-services',
+      '8': 'npu-testing',
     }
     const routeName = viewByKey[e.key]
     if (routeName) {
@@ -63,56 +63,28 @@ export function useKeyboard() {
   function handleGlobalEsc() {
     const appStore = useAppStore()
     const prStore = usePRCenterStore()
-    const todoStore = useTodoStore()
     const intelStore = useIntelStore()
-    const articlesStore = useArticlesStore()
     const anatomyStore = useAnatomyStore()
     const watchlistStore = useWatchlistStore()
     const usersStore = useUsersStore()
     const aiAgentStore = useAIAgentStore()
 
-    // 1. Article preview
-    if (articlesStore.editorSubView === 'preview' && articlesStore.editorOpen) {
-      articlesStore.closePreview()
-      return
-    }
-    // 2. Code ref modal
-    if (articlesStore.showInsertRef) {
-      articlesStore.closeInsertRef()
-      return
-    }
-    // 3. Article detail
-    if (articlesStore.selectedArticle) {
-      articlesStore.closeArticleView()
-      return
-    }
-    // 4. Article editor
-    if (articlesStore.editorOpen) {
-      articlesStore.closeEditor()
-      return
-    }
-    // 5. PR drawer
+    // 1. PR drawer
     if (prStore.selectedPR) {
       prStore.closePR()
       return
     }
-    // 6. Issue drawer
+    // 2. Issue drawer
     if (prStore.selectedIssue) {
       prStore.closeIssue()
       return
     }
-    // 7. Task drawer
-    if (todoStore.selectedTask) {
-      todoStore.closeTask()
-      return
-    }
-    // 8. Report modal
+    // 3. Report modal
     if (intelStore.selectedReport) {
       intelStore.closeReport()
       return
     }
-    // 9. Modals
-    if (todoStore.showAddModal) { todoStore.showAddModal = false; return }
+    // 4. Modals
     if (intelStore.showModal) { intelStore.showModal = false; return }
     if (watchlistStore.showAddModal) { watchlistStore.closeAddModal(); return }
     if (watchlistStore.showEditModal) { watchlistStore.closeEditModal(); return }
@@ -122,7 +94,7 @@ export function useKeyboard() {
     if (anatomyStore.showYAMLImport) { anatomyStore.closeYAMLImport(); return }
     if (anatomyStore.showBlockDetail) { anatomyStore.closeBlockDetail(); return }
     if (anatomyStore.showAssemblyDetail) { anatomyStore.closeAssemblyDetail(); return }
-    // 10. Mobile sidebar
+    // 5. Mobile sidebar
     if (appStore.mobileMenuOpen) { appStore.mobileMenuOpen = false }
   }
 

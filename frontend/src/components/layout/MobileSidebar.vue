@@ -35,36 +35,28 @@ const navGroups = ref<NavGroup[]>([
     ],
   },
   {
-    label: '任务',
-    expanded: true,
-    items: [
-      { name: 'personal-todo', label: '任务面板', kbd: '2', icon: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' },
-    ],
-  },
-  {
     label: '知识',
     expanded: true,
     items: [
-      { name: 'intelligence', label: '洞察面板', kbd: '3', icon: 'M11 11a8 8 0 1 0 0-16 8 8 0 0 0 0 16M21 21l-4.35-4.35' },
-      { name: 'articles', label: '技术Blog', kbd: '4', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8' },
-      { name: 'anatomy', label: '模型拆解', kbd: '5', icon: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5' },
+      { name: 'intelligence', label: '洞察面板', kbd: '2', icon: 'M11 11a8 8 0 1 0 0-16 8 8 0 0 0 0 16M21 21l-4.35-4.35' },
+      { name: 'anatomy', label: '模型拆解', kbd: '3', icon: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5' },
     ],
   },
   {
     label: 'AI 助手',
     expanded: true,
     items: [
-      { name: 'ai-agent', label: 'AI Agent', kbd: '6', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z' },
+      { name: 'ai-agent', label: 'AI Agent', kbd: '4', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z' },
     ],
   },
   {
     label: 'NPU',
     expanded: true,
     items: [
-      { name: 'npu-machines', label: 'NPU 机器', kbd: '7', icon: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01' },
-      { name: 'npu-jobs', label: '任务中心', kbd: '8', icon: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' },
-      { name: 'npu-services', label: '服务部署', kbd: '9', icon: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5' },
-      { name: 'npu-testing', label: '测试压测', kbd: '0', icon: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' },
+      { name: 'npu-machines', label: 'NPU 机器', kbd: '5', icon: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01' },
+      { name: 'npu-jobs', label: '任务中心', kbd: '6', icon: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' },
+      { name: 'npu-services', label: '服务部署', kbd: '7', icon: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5' },
+      { name: 'npu-testing', label: '测试压测', kbd: '8', icon: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' },
     ],
   },
 ])

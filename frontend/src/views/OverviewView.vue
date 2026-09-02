@@ -8,14 +8,12 @@ import { useWatchlistStore } from '@/stores/watchlist'
 import { useRulesStore } from '@/stores/rules'
 import { useUsersStore } from '@/stores/users'
 import { useReposStore } from '@/stores/repos'
-import { useTodoStore } from '@/stores/todo'
 import { issueType, issueTypeLabel, issueStateLabel, prStateLabel, timeAgo, exactTime, ghUrl, ghCommitUrl, ciLabel, ciBadgeClass } from '@/utils/helpers'
 import type { Issue, PR } from '@/utils/types'
 import Icon from '@/components/common/Icon.vue'
 import FilterRow from '@/components/common/FilterRow.vue'
 import PRDrawer from '@/components/common/PRDrawer.vue'
 import IssueDrawer from '@/components/common/IssueDrawer.vue'
-import TaskDrawer from '@/components/common/TaskDrawer.vue'
 import WatchlistModals from '@/components/common/WatchlistModals.vue'
 import { useCommentUser } from '@/composables/useCommentUser'
 
@@ -26,7 +24,6 @@ const watchlistStore = useWatchlistStore()
 const rulesStore = useRulesStore()
 const usersStore = useUsersStore()
 const reposStore = useReposStore()
-const todoStore = useTodoStore()
 const { selectedUserId, setUser } = useCommentUser()
 
 // ================= 左列：tab（AI 规则 + 社区动态） =================
@@ -249,14 +246,10 @@ watch(selectedUserId, (id) => {
 // ================= 右栏：我的关注卡片 =================
 function openWatchlistItem(w: any) {
   if (w.item_type === 'pr') {
-    prStore.openPR({ pr_number: w.number, title: w.title, url: w.url, state: w.state || 'open', repo: w.repo, watchlist_note: w.note || '', watchlist_assignee_id: w.assignee_id || null, linked_tasks: w.linked_tasks || [] })
+    prStore.openPR({ pr_number: w.number, title: w.title, url: w.url, state: w.state || 'open', repo: w.repo, watchlist_note: w.note || '', watchlist_assignee_id: w.assignee_id || null })
   } else {
-    prStore.openIssue({ number: w.number, title: w.title, url: w.url, state: w.state || 'open', repo: w.repo, watchlist_note: w.note || '', watchlist_assignee_id: w.assignee_id || null, linked_tasks: w.linked_tasks || [] })
+    prStore.openIssue({ number: w.number, title: w.title, url: w.url, state: w.state || 'open', repo: w.repo, watchlist_note: w.note || '', watchlist_assignee_id: w.assignee_id || null })
   }
-}
-
-function openTaskDrawer(task: any) {
-  todoStore.openTask({ id: task.id, title: task.title, status: task.status || 'todo', priority: task.priority || 'P2', source: 'self', created_at: '', updated_at: '' })
 }
 
 function watchlistChangeHint(w: any): string {
@@ -680,9 +673,6 @@ function openAIChat(intent: string) {
                 <span v-if="w.assignee_id" class="badge badge-assignee">{{ usersStore.userName(w.assignee_id) }}</span>
                 <span v-if="w.note" class="watchlist-note watchlist-note-icon"><Icon name="note" :size="11" /> {{ w.note }}</span>
                 <span style="flex:1;"></span>
-                <span v-for="lt in (w.linked_tasks || []).slice(0, 2)" :key="lt.id" class="ref-badge ref-badge-sm clickable" @click.stop="openTaskDrawer(lt)" :title="lt.title">
-                  #{{ lt.id }}
-                </span>
                 <button class="card-action-btn" @click.stop="watchlistStore.openEditModal(w)" title="编辑备注/责任人">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>
@@ -703,7 +693,6 @@ function openAIChat(intent: string) {
     <!-- 共享抽屉与弹窗 -->
     <PRDrawer />
     <IssueDrawer />
-    <TaskDrawer />
     <WatchlistModals />
     <ChatDrawer :open="aiChatOpen" :intent="aiChatIntent" @close="aiChatOpen = false" />
   </div>

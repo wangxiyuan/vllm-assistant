@@ -165,7 +165,7 @@ def knowledge_stats() -> dict:
         ).fetchall()
         by_type = {r["source_type"]: r["cnt"] for r in type_rows}
         known_types = ["docs", "code_structure", "issue", "pr",
-                       "article", "manual", "conversation", "report"]
+                       "manual", "conversation", "report"]
         for t in known_types:
             by_type.setdefault(t, 0)
         return {"total": total, "stale": stale, "by_type": by_type}

@@ -55,7 +55,6 @@ export interface Issue {
   is_new?: boolean
   watchlist_note?: string
   watchlist_assignee_id?: number | null
-  _linked_tasks?: any[]
   [key: string]: any
 }
 
@@ -77,7 +76,6 @@ export interface PR {
   is_new?: boolean
   watchlist_note?: string
   watchlist_assignee_id?: number | null
-  _linked_tasks?: any[]
   [key: string]: any
 }
 
@@ -90,38 +88,14 @@ export interface WatchlistItem {
   repo?: string
   note?: string
   assignee_id?: number | null
-  linked_tasks?: any[]
   state?: string
   area?: string
   issue_type?: string
 }
 
-export interface TodoTask {
-  id: number
-  title: string
-  description?: string
-  status: 'todo' | 'in_progress' | 'done' | 'cancelled'
-  priority: 'P0' | 'P1' | 'P2' | 'P3'
-  source: string
-  area?: string
-  assignee_id?: number | null
-  due_date?: string
-  created_at: string
-  updated_at: string
-  related_refs?: any[]
-  tags?: string[]
-  has_ai_insight?: boolean
-  latest_insight_report_id?: number
-  children?: TodoTask[]
-  parent_id?: number | null
-  subtask_count?: number
-  subtask_done_count?: number
-}
-
 export interface IntelReport {
   id: number
   title: string
-  task_id: number
   sources: string[]
   excluded_sources?: string[]
   extra_prompt?: string
@@ -131,23 +105,6 @@ export interface IntelReport {
   word_count: number
   error_message?: string
   content?: string
-  task_title?: string
-}
-
-export interface Article {
-  id: number
-  title: string
-  content?: string
-  area?: string
-  tags?: string[]
-  user_id?: number | null
-  user_name?: string | null
-  status: 'draft' | 'published'
-  created_at: string
-  updated_at: string
-  code_refs_count?: number
-  valid_refs_count?: number
-  outdated_refs_count?: number
 }
 
 export interface Operator {
@@ -230,7 +187,7 @@ export interface RepoConfig {
 
 export interface Comment {
   id: number
-  target_type: 'article' | 'report'
+  target_type: 'report'
   target_id: number
   user_id: number | null
   user_name: string | null

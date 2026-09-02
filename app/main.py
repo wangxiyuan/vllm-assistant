@@ -220,10 +220,7 @@ from app.api.community import router as community_router
 from app.api.pr_center import router as pr_center_router
 from app.api.ai_assistant import router as ai_assistant_router
 from app.api.watchlist import router as watchlist_router
-from app.api.personal_todo import router as personal_todo_router
 from app.api.intelligence import router as intelligence_router
-from app.api.articles import router as articles_router
-from app.api.sync import router as sync_router
 from app.api.model_anatomy import router as model_anatomy_router
 from app.api.users import router as users_router
 from app.api.repos import router as repos_router
@@ -242,10 +239,7 @@ app.include_router(community_router, prefix="/api/community", tags=["Community P
 app.include_router(pr_center_router, prefix="/api/pr-center", tags=["PR Command Center"])
 app.include_router(ai_assistant_router, prefix="/api/ai-assistant", tags=["AI Assistant"])
 app.include_router(watchlist_router, prefix="/api/watchlist", tags=["Watchlist"])
-app.include_router(personal_todo_router, prefix="/api/personal-todo", tags=["Personal Todo"])
 app.include_router(intelligence_router, prefix="/api/intelligence", tags=["Intelligence Reports"])
-app.include_router(articles_router, prefix="/api/articles", tags=["Articles"])
-app.include_router(sync_router, prefix="/api/sync", tags=["Sync"])
 app.include_router(model_anatomy_router, prefix="/api/anatomy", tags=["Model Anatomy"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(repos_router, prefix="/api/repos", tags=["Repos"])
@@ -304,7 +298,11 @@ class SPAStaticFiles(StarletteStaticFiles):
         if stat_result is not None:
             return await super().get_response(path, scope)
         # 否则返回 index.html（SPA 路由）
-        return await super().get_response("index.html", scope)
+        response = await super().get_response("index.html", scope)
+        # index.html 引用的是带 hash 的产物文件，本身绝不能缓存，
+        # 否则重新构建后浏览器会拿着旧 index.html 去加载已删除的旧 chunk
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 spa_dir = static_dir / "dist"
 if spa_dir.exists():

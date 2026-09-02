@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Comment, Article, IntelligenceReport, User
+from app.models import Comment, IntelligenceReport, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -28,7 +28,7 @@ class CommentUpdate(BaseModel):
     content: str
 
 
-ALLOWED_TARGET_TYPES = ("article", "report")
+ALLOWED_TARGET_TYPES = ("report",)
 
 
 def _render_markdown(text: str) -> str:
@@ -39,9 +39,7 @@ def _render_markdown(text: str) -> str:
 
 
 def _verify_target_exists(target_type: str, target_id: int, db: Session):
-    if target_type == "article":
-        obj = db.query(Article).filter(Article.id == target_id).first()
-    elif target_type == "report":
+    if target_type == "report":
         obj = db.query(IntelligenceReport).filter(IntelligenceReport.id == target_id).first()
     else:
         raise HTTPException(status_code=400, detail=f"Invalid target_type: {target_type}")

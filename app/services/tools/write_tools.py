@@ -1,14 +1,13 @@
 """
 写类工具（write category）
 
-让 AI agent 可以创建/更新/删除本项目的实体：筛选规则、个人任务、学习文章、
-模型拆解（YAML 导入）、洞察报告。业务逻辑全部委托给 app/services/entity_writer.py
-与 app/api/model_anatomy.py:run_yaml_import，本模块只做参数适配与会话管理。
+让 AI agent 可以创建/更新/删除本项目的实体：筛选规则、模型拆解（YAML 导入）、洞察报告。
+业务逻辑全部委托给 app/services/entity_writer.py 与 app/api/model_anatomy.py:run_yaml_import，
+本模块只做参数适配与会话管理。
 
 安全约定：
 - delete_* 工具在 confirm != true 时只返回待删对象详情，不执行删除；
   system prompt 要求 AI 先向用户复述并征得明确同意后才允许 confirm=true。
-- 文章默认创建为 draft，发布需显式传 status="published"。
 """
 import logging
 
@@ -199,258 +198,6 @@ def _get_rule_detail(db, rule_id: int) -> dict:
 
 
 # ======================================================================
-# 个人任务
-# ======================================================================
-
-CREATE_TASK = {
-    "type": "function",
-    "function": {
-        "name": "create_task",
-        "description": "创建一条个人任务（任务面板）。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "任务标题"},
-                "description": {"type": "string", "description": "任务描述/目标，支持 Markdown"},
-                "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"], "description": "优先级，默认 P2"},
-                "area": {"type": "string", "description": "所属领域，如 'attention'"},
-                "due_date": {"type": "string", "description": "截止日期 YYYY-MM-DD"},
-                "tags": {"type": "array", "items": {"type": "string"}},
-                "related_refs": {
-                    "type": "array",
-                    "items": {"type": "object"},
-                    "description": "关联的社区条目，如 [{\"type\": \"pr\", \"number\": 123, \"repo\": \"vllm\", \"title\": \"...\", \"url\": \"...\"}]；type 为 pr 或 issue",
-                },
-                "parent_id": {"type": "integer", "description": "父任务 ID（创建子任务时）"},
-            },
-            "required": ["title"],
-        },
-    },
-}
-
-
-async def handle_create_task(args: dict) -> dict:
-    from app.services import entity_writer
-
-    fields = {k: v for k, v in args.items() if k in (
-        "title", "description", "priority", "area", "due_date", "tags", "related_refs", "parent_id",
-    )}
-    fields["source"] = "ai"
-    result = _run_db(entity_writer.create_task, fields)
-    if "error" not in result:
-        result["entity"] = "task"
-        result["page"] = "/personal-todo"
-    return result
-
-
-UPDATE_TASK = {
-    "type": "function",
-    "function": {
-        "name": "update_task",
-        "description": "更新一条个人任务（标题/描述/优先级/状态/截止日期等）。先用 list_entities 找到 task_id。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "integer"},
-                "title": {"type": "string"},
-                "description": {"type": "string"},
-                "status": {"type": "string", "enum": ["todo", "in_progress", "done", "cancelled"]},
-                "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
-                "area": {"type": "string"},
-                "due_date": {"type": "string", "description": "YYYY-MM-DD，传空字符串清除"},
-                "tags": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["task_id"],
-        },
-    },
-}
-
-
-async def handle_update_task(args: dict) -> dict:
-    from app.services import entity_writer
-
-    task_id = args.pop("task_id", None)
-    if not task_id:
-        return {"error": "task_id is required"}
-    fields = {k: v for k, v in args.items() if k in (
-        "title", "description", "status", "priority", "area", "due_date", "tags",
-    )}
-    if not fields:
-        return {"error": "没有提供任何要更新的字段"}
-    result = _run_db(entity_writer.update_task, task_id, fields)
-    if "error" not in result:
-        result["entity"] = "task"
-        result["page"] = "/personal-todo"
-    return result
-
-
-DELETE_TASK = {
-    "type": "function",
-    "function": {
-        "name": "delete_task",
-        "description": "删除一条个人任务（级联删除子任务和关联洞察报告）。必须先向用户复述任务标题并征得明确同意后，才能以 confirm=true 调用。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "task_id": {"type": "integer"},
-                "confirm": {"type": "boolean", "description": "用户明确同意删除后传 true"},
-            },
-            "required": ["task_id"],
-        },
-    },
-}
-
-
-async def handle_delete_task(args: dict) -> dict:
-    from app.services import entity_writer
-
-    task_id = args.get("task_id")
-    if not task_id:
-        return {"error": "task_id is required"}
-    if not args.get("confirm"):
-        detail = _run_db(_get_task_detail, task_id)
-        return {
-            "status": "needs_confirmation",
-            "message": "请向用户复述以下任务并征得明确同意后，再次调用本工具并传 confirm=true",
-            "target": detail,
-        }
-    result = _run_db(entity_writer.delete_task, task_id)
-    if "error" not in result:
-        result["entity"] = "task"
-        result["page"] = "/personal-todo"
-    return result
-
-
-def _get_task_detail(db, task_id: int) -> dict:
-    from app.models import PersonalTask
-
-    task = db.query(PersonalTask).filter(PersonalTask.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    d = task.to_dict()
-    return {"id": d["id"], "title": d["title"], "status": d["status"], "priority": d["priority"]}
-
-
-# ======================================================================
-# 学习文章
-# ======================================================================
-
-CREATE_ARTICLE = {
-    "type": "function",
-    "function": {
-        "name": "create_article",
-        "description": "创建一篇技术博客/学习文章（文章页），Markdown 正文。默认保存为草稿。正文中可用 `owner/repo/file_path:start-end` 语法引用代码片段（需在本地代码缓存中存在）。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "content": {"type": "string", "description": "Markdown 正文"},
-                "area": {"type": "string", "description": "所属领域，如 'attention'"},
-                "tags": {"type": "array", "items": {"type": "string"}},
-                "status": {"type": "string", "enum": ["draft", "published"], "description": "默认 draft；published 会同步进知识库"},
-            },
-            "required": ["title", "content"],
-        },
-    },
-}
-
-
-async def handle_create_article(args: dict) -> dict:
-    from app.services import entity_writer
-
-    fields = {k: v for k, v in args.items() if k in ("title", "content", "area", "tags", "status")}
-    fields.setdefault("status", "draft")
-    result = _run_db(entity_writer.create_article, fields)
-    if "error" not in result:
-        result["entity"] = "article"
-        result["page"] = "/articles"
-    return result
-
-
-UPDATE_ARTICLE = {
-    "type": "function",
-    "function": {
-        "name": "update_article",
-        "description": "更新一篇文章的标题/正文/标签/状态。content 为整篇替换；先用 list_entities 找到 article_id，长文修改前建议先取回内容。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "article_id": {"type": "integer"},
-                "title": {"type": "string"},
-                "content": {"type": "string", "description": "Markdown 正文（整篇替换）"},
-                "area": {"type": "string"},
-                "tags": {"type": "array", "items": {"type": "string"}},
-                "status": {"type": "string", "enum": ["draft", "published", "archived"]},
-            },
-            "required": ["article_id"],
-        },
-    },
-}
-
-
-async def handle_update_article(args: dict) -> dict:
-    from app.services import entity_writer
-
-    article_id = args.pop("article_id", None)
-    if not article_id:
-        return {"error": "article_id is required"}
-    fields = {k: v for k, v in args.items() if k in ("title", "content", "area", "tags", "status")}
-    if not fields:
-        return {"error": "没有提供任何要更新的字段"}
-    result = _run_db(entity_writer.update_article, article_id, fields)
-    if "error" not in result:
-        result["entity"] = "article"
-        result["page"] = "/articles"
-    return result
-
-
-DELETE_ARTICLE = {
-    "type": "function",
-    "function": {
-        "name": "delete_article",
-        "description": "删除一篇文章（级联删除代码引用、评论和知识库内容）。必须先向用户复述文章标题并征得明确同意后，才能以 confirm=true 调用。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "article_id": {"type": "integer"},
-                "confirm": {"type": "boolean", "description": "用户明确同意删除后传 true"},
-            },
-            "required": ["article_id"],
-        },
-    },
-}
-
-
-async def handle_delete_article(args: dict) -> dict:
-    from app.services import entity_writer
-
-    article_id = args.get("article_id")
-    if not article_id:
-        return {"error": "article_id is required"}
-    if not args.get("confirm"):
-        detail = _run_db(_get_article_detail, article_id)
-        return {
-            "status": "needs_confirmation",
-            "message": "请向用户复述以下文章并征得明确同意后，再次调用本工具并传 confirm=true",
-            "target": detail,
-        }
-    result = _run_db(entity_writer.delete_article, article_id)
-    if "error" not in result:
-        result["entity"] = "article"
-        result["page"] = "/articles"
-    return result
-
-
-def _get_article_detail(db, article_id: int) -> dict:
-    from app.models import Article
-
-    article = db.query(Article).filter(Article.id == article_id).first()
-    if not article:
-        raise HTTPException(status_code=404, detail="Article not found")
-    return {"id": article.id, "title": article.title, "status": article.status}
-
-
-# ======================================================================
 # 模型拆解（YAML 导入）
 # ======================================================================
 
@@ -504,11 +251,11 @@ GENERATE_INTELLIGENCE_REPORT = {
         "parameters": {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "报告标题（有关联任务时可省略）"},
+                "title": {"type": "string", "description": "报告主题/标题"},
                 "sources": {"type": "array", "items": {"type": "string"}, "description": "情报来源列表（仓库名/academic/news）。空 = 全部可用来源"},
                 "extra_prompt": {"type": "string", "description": "额外关注点/要求"},
-                "task_id": {"type": "integer", "description": "关联任务 ID（可选）"},
             },
+            "required": ["title"],
         },
     },
 }
@@ -523,7 +270,6 @@ async def handle_generate_intelligence_report(args: dict) -> dict:
             sources=args.get("sources") or [],
             excluded_sources=[],
             extra_prompt=args.get("extra_prompt") or "",
-            task_id=args.get("task_id"),
         )
     except HTTPException as e:
         return {"error": e.detail}
@@ -542,11 +288,11 @@ LIST_ENTITIES = {
     "type": "function",
     "function": {
         "name": "list_entities",
-        "description": "列出规则/任务/文章的 id 与摘要，用于更新或删除前定位目标。支持关键词过滤。",
+        "description": "列出规则/报告的 id 与摘要，用于更新或删除前定位目标。支持关键词过滤。",
         "parameters": {
             "type": "object",
             "properties": {
-                "entity_type": {"type": "string", "enum": ["rule", "task", "article", "report"]},
+                "entity_type": {"type": "string", "enum": ["rule", "report"]},
                 "query": {"type": "string", "description": "标题/名称关键词过滤（可选）"},
                 "limit": {"type": "integer", "description": "返回条数，默认 20，最大 50"},
             },
@@ -576,28 +322,6 @@ async def handle_list_entities(args: dict) -> dict:
                 {"id": r.id, "title": r.name, "detail": (r.prompt or "")[:120], "enabled": r.enabled}
                 for r in rows
             ]
-        elif entity_type == "task":
-            from app.models import PersonalTask
-
-            q = db.query(PersonalTask).filter(PersonalTask.parent_id.is_(None))
-            if query:
-                q = q.filter(PersonalTask.title.like(f"%{query}%"))
-            rows = q.order_by(PersonalTask.updated_at.desc()).limit(limit).all()
-            items = [
-                {"id": t.id, "title": t.title, "status": t.status, "priority": t.priority}
-                for t in rows
-            ]
-        elif entity_type == "article":
-            from app.models import Article
-
-            q = db.query(Article)
-            if query:
-                q = q.filter(Article.title.like(f"%{query}%"))
-            rows = q.order_by(Article.updated_at.desc()).limit(limit).all()
-            items = [
-                {"id": a.id, "title": a.title, "status": a.status, "area": a.area}
-                for a in rows
-            ]
         elif entity_type == "report":
             from app.models import IntelligenceReport
 
@@ -610,7 +334,7 @@ async def handle_list_entities(args: dict) -> dict:
                 for r in rows
             ]
         else:
-            return {"error": "entity_type 必须是 rule/task/article/report"}
+            return {"error": "entity_type 必须是 rule/report"}
         return {"entity_type": entity_type, "items": items, "total": len(items)}
     except Exception as e:
         logger.exception("list_entities failed")
@@ -626,12 +350,6 @@ async def handle_list_entities(args: dict) -> dict:
 register_tool("create_rule", CREATE_RULE, handle_create_rule)
 register_tool("update_rule", UPDATE_RULE, handle_update_rule)
 register_tool("delete_rule", DELETE_RULE, handle_delete_rule)
-register_tool("create_task", CREATE_TASK, handle_create_task)
-register_tool("update_task", UPDATE_TASK, handle_update_task)
-register_tool("delete_task", DELETE_TASK, handle_delete_task)
-register_tool("create_article", CREATE_ARTICLE, handle_create_article)
-register_tool("update_article", UPDATE_ARTICLE, handle_update_article)
-register_tool("delete_article", DELETE_ARTICLE, handle_delete_article)
 register_tool("import_anatomy_yaml", IMPORT_ANATOMY_YAML, handle_import_anatomy_yaml)
 register_tool("generate_intelligence_report", GENERATE_INTELLIGENCE_REPORT, handle_generate_intelligence_report)
 register_tool("list_entities", LIST_ENTITIES, handle_list_entities)

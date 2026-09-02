@@ -1,22 +1,17 @@
 <script setup lang="ts">
 import { usePRCenterStore } from '@/stores/prCenter'
 import { useWatchlistStore } from '@/stores/watchlist'
-import { useTodoStore } from '@/stores/todo'
 import { renderMarkdown } from '@/composables/useMarkdown'
 import { ghUrl } from '@/utils/helpers'
 import Icon from '@/components/common/Icon.vue'
 
 const prStore = usePRCenterStore()
 const watchlistStore = useWatchlistStore()
-const todoStore = useTodoStore()
 
 function toggleWatchlist(number: number, type: string, title: string, url: string, extra?: any) {
   watchlistStore.toggleWatch(number, type, title, url, extra)
 }
 
-function openTaskDrawer(task: any) {
-  todoStore.openTask({ id: task.id, title: task.title, status: task.status || 'todo', priority: task.priority || 'P2', source: 'self', created_at: '', updated_at: '' })
-}
 </script>
 
 <template>
@@ -69,16 +64,6 @@ function openTaskDrawer(task: any) {
               <div v-if="prStore.selectedIssue?.watchlist_note" class="watchlist-note-detail">
                 <span class="watchlist-note-label">备注</span>
                 <span class="watchlist-note-text">{{ prStore.selectedIssue.watchlist_note }}</span>
-              </div>
-              <!-- Linked tasks -->
-              <div v-if="prStore.selectedIssue?.linked_tasks && prStore.selectedIssue.linked_tasks.length > 0" class="linked-tasks-detail">
-                <span class="linked-tasks-label">关联任务</span>
-                <div class="linked-tasks-list">
-                  <span v-for="lt in prStore.selectedIssue.linked_tasks" :key="lt.id" class="ref-badge ref-badge-sm clickable" @click.stop="openTaskDrawer(lt)">
-                    <span>#{{ lt.id }}</span>
-                    <span>{{ lt.title }}</span>
-                  </span>
-                </div>
               </div>
               <div class="drawer-toolbar">
                 <template v-if="prStore.issueTranslatedBody">

@@ -1,5 +1,5 @@
 """
-洞察报告生成器（DESIGN-PERSONAL-TODO.md 4.2）
+洞察报告生成器
 
 Agent 模式：通过 OpenAI function calling，让 AI 自主决定搜索什么、
 读取哪些 issue/PR 的正文和评论，多轮迭代后生成报告。

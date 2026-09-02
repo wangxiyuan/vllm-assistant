@@ -39,7 +39,6 @@ const intelSourceOptions = computed(() => {
 
 onMounted(async () => {
   await intelStore.loadReports()
-  intelStore.loadIntelTasks()
   // 检查 Slack 是否有凭证
   try {
     const slackStatus: any = await api('/api/slack/status')
@@ -187,7 +186,6 @@ function openAIChat(intent: string) {
           </div>
         </div>
         <div class="report-meta">
-          <span v-if="report.task_title && !isDailyReport(report)" class="meta-item" @click.stop="intelStore.viewReport(report)" title="触发任务">触发任务: <strong>{{ report.task_title }}</strong></span>
           <span v-if="isDailyReport(report)" class="meta-item"><Icon name="calendar" :size="11" /> {{ new Date(report.created_at).toLocaleDateString('zh-CN') }}</span>
           <span v-for="s in report.sources" :key="s" class="badge badge-source" :class="intelStore.intelSourceClass(s)" :style="intelStore.intelSourceStyle(s)">{{ intelStore.intelSourceLabel(s) }}</span>
           <span>{{ report.word_count }} 字</span>
@@ -244,15 +242,9 @@ function openAIChat(intent: string) {
           </div>
           <div class="modal-body">
             <div class="form-group">
-              <label class="form-label">关联任务（可选）</label>
-              <select class="select" v-model.number="intelStore.intelForm.task_id">
-                <option value="">选择任务…</option>
-                <option v-for="t in intelStore.intelTasks" :key="t.id" :value="t.id">{{ t.title }}</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">报告标题（可选）</label>
-              <input type="text" class="input" v-model="intelStore.intelForm.title" placeholder="自动生成标题" />
+              <label class="form-label">报告主题 <span style="color: var(--signal-red)">*</span></label>
+              <input type="text" class="input" v-model="intelStore.intelForm.title"
+                     placeholder="想了解什么，如：最近两周 MoE 通信优化的进展" @keyup.enter="intelStore.generateReport()" />
             </div>
             <div class="form-group">
               <label class="form-label">数据来源</label>

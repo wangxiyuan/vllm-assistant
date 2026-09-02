@@ -13,8 +13,6 @@ const emit = defineEmits<{
 
 const TITLES: Record<string, string> = {
   rule: '创建 AI 筛选规则',
-  task: '创建任务',
-  article: '写技术博客',
   anatomy: '拆解模型',
   report: '生成洞察报告',
 }
@@ -45,15 +43,6 @@ const ruleFocus = ref('')
 const ruleTypes = ref({ pr: true, issue: true, commit: false })
 const ruleRepos = ref<string[]>([])
 
-const taskTitle = ref('')
-const taskDetail = ref('')
-const taskPriority = ref('P2')
-const taskArea = ref('')
-const taskDue = ref('')
-
-const articleTopic = ref('')
-const articleArea = ref('')
-
 const anatomyModel = ref('')
 const anatomyNotes = ref('')
 
@@ -65,13 +54,6 @@ function resetForm() {
   ruleFocus.value = ''
   ruleTypes.value = { pr: true, issue: true, commit: false }
   ruleRepos.value = []
-  taskTitle.value = ''
-  taskDetail.value = ''
-  taskPriority.value = 'P2'
-  taskArea.value = ''
-  taskDue.value = ''
-  articleTopic.value = ''
-  articleArea.value = ''
   anatomyModel.value = ''
   anatomyNotes.value = ''
   reportTopic.value = ''
@@ -84,8 +66,6 @@ const sourceOptions = computed(() => [...repos.value, 'academic', 'news'])
 const canSend = computed(() => {
   switch (props.intent) {
     case 'rule': return !!ruleFocus.value.trim()
-    case 'task': return !!taskTitle.value.trim()
-    case 'article': return !!articleTopic.value.trim()
     case 'anatomy': return !!anatomyModel.value.trim()
     case 'report': return !!reportTopic.value.trim()
     default: return false
@@ -116,20 +96,6 @@ function buildPrompt(): string {
       lines.push('创建成功后帮我立即触发一轮分诊。')
       break
     }
-    case 'task':
-      lines.push('帮我创建一个任务。')
-      lines.push(`标题：${taskTitle.value.trim()}`)
-      if (taskDetail.value.trim()) lines.push(`描述：${taskDetail.value.trim()}`)
-      lines.push(`优先级：${taskPriority.value}`)
-      if (taskArea.value.trim()) lines.push(`领域：${taskArea.value.trim()}`)
-      if (taskDue.value) lines.push(`截止日期：${taskDue.value}`)
-      break
-    case 'article':
-      lines.push('帮我写一篇技术博客。')
-      lines.push(`主题：${articleTopic.value.trim()}`)
-      if (articleArea.value.trim()) lines.push(`领域：${articleArea.value.trim()}`)
-      lines.push('要求：先搜索知识库和社区资料列出提纲给我确认；确认后再写成 Markdown 全文并保存为草稿。')
-      break
     case 'anatomy':
       lines.push(`帮我拆解模型：${anatomyModel.value.trim()}。`)
       lines.push('要求：先用 read_local_code 读 docs/model-yaml-spec.md 和 scripts/glm5_next_causal_lm.yaml 参考实现，再从 vLLM 源码定位相关类，按 atomic → composite → assembly 编排 YAML，最后用 import_anatomy_yaml 导入。')
@@ -179,47 +145,6 @@ function submit() {
           <button v-for="r in repos" :key="r" class="chip" :class="{ on: ruleRepos.includes(r) }"
                   @click="toggleIn(ruleRepos, r)">{{ r }}</button>
         </div>
-      </div>
-    </template>
-
-    <!-- 任务 -->
-    <template v-else-if="intent === 'task'">
-      <div class="intent-field">
-        <label class="intent-label">标题 <span class="req">*</span></label>
-        <input class="input" v-model="taskTitle" placeholder="一句话说清要做什么" />
-      </div>
-      <div class="intent-field">
-        <label class="intent-label">描述 / 目标</label>
-        <textarea class="textarea" rows="2" v-model="taskDetail" placeholder="可选"></textarea>
-      </div>
-      <div class="intent-field-row">
-        <div class="intent-field">
-          <label class="intent-label">优先级</label>
-          <select class="input" v-model="taskPriority">
-            <option>P0</option><option>P1</option><option>P2</option><option>P3</option>
-          </select>
-        </div>
-        <div class="intent-field">
-          <label class="intent-label">领域</label>
-          <input class="input" v-model="taskArea" placeholder="可选，如 attention" />
-        </div>
-        <div class="intent-field">
-          <label class="intent-label">截止日期</label>
-          <input class="input" type="date" v-model="taskDue" />
-        </div>
-      </div>
-    </template>
-
-    <!-- 文章 -->
-    <template v-else-if="intent === 'article'">
-      <div class="intent-field">
-        <label class="intent-label">主题 <span class="req">*</span></label>
-        <textarea class="textarea" rows="2" v-model="articleTopic"
-                  placeholder="想写什么，如：vLLM 的 scheduler 调度策略演进"></textarea>
-      </div>
-      <div class="intent-field">
-        <label class="intent-label">领域</label>
-        <input class="input" v-model="articleArea" placeholder="可选，如 attention" />
       </div>
     </template>
 

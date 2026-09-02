@@ -396,7 +396,7 @@ function sendText(text: string) {
   })
 }
 
-// AI 回复里的站内链接（如 /personal-todo）用路由跳转，不整页刷新
+// AI 回复里的站内链接用路由跳转，不整页刷新
 function onMessagesClick(e: MouseEvent) {
   const a = (e.target as HTMLElement).closest?.('a')
   if (!a) return

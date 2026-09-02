@@ -599,7 +599,7 @@ def _ensure_ai_rules_include_commits_column():
 
 
 def _cleanup_obsolete_schema():
-    """清理已废弃的表和字段（dedup_check_result, task_dedup_cache）"""
+    """清理已废弃的表和字段（task_dedup_cache, personal_tasks, articles, code_references）"""
     from sqlalchemy import inspect, DDL, text
 
     with engine.connect() as conn:
@@ -611,52 +611,20 @@ def _cleanup_obsolete_schema():
         except Exception as e:
             logger.warning(f"Failed to drop task_dedup_cache: {e}")
 
-        # 2. 删除 personal_tasks.dedup_check_result 列
+        # 2. 删除已下线的任务面板/技术 Blog 相关表（personal_tasks / articles / code_references）
+        #    临时禁用外键检查（intelligence_reports.task_id 历史外键指向 personal_tasks）
         try:
-            cols = {c["name"] for c in inspect(conn).get_columns("personal_tasks")}
-            if "dedup_check_result" in cols:
-                # 清理可能残留的旧迁移临时表（上次迁移中途失败留下）
-                try:
-                    conn.execute(DDL("DROP TABLE IF EXISTS personal_tasks_new"))
-                    conn.commit()
-                except Exception:
-                    pass
-                # SQLite 不支持 DROP COLUMN，用重建方式
-                # 临时禁用外键检查以允许 DROP TABLE personal_tasks
+            existing = set(inspect(conn).get_table_names())
+            obsolete = [t for t in ("code_references", "articles", "personal_tasks") if t in existing]
+            if obsolete:
                 conn.execute(text("PRAGMA foreign_keys=OFF"))
-                conn.execute(DDL("""
-                    CREATE TABLE personal_tasks_new (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        title TEXT NOT NULL,
-                        description TEXT,
-                        source VARCHAR(50) NOT NULL,
-                        priority VARCHAR(10) NOT NULL DEFAULT 'P2',
-                        status VARCHAR(20) NOT NULL DEFAULT 'todo',
-                        related_refs JSON DEFAULT '[]',
-                        area VARCHAR(50),
-                        tags TEXT,
-                        assignee_id INTEGER REFERENCES users(id),
-                        parent_id INTEGER REFERENCES personal_tasks(id),
-                        subtask_order INTEGER DEFAULT 0,
-                        created_at TIMESTAMP NOT NULL,
-                        updated_at TIMESTAMP NOT NULL,
-                        due_date DATE,
-                        completed_at TIMESTAMP
-                    )
-                """))
-                conn.execute(DDL("""
-                    INSERT INTO personal_tasks_new SELECT
-                        id, title, description, source, priority, status,
-                        related_refs, area, tags, assignee_id, parent_id,
-                        subtask_order, created_at, updated_at, due_date, completed_at
-                    FROM personal_tasks
-                """))
-                conn.execute(DDL("DROP TABLE personal_tasks"))
-                conn.execute(DDL("ALTER TABLE personal_tasks_new RENAME TO personal_tasks"))
-                conn.commit()
-                logger.info("Dropped obsolete column: personal_tasks.dedup_check_result")
+                for table in obsolete:
+                    conn.execute(DDL(f"DROP TABLE IF EXISTS {table}"))
+                    conn.commit()
+                conn.execute(text("PRAGMA foreign_keys=ON"))
+                logger.info(f"Dropped obsolete tables: {', '.join(obsolete)}")
         except Exception as e:
-            logger.warning(f"Failed to drop dedup_check_result column: {e}")
+            logger.warning(f"Failed to drop obsolete feature tables: {e}")
 
 
 _ensure_indexes()

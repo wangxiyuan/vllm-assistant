@@ -6,7 +6,7 @@ import { useCommentUser } from '@/composables/useCommentUser'
 import { timeAgo } from '@/utils/helpers'
 
 const props = defineProps<{
-  targetType: 'article' | 'report'
+  targetType: 'report'
   targetId: number
 }>()
 

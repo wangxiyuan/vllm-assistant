@@ -223,7 +223,7 @@ class MemoryService:
         """按 source_ref 前缀批量删除或标记知识条目。
 
         Args:
-            source_ref_prefix: source_ref 前缀，如 "article123" 或 "conv/session-id/"
+            source_ref_prefix: source_ref 前缀，如 "intelligence_report123" 或 "conv/session-id/"
             hard_delete: True 则物理删除，False 则标记为 stale
             db: 复用调用方已有的会话（避免 SQLite 双写连接互锁），缺省时自建
 
@@ -338,7 +338,7 @@ class MemoryService:
             ).fetchall()
             by_type = {r[0]: r[1] for r in type_counts}
             # 补全所有已知类型（数量为 0 的也显示）
-            known_types = ["docs", "code_structure", "issue", "pr", "article", "manual", "conversation", "report", "slack"]
+            known_types = ["docs", "code_structure", "issue", "pr", "manual", "conversation", "report", "slack"]
             for t in known_types:
                 if t not in by_type:
                     by_type[t] = 0
@@ -409,7 +409,7 @@ class MemoryService:
         Returns:
             各层构建数量统计
         """
-        stats = {"docs": 0, "code_structure": 0, "issue_pr": 0, "article": 0, "model": 0}
+        stats = {"docs": 0, "code_structure": 0, "issue_pr": 0, "model": 0}
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_back)
 
         # 1. 从 LocalCodeCache 构建代码结构 + 文档知识（走增量更新逻辑）
@@ -421,11 +421,7 @@ class MemoryService:
         issue_stats = self._build_from_items(cutoff)
         stats["issue_pr"] = issue_stats.get("count", 0)
 
-        # 3. 从 Article 表构建文章知识
-        article_stats = self._build_from_articles()
-        stats["article"] = article_stats.get("count", 0)
-
-        # 4. 从 BuildingBlock / ModelAssembly 表构建架构知识
+        # 3. 从 BuildingBlock / ModelAssembly 表构建架构知识
         model_stats = self._build_from_model_anatomy()
         stats["model"] = model_stats.get("count", 0)
 
@@ -637,51 +633,6 @@ class MemoryService:
                     stats["count"] += 1
         except Exception:
             logger.exception("Failed to build from items")
-        finally:
-            db.close()
-        return stats
-
-    def _build_from_articles(self) -> Dict[str, int]:
-        """从 Article 表增量构建文章知识
-
-        按 checksum（articles 表的 updated_at）判断是否需要更新。
-        """
-        from app.database import SessionLocal
-        from app.models import Article
-
-        stats = {"count": 0}
-        db = SessionLocal()
-        try:
-            articles = db.query(Article).filter(Article.status == "published").all()
-            for article in articles:
-                tags = json.loads(article.tags) if article.tags else []
-                if article.area:
-                    tags = [article.area] + tags
-
-                source_ref = f"article#{article.id}"
-                content = (
-                    f"## {article.title}\n\n"
-                    f"{article.content}\n"
-                )
-                article_checksum = str(article.updated_at.timestamp()) if article.updated_at else ""
-
-                existing = self.find_by_source_ref(source_ref)
-                if existing:
-                    if existing.checksum == article_checksum:
-                        continue
-                    self.update(existing.id, content=content, checksum=article_checksum)
-                    stats["count"] += 1
-                else:
-                    self.remember(
-                        content=content,
-                        source_type="article",
-                        source_ref=source_ref,
-                        tags=tags,
-                        checksum=article_checksum,
-                    )
-                    stats["count"] += 1
-        except Exception:
-            logger.exception("Failed to build from articles")
         finally:
             db.close()
         return stats

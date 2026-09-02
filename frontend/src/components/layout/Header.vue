@@ -8,9 +8,7 @@ const appStore = useAppStore()
 
 const viewTitles: Record<string, string> = {
   'overview': '总览',
-  'personal-todo': '任务面板',
   'intelligence': '洞察面板',
-  'articles': '技术Blog',
   'anatomy': '模型拆解',
   'ai-agent': 'AI Agent',
 }

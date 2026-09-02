@@ -19,7 +19,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import Config
 from app.database import SessionLocal
-from app.models import Item, MyPR, Area, UserIssue, User, PersonalTask, RepoCache, SlackConfig, LocalCodeCache, Watchlist
+from app.models import Item, MyPR, Area, UserIssue, User, RepoCache, SlackConfig, LocalCodeCache, Watchlist
 from app.services.github_client import GitHubClient, DEFAULT_PER_PAGE
 from app.services.area_mapper import AreaMapper
 
@@ -754,11 +754,10 @@ def _upsert_user_pr(db, detail: dict, github_client: GitHubClient,
         ))
 
 
-def _refresh_personal_task_refs():
-    """刷新所有 personal_tasks（含子任务）中 related_refs 的 state 字段
+def _refresh_watchlist_refs():
+    """刷新 watchlist 条目的 GitHub 实时状态（总览页"我的关注"卡片的状态来源）
 
-    历史数据中 related_refs 可能缺少 state 字段（open/closed/merged），
-    此定时任务逐个查询 GitHub API 补全。
+    watchlist.repo 可能存短名（历史数据）或全名，先经 short->full 映射兜底。
     """
     import requests
     from app.config import Config as AppConfig
@@ -766,52 +765,6 @@ def _refresh_personal_task_refs():
     headers = AppConfig.get_github_headers()
     db = SessionLocal()
     try:
-        tasks = db.query(PersonalTask).filter(
-            PersonalTask.related_refs.isnot(None),
-        ).all()
-        updated = 0
-        for task in tasks:
-            refs = task.related_refs or []
-            changed = False
-            # 预加载 RepoCache 短名 -> 完整 owner/repo 映射
-            repo_map = {}
-            try:
-                for rc in db.query(RepoCache).filter(RepoCache.status == "active").all():
-                    repo_map[rc.repo] = _clone_url_to_full_repo(rc.clone_url)
-            except Exception:
-                pass
-            for ref in refs:
-                if ref.get("state") or not ref.get("number"):
-                    continue
-                number = ref["number"]
-                repo_short = ref.get('repo', '')
-                repo_path = repo_map.get(repo_short, '')
-                if not repo_path:
-                    continue
-                if ref.get("type") == "pr":
-                    url = f"https://api.github.com/repos/{repo_path}/pulls/{number}"
-                else:
-                    url = f"https://api.github.com/repos/{repo_path}/issues/{number}"
-                try:
-                    resp = requests.get(url, headers=headers, timeout=10)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        state = data.get("state", "unknown")
-                        if ref["type"] == "pr" and state == "closed" and data.get("merged", False):
-                            state = "merged"
-                        ref["state"] = state
-                        changed = True
-                except Exception:
-                    continue
-            if changed:
-                task.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                updated += 1
-        db.commit()
-        if updated:
-            logger.info(f"Refreshed state for {updated} personal tasks' refs (including subtasks)")
-
-        # —— watchlist 状态刷新（总览页"我的关注"卡片的状态来源）——
-        # watchlist.repo 可能存短名（历史数据）或全名，先经 short->full 映射兜底
         repo_map = {}
         try:
             for rc in db.query(RepoCache).filter(RepoCache.status == "active").all():
@@ -823,7 +776,7 @@ def _refresh_personal_task_refs():
         if wl_updated:
             logger.info(f"Refreshed {wl_updated} watchlist item states")
     except Exception:
-        logger.exception("Failed to refresh personal task refs")
+        logger.exception("Failed to refresh watchlist refs")
     finally:
         db.close()
 
@@ -1218,12 +1171,12 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # 个人任务关联引用状态刷新（每 6 小时一次）
+    # watchlist 条目状态刷新（每 6 小时一次）
     scheduler.add_job(
-        _refresh_personal_task_refs,
+        _refresh_watchlist_refs,
         trigger=IntervalTrigger(hours=6),
-        id="refresh_personal_task_refs",
-        name="Refresh Personal Task Ref States",
+        id="refresh_watchlist_refs",
+        name="Refresh Watchlist States",
         replace_existing=True,
     )
 
@@ -1294,7 +1247,7 @@ def start_scheduler():
                 db.close()
             if has_repos:
                 sync_all_repos_job()
-            _refresh_personal_task_refs()
+            _refresh_watchlist_refs()
             run_ai_triage_job()
         except Exception:
             logger.exception("Initial sync failed (will retry on schedule)")
@@ -1404,12 +1357,6 @@ def sync_all_repos_job():
                     has_changes = True
             except Exception:
                 logger.exception(f"Error syncing repo {repo_record.repo}")
-
-        # 对所有受影响文件做行号越界检查
-        try:
-            manager.validate_all_refs()
-        except Exception:
-            logger.exception("Error validating refs after sync")
 
         # 如果仓库有变更，增量更新知识库
         if has_changes:

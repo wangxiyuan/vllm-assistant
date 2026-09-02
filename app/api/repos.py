@@ -57,7 +57,7 @@ def _clone_url_to_full_repo(clone_url: str) -> str:
 
 def _cleanup_on_delete(db: Session, repo_name: str, full_repo: Optional[str] = None):
     """删除仓库时联动清理所有关联资源"""
-    from app.models import LocalCodeCache, FileChangeHistory, CodeReference, Item, Watchlist
+    from app.models import LocalCodeCache, FileChangeHistory, Item, Watchlist
 
     # 1. 删除 LocalCodeCache
     deleted = db.query(LocalCodeCache).filter(LocalCodeCache.repo == repo_name).delete()
@@ -67,21 +67,15 @@ def _cleanup_on_delete(db: Session, repo_name: str, full_repo: Optional[str] = N
     deleted = db.query(FileChangeHistory).filter(FileChangeHistory.repo == repo_name).delete()
     logger.info(f"Deleted {deleted} FileChangeHistory rows for repo '{repo_name}'")
 
-    # 3. 标记 CodeReference 为无效
-    updated = db.query(CodeReference).filter(
-        CodeReference.repo_name == repo_name
-    ).update({"is_valid": False}, synchronize_session=False)
-    logger.info(f"Marked {updated} CodeReference rows invalid for repo '{repo_name}'")
-
-    # 4. 删除 Item 中该 repo 的记录（按完整 owner/repo 匹配）
+    # 3. 删除 Item 中该 repo 的记录（按完整 owner/repo 匹配）
     if full_repo:
         deleted_items = db.query(Item).filter(Item.repo == full_repo).delete()
         logger.info(f"Deleted {deleted_items} Item rows for repo '{full_repo}'")
-        # 5. 删除 Watchlist 中该 repo 的记录
+        # 4. 删除 Watchlist 中该 repo 的记录
         deleted_wl = db.query(Watchlist).filter(Watchlist.repo == full_repo).delete()
         logger.info(f"Deleted {deleted_wl} Watchlist rows for repo '{full_repo}'")
 
-    # 6. 标记 AI Memory 为过期（软删除，tag 包含该 repo 名的条目）
+    # 5. 标记 AI Memory 为过期（软删除，tag 包含该 repo 名的条目）
     from app.services.memory_service import MemoryService
     mem = MemoryService()
     count = mem.forget_by_source_ref_prefix(f"{repo_name}/")
@@ -92,7 +86,7 @@ def _cleanup_on_delete(db: Session, repo_name: str, full_repo: Optional[str] = N
 
 def _cleanup_on_repo_rename(db: Session, old_name: str, new_name: str):
     """重命名仓库时更新所有关联表中的 repo 字段"""
-    from app.models import LocalCodeCache, FileChangeHistory, CodeReference
+    from app.models import LocalCodeCache, FileChangeHistory
 
     # 1. 更新 LocalCodeCache
     updated = db.query(LocalCodeCache).filter(
@@ -106,13 +100,7 @@ def _cleanup_on_repo_rename(db: Session, old_name: str, new_name: str):
     ).update({"repo": new_name}, synchronize_session=False)
     logger.info(f"Renamed {updated} FileChangeHistory rows: '{old_name}' -> '{new_name}'")
 
-    # 3. 标记旧名称的 CodeReference 为无效
-    updated = db.query(CodeReference).filter(
-        CodeReference.repo_name == old_name
-    ).update({"is_valid": False}, synchronize_session=False)
-    logger.info(f"Marked {updated} CodeReference rows invalid for renamed repo '{old_name}'")
-
-    # 4. 更新 AI Memory 中 tag 包含旧 repo 名的条目
+    # 3. 更新 AI Memory 中 tag 包含旧 repo 名的条目
     from app.services.memory_service import MemoryService
     mem = MemoryService()
     count = mem.forget_by_source_ref_prefix(f"{old_name}/")

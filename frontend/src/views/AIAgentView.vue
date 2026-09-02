@@ -817,7 +817,6 @@ const groupedSessions = computed(() => {
 .kb-source-code_structure { background: var(--signal-purple-glow); color: var(--signal-purple); border-color: rgba(218,178,255,0.3); }
 .kb-source-issue { background: var(--signal-green-glow); color: var(--signal-green); border-color: rgba(142,236,151,0.3); }
 .kb-source-pr { background: var(--signal-cyan-glow); color: var(--signal-cyan); border-color: rgba(106,216,223,0.3); }
-.kb-source-article { background: var(--signal-yellow-glow); color: var(--signal-yellow); border-color: rgba(242,204,96,0.3); }
 .kb-source-manual { background: var(--amber-glow); color: var(--amber); border-color: rgba(255,180,84,0.3); }
 .kb-source-conversation { background: var(--bg-elev-3); color: var(--text-secondary); border-color: var(--border); }
 .kb-source-report { background: var(--signal-red-glow); color: var(--signal-red); border-color: rgba(255,107,107,0.3); }

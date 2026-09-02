@@ -4,7 +4,6 @@ entity_writer 与写类工具的单元测试
 不依赖真实数据库：用内存 SQLite 建 Base.metadata，直接测 service 函数；
 工具 handler 通过 monkeypatch app.database.SessionLocal 注入内存会话工厂。
 """
-import json
 import sys
 from pathlib import Path
 
@@ -16,11 +15,7 @@ from sqlalchemy.pool import StaticPool
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base  # noqa: E402
-from app.models import (  # noqa: E402
-    AIRule,
-    Article,
-    PersonalTask,
-)
+from app.models import AIRule  # noqa: E402
 import app.database as database_module  # noqa: E402
 from app.services import entity_writer  # noqa: E402
 
@@ -91,92 +86,6 @@ def test_delete_rule_cascades_matches(db_session):
 
 
 # ======================================================================
-# 任务
-# ======================================================================
-
-
-def test_create_task_defaults_and_due_date(db_session):
-    task = entity_writer.create_task(db_session, {
-        "title": "调研 MLA",
-        "due_date": "2026-09-01",
-        "tags": ["vllm"],
-        "source": "ai",
-    })
-    assert task["title"] == "调研 MLA"
-    assert task["status"] == "todo"
-    stored = db_session.query(PersonalTask).first()
-    assert stored.tags == json.dumps(["vllm"], ensure_ascii=False)
-    assert stored.due_date is not None and stored.due_date.isoformat() == "2026-09-01"
-
-
-def test_create_task_empty_title_rejected(db_session):
-    import fastapi
-
-    with pytest.raises(fastapi.HTTPException):
-        entity_writer.create_task(db_session, {"title": ""})
-
-
-def test_update_task_status_sets_completed_at(db_session):
-    task = entity_writer.create_task(db_session, {"title": "t"})
-    assert task["completed_at"] is None
-    updated = entity_writer.update_task(db_session, task["id"], {"status": "done"})
-    assert updated["status"] == "done" and updated["completed_at"]
-    back = entity_writer.update_task(db_session, task["id"], {"status": "todo"})
-    assert back["completed_at"] is None
-
-
-def test_delete_task_cascades(db_session):
-    from app.models import IntelligenceReport
-
-    parent = entity_writer.create_task(db_session, {"title": "父"})
-    child = entity_writer.create_task(db_session, {"title": "子", "parent_id": parent["id"]})
-    db_session.add(IntelligenceReport(
-        title="r", content="", task_id=parent["id"], sources="[]",
-        created_at=entity_writer._utcnow(), status="completed",
-    ))
-    db_session.commit()
-
-    entity_writer.delete_task(db_session, parent["id"])
-    assert db_session.query(PersonalTask).filter(PersonalTask.id == child["id"]).count() == 0
-    assert db_session.query(IntelligenceReport).filter_by(task_id=parent["id"]).count() == 0
-
-
-# ======================================================================
-# 文章
-# ======================================================================
-
-
-def test_create_article_draft_default_and_refs(db_session):
-    result = entity_writer.create_article(db_session, {
-        "title": "学习笔记",
-        "content": "# 笔记\n\n没有代码引用的内容。",
-    })
-    assert result["status"] == "draft" and result["refs_count"] == 0
-    stored = db_session.query(Article).filter_by(id=result["id"]).first()
-    assert stored is not None and stored.status == "draft"
-
-
-def test_article_validation(db_session):
-    import fastapi
-
-    with pytest.raises(fastapi.HTTPException):
-        entity_writer.create_article(db_session, {"title": "t", "content": "   "})
-
-
-def test_update_article_rewrites_refs(db_session):
-    created = entity_writer.create_article(db_session, {"title": "a", "content": "v1"})
-    updated = entity_writer.update_article(db_session, created["id"], {"content": "v2\n"})
-    assert updated["content"] == "v2\n"
-
-
-def test_delete_article(db_session):
-    created = entity_writer.create_article(db_session, {"title": "a", "content": "x"})
-    result = entity_writer.delete_article(db_session, created["id"])
-    assert result["deleted"] is True
-    assert db_session.query(Article).count() == 0
-
-
-# ======================================================================
 # 工具层（write_tools）
 # ======================================================================
 
@@ -224,8 +133,8 @@ def test_tool_list_entities(db_session):
     import asyncio
     from app.services.tools import write_tools
 
-    entity_writer.create_task(db_session, {"title": "检索我"})
-    out = asyncio.run(write_tools.handle_list_entities({"entity_type": "task", "query": "检索"}))
+    entity_writer.create_rule(db_session, {"name": "检索我", "prompt": "p"})
+    out = asyncio.run(write_tools.handle_list_entities({"entity_type": "rule", "query": "检索"}))
     assert out["total"] == 1 and out["items"][0]["title"] == "检索我"
 
     bad = asyncio.run(write_tools.handle_list_entities({"entity_type": "nope"}))

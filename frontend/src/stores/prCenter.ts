@@ -197,9 +197,6 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     if (wl) {
       pr.watchlist_note = wl.note || ''
       pr.watchlist_assignee_id = wl.assignee_id || null
-      pr._linked_tasks = wl.linked_tasks || []
-    } else if (pr._linked_tasks) {
-      pr._linked_tasks = pr._linked_tasks || []
     }
     selectedPR.value = pr
     prDetails.value = null
@@ -247,9 +244,6 @@ export const usePRCenterStore = defineStore('prCenter', () => {
     if (wl) {
       issue.watchlist_note = wl.note || ''
       issue.watchlist_assignee_id = wl.assignee_id || null
-      issue._linked_tasks = wl.linked_tasks || []
-    } else {
-      issue._linked_tasks = issue._linked_tasks || []
     }
     selectedIssue.value = issue
     issueDetails.value = issue.body ? issue : null

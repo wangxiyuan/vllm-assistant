@@ -1,6 +1,6 @@
 """
 本地代码缓存查询服务
-对应 DESIGN-ARTICLES.md 5.3 LocalCodeSyncService
+本地代码同步服务（LocalCodeSyncService）
 
 只读缓存查询服务，不负责同步，同步由 RepoManager 负责
 """

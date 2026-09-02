@@ -1,15 +1,13 @@
 # vLLM Assistant
 
-vLLM 贡献者效率工具：聚合社区动态、集中管理自己的 PR 和任务，NPU 算力统一管理，并提供 AI 辅助（Review 意见生成、PR 总结、翻译等）。
+vLLM 贡献者效率工具：聚合社区动态、集中管理自己的 PR，NPU 算力统一管理，并提供 AI 辅助（Review 意见生成、PR 总结、翻译等）。
 
 ## 功能
 
 - **Community Pulse** — 社区活跃 Issue/PR 一览，按领域过滤，新条目高亮
 - **PR Command Center** — 集中管理自己的 PR：CI 状态、冲突检测、贡献统计图表
-- **特别关注** — 追踪重点 Issue/PR，支持备注和关联任务
-- **个人任务** — Kanban / 列表视图，P0-P3 优先级，可关联社区条目并做去重检查
-- **洞察报告** — AI 生成多源报告（vLLM、vLLM-Ascend、sglang 等），可一键关联任务
-- **技术 Blog** — Markdown 编辑器，支持代码引用同步、TOC、MathJax
+- **特别关注** — 追踪重点 Issue/PR，支持备注和责任人
+- **洞察报告** — AI 生成多源报告（vLLM、vLLM-Ascend、sglang 等），支持每日定时推送
 - **模型拆解** — 算子知识库 + 模型架构可视化编辑
 - **AI 辅助** — Review 意见生成、PR/Issue 总结、英文翻译、标签建议
 - **NPU 算力管理** — 统一纳管 Ascend NPU 机器（SSH），一切任务容器化运行：

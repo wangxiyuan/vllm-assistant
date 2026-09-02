@@ -1,6 +1,6 @@
 """
 代码仓库管理服务
-对应 DESIGN-ARTICLES.md 5.1 RepoManager
+仓库本地克隆管理（RepoManager）
 
 多仓库管理：clone、pull、同步到 LocalCodeCache
 """
@@ -349,28 +349,6 @@ class RepoManager:
         except Exception as e:
             logger.exception(f"Error syncing file {relative_path}")
             return {"status": "error", "path": relative_path, "error": str(e)}
-
-    def validate_all_refs(self):
-        """对所有受影响的文件做行号越界检查（轻量验证）"""
-        from app.models import CodeReference
-        from app.services.local_code_sync import LocalCodeSyncService
-        from app.database import SessionLocal
-
-        db = SessionLocal()
-        try:
-            cache_service = LocalCodeSyncService(db)
-            refs = db.query(CodeReference).all()
-            for ref in refs:
-                lines = cache_service.get_file_lines(ref.repo_name, ref.file_path)
-                if lines is None:
-                    continue
-                total_lines = len(lines)
-                if ref.line_start > total_lines or ref.line_end > total_lines:
-                    ref.is_valid = False
-                    ref.last_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            db.commit()
-        finally:
-            db.close()
 
     def _upsert_repo_cache(self, db, repo_name: str, clone_url: str,
                            branch: str, commit_sha: Optional[str]):
